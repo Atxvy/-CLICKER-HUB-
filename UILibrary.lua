@@ -16,17 +16,19 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
-    local pg = LocalPlayer:WaitForChild("PlayerGui")
     if gethui then
         local ok, h = pcall(gethui)
         if ok and h then
-            local cg = game:GetService("CoreGui")
-            if h ~= cg and not h:IsDescendantOf(cg) then
-                return h
-            end
+            return h
         end
     end
-    return pg
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then
+        return cg
+    end
+    local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
+    local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
+    return pg or game:GetService("CoreGui")
 end
 
 local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
@@ -50,11 +52,26 @@ function UILibrary.CreateWindow(config)
     end
     local Connections = {}
 
-    -- Clean up previous instance if running
+    -- Clean up previous instances across all potential roots
+    pcall(function()
+        if gethui then
+            local ok, h = pcall(gethui)
+            if ok and h and h:FindFirstChild("ClickerHub_UI") then
+                h.ClickerHub_UI:Destroy()
+            end
+        end
+        local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+        if ok and cg then
+            local oldCg = cg:FindFirstChild("ClickerHub_UI", true)
+            if oldCg then oldCg:Destroy() end
+        end
+        if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+            local oldPg = LocalPlayer.PlayerGui:FindFirstChild("ClickerHub_UI")
+            if oldPg then oldPg:Destroy() end
+        end
+    end)
+
     local root = getRootGui()
-    if root:FindFirstChild("ClickerHub_UI") then
-        pcall(function() root.ClickerHub_UI:Destroy() end)
-    end
 
     -- Permanently suppress game black shade / screen dimming
     task.spawn(function()
@@ -119,7 +136,14 @@ function UILibrary.CreateWindow(config)
     MainFrame.BackgroundColor3 = Color3.fromRGB(18, 15, 25)
     MainFrame.BorderSizePixel = 0
     MainFrame.ClipsDescendants = false
+    MainFrame.Visible = true
     MainFrame.Parent = ScreenGui
+
+    table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
+            ScreenGui.Enabled = true
+        end
+    end))
 
     local MainCorner = Instance.new("UICorner")
     MainCorner.CornerRadius = UDim.new(0, 10)
@@ -357,6 +381,7 @@ function UILibrary.CreateWindow(config)
     local function toggleUI()
         MainFrame.Visible = not MainFrame.Visible
         if MainFrame.Visible then
+            ScreenGui.Enabled = true
             tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0.5})
         else
             tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
@@ -364,8 +389,12 @@ function UILibrary.CreateWindow(config)
     end
 
     FloatingBtn.MouseButton1Click:Connect(toggleUI)
+    FloatingBtn.TouchTap:Connect(toggleUI)
 
     CloseBtn.MouseButton1Click:Connect(function()
+        MainFrame.Visible = false
+    end)
+    CloseBtn.TouchTap:Connect(function()
         MainFrame.Visible = false
     end)
 
@@ -387,10 +416,15 @@ function UILibrary.CreateWindow(config)
     local Window = {
         ScreenGui = ScreenGui,
         MainFrame = MainFrame,
+        FloatingBtn = FloatingBtn,
         Options = {},
         Tabs = {},
         ActiveTab = nil,
     }
+
+    function Window:Toggle()
+        toggleUI()
+    end
 
     function Window:Notify(opts)
         opts = opts or {}

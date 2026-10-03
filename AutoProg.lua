@@ -66,9 +66,12 @@ local function loadModule(name: string)
         end
     end
 
-    -- 2. Fallback to GitHub raw
-    local url = GITHUB_REPO .. "/" .. name
+    -- 2. Fallback to GitHub raw (with cache-buster)
+    local url = GITHUB_REPO .. "/" .. name .. "?t=" .. tostring(os.time())
     local ok, chunk = pcall(game.HttpGet, game, url)
+    if not ok or not chunk or #chunk == 0 then
+        ok, chunk = pcall(game.HttpGet, game, GITHUB_REPO .. "/" .. name)
+    end
     if ok and chunk and #chunk > 0 then
         local fn, err = loadstring(chunk)
         if fn then

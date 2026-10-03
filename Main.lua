@@ -34,7 +34,8 @@ end
 if not checkExecutor() then return end
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Client = ReplicatedStorage:WaitForChild("Library"):WaitForChild("Client")
+local Library = ReplicatedStorage:WaitForChild("Library", 10)
+local Client = Library and Library:WaitForChild("Client", 5)
 
 --==============================================================================
 -- UNLOAD PREVIOUS INSTANCE (Safety Guard)
@@ -44,7 +45,6 @@ if Globals.ClickerHub_Unload then
     pcall(Globals.ClickerHub_Unload)
 end
 
---==============================================================================
 --==============================================================================
 -- LOAD WORKSPACE MODULES (Hybrid Local + GitHub Remote Fallback)
 --==============================================================================
@@ -63,9 +63,12 @@ local function loadModule(name: string)
         end
     end
 
-    -- 2. Fallback to GitHub raw
-    local url = GITHUB_REPO .. "/" .. name
+    -- 2. Fallback to GitHub raw (with cache-buster)
+    local url = GITHUB_REPO .. "/" .. name .. "?t=" .. tostring(os.time())
     local ok, chunk = pcall(game.HttpGet, game, url)
+    if not ok or not chunk or #chunk == 0 then
+        ok, chunk = pcall(game.HttpGet, game, GITHUB_REPO .. "/" .. name)
+    end
     if ok and chunk and #chunk > 0 then
         local fn, err = loadstring(chunk)
         if fn then

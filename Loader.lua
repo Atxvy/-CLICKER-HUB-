@@ -42,9 +42,13 @@ local function launch()
         end
     end
 
-    -- 2. Fallback to GitHub remote loadstring
-    local url = GITHUB_REPO .. "/Main.lua"
+    -- 2. Fallback to GitHub remote loadstring with cache-buster
+    local url = GITHUB_REPO .. "/Main.lua?t=" .. tostring(os.time())
     local ok, chunk = pcall(game.HttpGet, game, url)
+    if not ok or not chunk or #chunk == 0 then
+        ok, chunk = pcall(game.HttpGet, game, GITHUB_REPO .. "/Main.lua")
+    end
+
     if ok and chunk and #chunk > 0 then
         local fn, err = loadstring(chunk)
         if fn then
@@ -58,4 +62,3 @@ local function launch()
 end
 
 launch()
-
