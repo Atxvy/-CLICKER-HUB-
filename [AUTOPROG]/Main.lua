@@ -107,11 +107,18 @@ local function loadModule(name: string)
 end
 
 local UILibrary = loadModule("UILibrary.lua")
-local AutoProgAPI = loadModule("AutoProgAPI.lua")
+local ProgAPI = nil
+local okProg, pMod = pcall(function() return loadModule("ProgAPI.lua") end)
+if okProg and pMod then
+    ProgAPI = pMod
+else
+    ProgAPI = loadModule("AutoProgAPI.lua")
+end
+local AutoProgAPI = ProgAPI -- Backward compatibility alias
 local Configs = loadModule("Configs.lua")
 
 -- Suppress game black shade
-pcall(AutoProgAPI.SuppressBlackShade)
+pcall(ProgAPI.SuppressBlackShade)
 
 -- Clean up any prior running AutoProg instance
 if _G.ClickerSimulatorAutoProgCleanup then
@@ -227,6 +234,15 @@ DashTab:AddButton({
     Callback = function()
         local cleaned = AutoProgAPI.CleanWeakPets(State.ProtectCraftingPets)
         Window:Notify({ Title = "Pet Cleaner", Content = string.format("Cleaned %d weak pets!", cleaned), Duration = 2.5 })
+    end
+})
+
+DashTab:AddButton({
+    Title = "Claim Milestones & Rewards",
+    Description = "Claims all completed achievement stages, summer road rewards, and gifts",
+    Callback = function()
+        local ach, road = ProgAPI.ClaimAllMilestones()
+        Window:Notify({ Title = "Milestones Claimed", Content = string.format("Claimed %d achievements, %d event rewards!", ach, road), Duration = 3 })
     end
 })
 
@@ -487,14 +503,14 @@ table.insert(threads, task.spawn(function()
             if State.AutoFruits then pcall(AutoProgAPI.UseAllFruits) end
         end
 
-        -- C. Free Gifts, Chests, Daily, Achievements
+        -- C. Free Gifts, Chests, Daily, Achievements & Milestones
         if State.AutoFreeGifts and (now - lastGiftTick > 8) then
             lastGiftTick = now
             pcall(function()
-                AutoProgAPI.ClaimAllFreeGifts()
-                AutoProgAPI.ClaimAllChests()
-                AutoProgAPI.ClaimDaily()
-                AutoProgAPI.ClaimAllAchievements()
+                ProgAPI.ClaimAllFreeGifts()
+                ProgAPI.ClaimAllChests()
+                ProgAPI.ClaimDaily()
+                ProgAPI.ClaimAllMilestones()
             end)
         end
 
@@ -521,7 +537,35 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 3: MAIN PROGRESSION STATE MACHINE (Phase 1 vs Phase 2)
+-- THREAD 3: DEDICATED CONTINUOUS MAX REBIRTH (Non-blocking high-frequency execution)
+table.insert(threads, task.spawn(function()
+    local lastRebirthAttempt = 0
+    while isRunning do
+        task.wait(0.1)
+        if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
+        local now = tick()
+        if now - lastRebirthAttempt > 0.2 then
+            lastRebirthAttempt = now
+            local lockedIsland = ProgAPI.GetNextLockedIsland()
+            local pData = ProgAPI.GetPlayerData()
+
+            -- In Phase 1: if close to next island cost, hold clicks for unlock
+            local isSavingForIsland = false
+            if lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.85) then
+                isSavingForIsland = true
+            end
+
+            if not isSavingForIsland then
+                local maxInfo = ProgAPI.GetMaxRebirthInfo()
+                if maxInfo.CanAffordMax then
+                    ProgAPI.RebirthMaxTarget()
+                end
+            end
+        end
+    end
+end))
+
+-- THREAD 4: MAIN PROGRESSION STATE MACHINE (Phase 1 vs Phase 2)
 table.insert(threads, task.spawn(function()
     local lastTeleportTick = 0
     local lastEggHatchTick = 0
@@ -707,7 +751,7 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 4: TELEMETRY DISPLAY REFRESH
+-- THREAD 5: TELEMETRY DISPLAY REFRESH
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(0.5)
