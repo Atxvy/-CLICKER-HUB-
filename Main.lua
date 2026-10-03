@@ -1610,13 +1610,17 @@ table.insert(threads, task.spawn(function()
             local pData = GameAPI.GetPlayerData()
             local nextIsld = GameAPI.GetNextLockedIsland()
             if nextIsld and pData.Clicks >= nextIsld.cost then
-                local ok, res = GameAPI.UnlockAndTeleportToNextIsland()
-                if ok then
-                    Window:Notify({ Title = "Island Unlocked!", Content = "🌟 " .. tostring(res), Duration = 3.5 })
+                local count, lastUnlocked = GameAPI.UnlockAllAffordableIslands()
+                if count > 0 and lastUnlocked then
+                    Window:Notify({
+                        Title = "Islands Unlocked!",
+                        Content = string.format("🌟 Unlocked %d Island(s)! Reached %s!", count, lastUnlocked),
+                        Duration = 3.5
+                    })
                 end
             end
         end
-        task.wait(1.0)
+        task.wait(0.5)
     end
 end))
 
@@ -1738,13 +1742,20 @@ table.insert(threads, task.spawn(function()
         -- ===================================================================
         if not allIslandsUnlocked then
 
-            -- A. Check Island Unlock Immediately if affordable
+            -- A. Check Island Unlock Immediately if affordable (Batch Unlocks ALL Affordable Islands!)
             if State.AutoUnlockNextIsland and lockedIsland and pData.Clicks >= lockedIsland.cost then
-                local ok, msg = GameAPI.UnlockAndTeleportToNextIsland()
-                if ok then
-                    Window:Notify({ Title = "Island Unlocked!", Content = "🌟 Reached " .. tostring(lockedIsland.name) .. "!", Duration = 3 })
+                local unlockedCount, lastIsland = GameAPI.UnlockAllAffordableIslands()
+                if unlockedCount > 0 and lastIsland then
+                    Window:Notify({
+                        Title = "Islands Unlocked!",
+                        Content = string.format("🌟 Unlocked %d Island(s)! Reached %s!", unlockedCount, lastIsland),
+                        Duration = 3.5
+                    })
                     pcall(GameAPI.EquipBest)
-                    task.wait(0.4)
+                    task.wait(0.3)
+                    pData = GameAPI.GetPlayerData()
+                    lockedIsland = GameAPI.GetNextLockedIsland()
+                    allIslandsUnlocked = (lockedIsland == nil)
                 end
             end
 
@@ -1776,17 +1787,14 @@ table.insert(threads, task.spawn(function()
                     end
                 end
 
-                -- Egg Hatching:
-                if (State.AutoOpenProgEggs or (State.AutoGold and not isAllGold)) and (now - lastProgHatch > 0.35) then
+                -- Egg Hatching: KEEP HATCHING until entire equipped team is Golden!
+                if (State.AutoOpenProgEggs or not isAllGold) and (now - lastProgHatch > 0.35) then
                     lastProgHatch = now
-                    local isSufficient = GameAPI.ArePetsSufficientForIsland()
-                    if not isNearIslandUnlock and (not isSufficient or (State.AutoGold and not isAllGold)) then
-                        local bestEgg = GameAPI.GetBestAffordableEgg()
-                        if bestEgg and pData.Clicks >= bestEgg.cost then
-                            GameAPI.OpenEgg(bestEgg.name, 1)
-                            pcall(GameAPI.CraftGoldenPets)
-                            pcall(GameAPI.EquipBest)
-                        end
+                    local bestEgg = GameAPI.GetBestAffordableEgg()
+                    if bestEgg and pData.Clicks >= bestEgg.cost then
+                        GameAPI.OpenEgg(bestEgg.name, 1)
+                        pcall(GameAPI.CraftGoldenPets)
+                        pcall(GameAPI.EquipBest)
                     end
                 end
             end
@@ -1798,7 +1806,7 @@ table.insert(threads, task.spawn(function()
             end
 
         -- ===================================================================
-        -- PHASE 2: ENDGAME ROADMAP (All 16 islands unlocked!)
+        -- PHASE 2: ENDGAME ROADMAP (All islands unlocked!)
         -- ===================================================================
         else
             -- 1st: Max Rebirth
@@ -1808,6 +1816,21 @@ table.insert(threads, task.spawn(function()
                 if maxInfo.CanAffordMax then
                     GameAPI.RebirthMaxTarget()
                 end
+            end
+
+            -- 1b. Ensure Equipped Team is 100% Gold (USER REQUIREMENT: Keep opening best eggs until full gold!)
+            if (State.AutoOpenProgEggs or not isAllGold) and (now - lastProgHatch > 0.35) then
+                lastProgHatch = now
+                if pData.Clicks >= 1e16 and not isFullGoldEvent then
+                    GameAPI.OpenEgg("CandyCornEgg", 1)
+                else
+                    local bestEgg = GameAPI.GetBestAffordableEgg()
+                    if bestEgg and pData.Clicks >= bestEgg.cost then
+                        GameAPI.OpenEgg(bestEgg.name, 1)
+                    end
+                end
+                pcall(GameAPI.CraftGoldenPets)
+                pcall(GameAPI.EquipBest)
             end
 
             -- 2nd: Dynamic Skill Tree (Priority: Coins First -> Volcano/Heaven Switching -> Latest Tech World Matrix) & Breakables
@@ -1985,8 +2008,7 @@ table.insert(threads, task.spawn(function()
         if State.AutoDaily then pcall(GameAPI.ClaimDaily) end
         if State.AutoWheel then pcall(GameAPI.RollWheel) end
         if State.AutoQuests then pcall(GameAPI.ClaimCompletedQuests) end
-        if State.AutoFinishedCrafts then pcall(GameAPI.ClaimFinishedCrafts) end
-        task.wait(State.RewardsInterval)
+        task.wait(math.min(State.RewardsInterval or 5, 5))
     end
 end))
 
@@ -2031,6 +2053,19 @@ table.insert(threads, task.spawn(function()
             pcall(GameAPI.StepSecretQuest)
         end
         task.wait(0.35)
+    end
+end))
+
+-- 8e. Furthest Unlocked Map Periodic Teleport Thread (Every 30 Seconds)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(30)
+        pcall(function()
+            local furthest = GameAPI.GetFurthestUnlockedIsland()
+            if furthest and furthest ~= "" and furthest ~= "Spawn" then
+                GameAPI.TeleportToIsland(furthest)
+            end
+        end)
     end
 end))
 
