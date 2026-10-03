@@ -269,12 +269,45 @@ function GameAPI.TeleportToMachine(machineName: string): boolean
     return false
 end
 
--- Automatically converts batches of duplicate normal pets into Golden pets
+-- Checks whether every equipped pet slot is filled with Golden (or better) pets
+function GameAPI.IsEquippedTeamAllGold(): boolean
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+    local maxSlots = stats.MaxEquippedPets or 3
+
+    local count = 0
+    for guid, _ in pairs(equipped) do
+        count = count + 1
+        local p = pets[guid]
+        if not p then return false end
+        local v = p.v or "Normal"
+        if v ~= "Golden" and v ~= "Rainbow" and v ~= "DarkMatter" then
+            return false
+        end
+    end
+
+    if count < maxSlots then
+        return false
+    end
+
+    return true
+end
+
+-- Automatically converts batches of duplicate normal pets into Golden pets with 100% guaranteed chance priority
 function GameAPI.CraftGoldenPets(): number
     if not Channels.Pets then return 0 end
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
     local equipped = stats.EquippedPets or {}
+
+    -- Check GoldenCraftPetReduction mastery power
+    local reduction = 0
+    pcall(function()
+        local MasteryFrontend = require(Client:WaitForChild("MasteryFrontend"))
+        reduction = (MasteryFrontend and MasteryFrontend.GetPower and MasteryFrontend.GetPower(stats, "GoldenCraftPetReduction")) or 0
+    end)
+    local requiredFor100 = math.max(1, 6 - reduction)
 
     -- Group craftable normal pets by ID + Shiny status
     local groups = {}
@@ -286,23 +319,36 @@ function GameAPI.CraftGoldenPets(): number
 
         if not isEquipped and not isLocked and isNormal and not isExclusive then
             local key = p.id .. "_" .. tostring(p.Shiny or p.s or false)
-            groups[key] = groups[key] or { id = p.id, guids = {} }
+            if not groups[key] then
+                local meta = Directory.Pets and Directory.Pets[p.id] or {}
+                local multi = (meta.Stats and meta.Stats.Clicks) or 1
+                groups[key] = { id = p.id, multi = multi, guids = {} }
+            end
             table.insert(groups[key].guids, guid)
         end
     end
 
-    local craftedCount = 0
+    -- Prioritize turning the highest multiplier / best pets gold first!
+    local groupList = {}
     for _, g in pairs(groups) do
-        -- While we have at least 5 pets of this kind, craft a batch
-        while #g.guids >= 5 do
+        table.insert(groupList, g)
+    end
+    table.sort(groupList, function(a, b)
+        return a.multi > b.multi
+    end)
+
+    local craftedCount = 0
+    for _, g in ipairs(groupList) do
+        -- Only craft when we have at least requiredFor100 pets (Guaranteed 100% Chance!)
+        while #g.guids >= requiredFor100 do
             local batch = {}
-            for i = 1, math.min(6, #g.guids) do
+            for i = 1, requiredFor100 do
                 table.insert(batch, table.remove(g.guids, 1))
             end
             local ok, res = pcall(function()
                 return Channels.Pets:InvokeServer("CraftGolden", batch)
             end)
-            if ok and res == true then
+            if ok and (res == true or type(res) == "table") then
                 craftedCount = craftedCount + 1
                 task.wait(0.2)
             else
@@ -429,11 +475,12 @@ end
 
 -- Teleports character right in front of the target egg model in the world
 function GameAPI.TeleportToEgg(eggName: string): boolean
+    local cleanName = eggName:gsub("%s+", "")
     local eggsFolder = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Interact") and workspace._MAP.Interact:FindFirstChild("Eggs")
-    local eggModel = eggsFolder and eggsFolder:FindFirstChild(eggName)
+    local eggModel = eggsFolder and (eggsFolder:FindFirstChild(cleanName) or eggsFolder:FindFirstChild(eggName))
     if not eggModel then
         for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc.Name == eggName and desc:IsA("Model") then
+            if (desc.Name == cleanName or desc.Name == eggName) and desc:IsA("Model") then
                 eggModel = desc
                 break
             end
@@ -444,7 +491,7 @@ function GameAPI.TeleportToEgg(eggName: string): boolean
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if hrp and targetPart then
-            hrp.CFrame = targetPart.CFrame * CFrame.new(0, 3, 5)
+            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
             return true
         end
     end
@@ -470,15 +517,36 @@ end
 
 local nextAllowedHatchTick = 0
 
-function GameAPI.OpenEgg(eggName: string, amount: number): (boolean, string)
+function GameAPI.OpenEgg(eggName: string, amount: number, skipTeleport: boolean?): (boolean, string)
     if not Channels.Egg then return false, "No egg channel" end
+    local cleanName = eggName:gsub("%s+", "")
     if tick() < nextAllowedHatchTick then
         return false, string.format("Hatch cooldown (%.1fs remaining)", math.max(0, nextAllowedHatchTick - tick()))
     end
+
+    -- Proximity verification: server enforces character proximity to the egg model
+    if not skipTeleport then
+        local eggsFolder = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Interact") and workspace._MAP.Interact:FindFirstChild("Eggs")
+        local eggModel = eggsFolder and (eggsFolder:FindFirstChild(cleanName) or eggsFolder:FindFirstChild(eggName))
+        local targetPart = eggModel and (eggModel:FindFirstChild("Point") or eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart"))
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and targetPart then
+            local dist = (hrp.Position - targetPart.Position).Magnitude
+            if dist > 25 then
+                GameAPI.TeleportToEgg(cleanName)
+                task.wait(0.2)
+            end
+        else
+            GameAPI.TeleportToEgg(cleanName)
+            task.wait(0.2)
+        end
+    end
+
     amount = amount or 1
     local guid = HttpService:GenerateGUID(false)
     local ok, res, extra = pcall(function()
-        return Channels.Egg:InvokeServer("Open", eggName, amount, guid)
+        return Channels.Egg:InvokeServer("Open", cleanName, amount, guid)
     end)
     if ok and res == true then
         nextAllowedHatchTick = tick() + 0.35
@@ -1474,9 +1542,34 @@ function GameAPI.GetInventoryPets()
     return petList
 end
 
--- Automatically deletes old / inferior pets while keeping top pets, equipped, and locked safe
-function GameAPI.CleanOldPets(keepCount: number): number
-    keepCount = keepCount or 12
+-- Automatically deletes old / inferior pets while keeping top pets, equipped, locked, and golden crafting candidates safe
+function GameAPI.CleanOldPets(keepCount: number, protectCrafting: boolean?): number
+    keepCount = keepCount or 15
+    if protectCrafting == nil then protectCrafting = true end
+
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+
+    -- Find the best progression egg to protect its pets
+    local bestEgg = GameAPI.GetBestAffordableEgg()
+    local bestEggPets = {}
+    if bestEgg and Directory.Eggs and Directory.Eggs[bestEgg.name] then
+        local drops = Directory.Eggs[bestEgg.name].Drops or Directory.Eggs[bestEgg.name].Pets or {}
+        for petId, _ in pairs(drops) do
+            bestEggPets[petId] = true
+        end
+    end
+
+    -- Count duplicate normal pets for crafting candidates
+    local normalCounts = {}
+    for guid, pData in pairs(pets) do
+        local isNormal = (pData.v == nil or pData.v == "Normal")
+        if isNormal then
+            normalCounts[pData.id] = (normalCounts[pData.id] or 0) + 1
+        end
+    end
+
     local petList = GameAPI.GetInventoryPets()
     if #petList <= keepCount then
         return 0
@@ -1486,10 +1579,20 @@ function GameAPI.CleanOldPets(keepCount: number): number
     -- Keep top `keepCount` pets, and examine the rest
     for i = keepCount + 1, #petList do
         local pet = petList[i]
-        -- Never delete if equipped, locked, or special rarity
+        -- Never delete if equipped or locked
         if not pet.equipped and not pet.locked then
-            if pet.rarity ~= "Secret" and pet.rarity ~= "Divine" and pet.rarity ~= "Mega" and not pet.isShiny then
-                table.insert(toDelete, pet.guid)
+            -- Never delete special/high-tier variants
+            if pet.rarity ~= "Secret" and pet.rarity ~= "Divine" and pet.rarity ~= "Mega" and pet.rarity ~= "Exclusive"
+                and not pet.isShiny and pet.variant ~= "Golden" and pet.variant ~= "Rainbow" and pet.variant ~= "DarkMatter" then
+                -- Protect candidate normal pets needed for Golden crafting:
+                -- 1) Any pet belonging to the best egg currently being farmed
+                -- 2) Any pet where we currently have >= 2 normal copies accumulating to reach 6
+                local isBestEggDrop = bestEggPets[pet.id] == true
+                local isCraftingCandidate = protectCrafting and (isBestEggDrop or (normalCounts[pet.id] and normalCounts[pet.id] >= 2))
+
+                if not isCraftingCandidate then
+                    table.insert(toDelete, pet.guid)
+                end
             end
         end
     end
