@@ -1186,57 +1186,76 @@ function GameAPI.GetSkillTreeProgress()
     }
 end
 
+local coinsSwitchTick = 0
+local currentCoinsIsland = "Volcano"
+
+function GameAPI.ForceSwitchCoinsIsland(): string
+    coinsSwitchTick = tick()
+    currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+    return currentCoinsIsland
+end
+
 -- Dynamically finds the best arena based on mode:
--- "Auto (Dynamic Smart)": Prioritizes Tech World until Tech skill tree is 100% complete, then automatically switches to Overworld Coins arenas (Heaven > Volcano > Candy > Forest) for faster progression!
+-- USER SPECIFICATION: Prioritizes COINS skill tree FIRST (switching between Volcano and Heaven), then once Coins are 100% complete, teleports to the latest unlocked Tech World island (Matrix > Fragment > Spaceship > Base)
 function GameAPI.GetBestBreakableIsland(mode: string?): string?
     local pData = GameAPI.GetPlayerData()
     local unlocked = pData.Raw and pData.Raw.UnlockedIslands or {"Spawn"}
     local unlockedSet = {}
     for _, isl in ipairs(unlocked) do unlockedSet[isl] = true end
 
-    local techIslands = { "Fragment", "Spaceship", "Base" }
-    local coinsIslands = { "Heaven", "Volcano", "Candy", "Forest" }
+    -- Latest tech islands in descending order of progression (Matrix is the newest 17th world)
+    local techIslands = { "Matrix", "Fragment", "Spaceship", "Base" }
+    local coinsIslands = { "Heaven", "Volcano" }
 
     mode = mode or "Auto (Dynamic Smart)"
 
-    if mode == "Coins World (Heaven)" or mode == "Coins Only" then
-        for _, isl in ipairs(coinsIslands) do
-            if unlockedSet[isl] and GameAPI.HasBreakables(isl) then
-                return isl
-            end
+    if mode == "Coins World (Volcano/Heaven)" or mode == "Coins Only" then
+        local now = tick()
+        if now - coinsSwitchTick > 10 then
+            coinsSwitchTick = now
+            currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
         end
-        return "Heaven"
-    elseif mode == "Tech World (Fragment)" or mode == "Tech Only" then
+        if unlockedSet[currentCoinsIsland] and GameAPI.HasBreakables(currentCoinsIsland) then
+            return currentCoinsIsland
+        end
+        return unlockedSet["Heaven"] and "Heaven" or "Volcano"
+    elseif mode == "Tech World (Matrix/Fragment)" or mode == "Tech Only" then
         for _, isl in ipairs(techIslands) do
             if unlockedSet[isl] and GameAPI.HasBreakables(isl) then
                 return isl
             end
         end
-        return "Fragment"
+        return "Matrix"
     elseif mode == "Auto (Dynamic Smart)" or mode == "Best Unlocked" or mode == "" then
         local progress = GameAPI.GetSkillTreeProgress()
-        -- Dynamic progression: If Tech skill tree is done, move to Coins for faster overall progress!
-        if progress.TechComplete and not progress.CoinsComplete then
-            for _, isl in ipairs(coinsIslands) do
+
+        -- 1. PRIORITIZE COINS SKILL TREE FIRST!
+        -- Alternate between Volcano and Heaven to break all breakables!
+        if not progress.CoinsComplete then
+            local now = tick()
+            if now - coinsSwitchTick > 10 then
+                coinsSwitchTick = now
+                currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+            end
+            if unlockedSet[currentCoinsIsland] and GameAPI.HasBreakables(currentCoinsIsland) then
+                return currentCoinsIsland
+            end
+            if unlockedSet["Heaven"] and GameAPI.HasBreakables("Heaven") then return "Heaven" end
+            if unlockedSet["Volcano"] and GameAPI.HasBreakables("Volcano") then return "Volcano" end
+        else
+            -- 2. AFTER ALL COINS UPGRADES ARE DONE:
+            -- Teleport to the LATEST unlocked Tech World island (Matrix > Fragment > Spaceship > Base) to farm Tech Coins!
+            for _, isl in ipairs(techIslands) do
                 if unlockedSet[isl] and GameAPI.HasBreakables(isl) then
                     return isl
                 end
             end
         end
 
-        -- If Tech skill tree still needs upgrades, or if both are complete, farm highest Tech world island
-        for _, isl in ipairs(techIslands) do
-            if unlockedSet[isl] and GameAPI.HasBreakables(isl) then
-                return isl
-            end
-        end
-
-        -- Fallback to Coins islands if player hasn't reached Tech world yet
-        for _, isl in ipairs(coinsIslands) do
-            if unlockedSet[isl] and GameAPI.HasBreakables(isl) then
-                return isl
-            end
-        end
+        -- Fallback
+        if unlockedSet["Matrix"] and GameAPI.HasBreakables("Matrix") then return "Matrix" end
+        if unlockedSet["Heaven"] and GameAPI.HasBreakables("Heaven") then return "Heaven" end
+        return "Volcano"
     elseif unlockedSet[mode] and GameAPI.HasBreakables(mode) then
         return mode
     end
@@ -1268,7 +1287,29 @@ GameAPI.OverworldIslands = {
     { name = "Base",      cost = 1.5e23,                num = 14 },
     { name = "Spaceship", cost = 7.5e23,                num = 15 },
     { name = "Fragment",  cost = 5e24,                  num = 16 },
+    { name = "Matrix",    cost = 2.5e25,                num = 17 },
 }
+
+-- Dynamically loads all islands from Directory.Islands to support any present or future game updates
+function GameAPI.GetOverworldIslands()
+    if Directory and Directory.Islands then
+        local list = {}
+        for name, data in pairs(Directory.Islands) do
+            table.insert(list, {
+                name = name,
+                cost = data.Cost or 0,
+                num = data.Index or data.Order or 0
+            })
+        end
+        table.sort(list, function(a, b) return (a.cost or 0) < (b.cost or 0) end)
+        for i, item in ipairs(list) do item.num = i end
+        if #list >= 17 then
+            GameAPI.OverworldIslands = list
+            return list
+        end
+    end
+    return GameAPI.OverworldIslands
+end
 
 GameAPI.ProgressionEggs = {
     { name = "BasicEgg",       cost = 250,        island = "Spawn" },
@@ -1288,6 +1329,7 @@ GameAPI.ProgressionEggs = {
     { name = "CastleEgg",      cost = 5e19,       island = "Castle" },
     { name = "CursedEgg",      cost = 1.5e20,     island = "Mystical" },
     { name = "DemonicEgg",     cost = 1.5e22,     island = "Hell" },
+    { name = "MatrixEgg",      cost = 2.5e25,     island = "Matrix" },
 }
 
 -- Rarity weight lookup hierarchy
@@ -1377,7 +1419,8 @@ function GameAPI.GetNextLockedIsland()
         unlockedSet[isld] = true
     end
 
-    for _, islandInfo in ipairs(GameAPI.OverworldIslands) do
+    local islandList = GameAPI.GetOverworldIslands()
+    for _, islandInfo in ipairs(islandList) do
         if not unlockedSet[islandInfo.name] then
             return islandInfo
         end
@@ -1710,18 +1753,27 @@ function GameAPI.BuyNextRebirthButton(): boolean
     end
     table.sort(buttonIndices)
 
+    local boughtAny = false
     for _, idx in ipairs(buttonIndices) do
         if not ownedMap[idx] then
             local rData = Constants.Rebirths[idx]
             local islandOk = (rData.RequiredIsland == nil or unlockedMap[rData.RequiredIsland] == true)
             if islandOk and gems >= (rData.Cost or 0) then
                 local ok = Channels.RebirthShop:InvokeServer("BuyRebirthButton", idx)
-                return ok == true
+                if ok == true then
+                    boughtAny = true
+                    ownedMap[idx] = true
+                    gems = gems - (rData.Cost or 0)
+                    task.wait(0.1)
+                else
+                    break
+                end
+            else
+                break -- sequential: can only purchase buttons in strict sequential order
             end
-            break -- sequential: can only purchase buttons in strict sequential order
         end
     end
-    return false
+    return boughtAny
 end
 
 -- Buys next Double Jump Upgrade with Gems
@@ -2125,13 +2177,18 @@ function GameAPI.AttackBreakable(ignoreBossChest: boolean?): (boolean, string?, 
     return true, targetModel.Name, dmg
 end
 
--- Purchases any affordable and unlocked Skill Tree perks (Default & RNG trees)
-function GameAPI.BuyAffordableSkillTree(): number
+-- Purchases any affordable and unlocked Skill Tree perks (Default & RNG trees), prioritizing Coins when preferCoins is true
+function GameAPI.BuyAffordableSkillTree(preferCoins: boolean?): number
     local stFrontend = nil
     pcall(function()
         stFrontend = require(Client:WaitForChild("SkillTreeFrontend"))
     end)
     if not Directory.SkillTree or not Channels.SkillTree then return 0 end
+
+    if preferCoins == nil then
+        local stProg = GameAPI.GetSkillTreeProgress()
+        preferCoins = not stProg.CoinsComplete
+    end
 
     local count = 0
     local boughtAny = true
@@ -2148,7 +2205,9 @@ function GameAPI.BuyAffordableSkillTree(): number
                     -- Check category price if required
                     if catData.Price and stFrontend and not stFrontend.OwnsCategory(catId, treeId) then
                         local p = catData.Price
-                        if p and curr[p.Id] and curr[p.Id] >= p.Amount then
+                        local isCoins = (p.Id == "Coins")
+                        local canBuyCat = (not preferCoins or isCoins)
+                        if canBuyCat and p and curr[p.Id] and curr[p.Id] >= p.Amount then
                             local ok = false
                             pcall(function()
                                 ok = Channels.SkillTree:InvokeServer("PurchaseCategory", catId, treeId)
@@ -2165,38 +2224,43 @@ function GameAPI.BuyAffordableSkillTree(): number
                     local upgrades = (type(catData) == "table" and catData.Upgrades)
                     if type(upgrades) == "table" then
                         for skillId, skillData in pairs(upgrades) do
-                            local alreadyOwned = false
-                            if stFrontend then
-                                alreadyOwned = stFrontend.Owns(skillId, treeId)
-                            else
-                                local saveKey = skillId
-                                local util = nil
-                                pcall(function() util = require(Library.Utils.SkillTreeUtil) end)
-                                if util and util.GetSaveKey then
-                                    saveKey = util.GetSaveKey(skillId, treeId)
-                                end
-                                alreadyOwned = stats.SkillTree and stats.SkillTree[saveKey] == true
-                            end
+                            local p = skillData.Price
+                            local isCoins = (p and p.Id == "Coins")
+                            local canBuyThis = (not preferCoins or isCoins)
 
-                            if not alreadyOwned then
-                                local reqFail = nil
+                            if canBuyThis then
+                                local alreadyOwned = false
                                 if stFrontend then
-                                    reqFail = stFrontend.GetRequirementFailure(skillData, treeId)
+                                    alreadyOwned = stFrontend.Owns(skillId, treeId)
+                                else
+                                    local saveKey = skillId
+                                    local util = nil
+                                    pcall(function() util = require(Library.Utils.SkillTreeUtil) end)
+                                    if util and util.GetSaveKey then
+                                        saveKey = util.GetSaveKey(skillId, treeId)
+                                    end
+                                    alreadyOwned = stats.SkillTree and stats.SkillTree[saveKey] == true
                                 end
 
-                                if not reqFail then
-                                    local p = skillData.Price
-                                    if p and curr[p.Id] and curr[p.Id] >= p.Amount then
-                                        local ok = false
-                                        pcall(function()
-                                            ok = Channels.SkillTree:InvokeServer("Purchase", skillId, treeId)
-                                        end)
-                                        if ok == true then
-                                            count = count + 1
-                                            boughtAny = true
-                                            curr[p.Id] = curr[p.Id] - p.Amount
-                                            task.wait(0.1)
-                                            break -- refresh and re-evaluate next tier perks
+                                if not alreadyOwned then
+                                    local reqFail = nil
+                                    if stFrontend then
+                                        reqFail = stFrontend.GetRequirementFailure(skillData, treeId)
+                                    end
+
+                                    if not reqFail then
+                                        if p and curr[p.Id] and curr[p.Id] >= p.Amount then
+                                            local ok = false
+                                            pcall(function()
+                                                ok = Channels.SkillTree:InvokeServer("Purchase", skillId, treeId)
+                                            end)
+                                            if ok == true then
+                                                count = count + 1
+                                                boughtAny = true
+                                                curr[p.Id] = curr[p.Id] - p.Amount
+                                                task.wait(0.1)
+                                                break -- refresh and re-evaluate next tier perks
+                                            end
                                         end
                                     end
                                 end
