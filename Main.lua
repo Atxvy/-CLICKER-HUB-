@@ -129,6 +129,14 @@ local State = {
     AutoRainbowPets = (cfg.AutoPets and cfg.AutoPets.AutoRainbowPets) or false,
     AutoClaimRainbowPets = (cfg.AutoPets and cfg.AutoPets.AutoClaimRainbow ~= false) or true,
 
+    -- Pets Helper & Auto Gold Engine
+    AutoOpenProgEggs = (cfg.AutoProg and cfg.AutoProg.AutoOpenEggs ~= false),
+    AutoGold = (cfg.AutoProg and cfg.AutoProg.AutoGold ~= false),
+    AutoCraftGolden = (cfg.AutoProg and cfg.AutoProg.AutoCraftGolden ~= false),
+    ProtectCraftingPets = (cfg.AutoProg and cfg.AutoProg.ProtectCraftingPets ~= false),
+    AutoCleanPets = (cfg.AutoProg and cfg.AutoProg.AutoCleanPets ~= false),
+    KeepTopPets = (cfg.AutoProg and cfg.AutoProg.KeepTopPets) or 15,
+
     -- Auto Hatch
     AutoHatch = (cfg.AutoHatch and cfg.AutoHatch.Enabled) or false,
     SelectedEgg = (cfg.AutoHatch and cfg.AutoHatch.Egg) or "Best Affordable Egg",
@@ -426,7 +434,94 @@ AutoProgTab:AddToggle("AutoEquipBestToggle_Prog", {
     end
 })
 
+AutoProgTab:AddSection("PETS HELPER & GOLDEN ENGINE")
+AutoProgTab:AddToggle("AutoOpenEggsToggle_Prog", {
+    Title = "Auto Open Best Affordable Eggs",
+    Description = "Automatically purchases and hatches the best affordable egg in the unlocked world",
+    Default = State.AutoOpenProgEggs,
+    Callback = function(val)
+        State.AutoOpenProgEggs = val
+        if not cfg.AutoProg then cfg.AutoProg = {} end
+        cfg.AutoProg.AutoOpenEggs = val
+        Configs.Save()
+    end
+})
+
+AutoProgTab:AddToggle("AutoGoldToggle_Prog", {
+    Title = "Auto Gold (Full Golden Team)",
+    Description = "Keeps opening best eggs & crafts in Golden Machine with 100% chance priority until all equipped slots are Golden!",
+    Default = State.AutoGold,
+    Callback = function(val)
+        State.AutoGold = val
+        if not cfg.AutoProg then cfg.AutoProg = {} end
+        cfg.AutoProg.AutoGold = val
+        Configs.Save()
+        if val then
+            Window:Notify({ Title = "Auto Gold", Content = "Auto Gold enabled: Opening best eggs until all equipped are Golden!", Duration = 3 })
+        end
+    end
+})
+
+AutoProgTab:AddToggle("AutoCraftGoldenToggle_Prog", {
+    Title = "Auto Craft Golden (100% Guaranteed Priority)",
+    Description = "Automatically converts batches of normal pets into Golden pets with guaranteed 100% success rate",
+    Default = State.AutoCraftGolden,
+    Callback = function(val)
+        State.AutoCraftGolden = val
+        if not cfg.AutoProg then cfg.AutoProg = {} end
+        cfg.AutoProg.AutoCraftGolden = val
+        Configs.Save()
+    end
+})
+
+AutoProgTab:AddToggle("ProtectCraftingPetsToggle_Prog", {
+    Title = "Protect Crafting Candidates (Do Not Delete)",
+    Description = "Prevents duplicate normal pets from being deleted so they can reach the 6-pet Golden crafting threshold",
+    Default = State.ProtectCraftingPets,
+    Callback = function(val)
+        State.ProtectCraftingPets = val
+        if not cfg.AutoProg then cfg.AutoProg = {} end
+        cfg.AutoProg.ProtectCraftingPets = val
+        Configs.Save()
+    end
+})
+
+AutoProgTab:AddToggle("AutoCleanPetsToggle_Prog", {
+    Title = "Auto Clean Weak Pets",
+    Description = "Automatically deletes obsolete weak pets while keeping all Golden, Rainbow, Special, and crafting candidate pets safe",
+    Default = State.AutoCleanPets,
+    Callback = function(val)
+        State.AutoCleanPets = val
+        if not cfg.AutoProg then cfg.AutoProg = {} end
+        cfg.AutoProg.AutoCleanPets = val
+        Configs.Save()
+    end
+})
+
 AutoProgTab:AddSection("QUICK CHECKS & ACTIONS")
+AutoProgTab:AddButton({
+    Title = "Craft Golden Pets Now (100% Guaranteed)",
+    Description = "Immediately runs 100% guaranteed Golden crafting on eligible candidate batches",
+    Callback = function()
+        local crafted = GameAPI.CraftGoldenPets()
+        GameAPI.EquipBest()
+        Window:Notify({
+            Title = "Golden Machine",
+            Content = crafted > 0 and string.format("Crafted %d Golden Pet(s) with 100%% Chance!", crafted) or "No batches ready for 100% Golden crafting yet.",
+            Duration = 2.5
+        })
+    end
+})
+
+AutoProgTab:AddButton({
+    Title = "Clean Pet Inventory Now",
+    Description = "Cleans obsolete pets while keeping top pets and crafting candidates safe",
+    Callback = function()
+        local cleaned = GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
+        Window:Notify({ Title = "Pet Cleaner", Content = string.format("Cleaned %d obsolete pets!", cleaned), Duration = 2.5 })
+    end
+})
+
 AutoProgTab:AddButton({
     Title = "Claim All Free Gifts Now",
     Description = "Instantly collects all free gifts, daily rewards, and chests",
@@ -1538,8 +1633,14 @@ end))
 -- 4b. Auto Pet Crafting Thread (Golden & Rainbow & Claim)
 table.insert(threads, task.spawn(function()
     while isRunning do
-        if State.AutoGoldPets then
-            pcall(GameAPI.CraftGoldenPets)
+        if State.AutoGoldPets or (State.AutoProgMaster and State.AutoCraftGolden) then
+            local crafted = 0
+            pcall(function()
+                crafted = GameAPI.CraftGoldenPets()
+                if crafted > 0 then
+                    GameAPI.EquipBest()
+                end
+            end)
         end
         if State.AutoRainbowPets then
             pcall(GameAPI.CraftRainbowPets)
@@ -1547,7 +1648,40 @@ table.insert(threads, task.spawn(function()
         if State.AutoClaimRainbowPets then
             pcall(GameAPI.ClaimRainbowPets)
         end
-        task.wait(2.5)
+        task.wait(2.0)
+    end
+end))
+
+-- 4c. Auto Prog Egg & Auto Gold Worker Thread
+table.insert(threads, task.spawn(function()
+    local lastProgHatch = 0
+    local lastProgClean = 0
+    while isRunning do
+        if State.AutoProgMaster then
+            local now = tick()
+            local isAllGold = GameAPI.IsEquippedTeamAllGold()
+            local pData = GameAPI.GetPlayerData()
+
+            -- Clean inventory periodically if enabled
+            if State.AutoCleanPets and (now - lastProgClean > 4) then
+                lastProgClean = now
+                pcall(function()
+                    GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
+                end)
+            end
+
+            -- Auto Gold or Auto Open Eggs
+            if (State.AutoGold and not isAllGold) or State.AutoOpenProgEggs then
+                if (now - lastProgHatch > 0.35) then
+                    lastProgHatch = now
+                    local bestEgg = GameAPI.GetBestAffordableEgg()
+                    if bestEgg and pData.Clicks >= bestEgg.cost then
+                        GameAPI.OpenEgg(bestEgg.name, 1)
+                    end
+                end
+            end
+        end
+        task.wait(0.2)
     end
 end))
 
