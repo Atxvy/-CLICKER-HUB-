@@ -964,7 +964,7 @@ UpgradesTab:AddButton({
 UpgradesTab:AddSection("REBIRTH SHOP BUTTONS")
 UpgradesTab:AddToggle("AutoRebirthButtonsToggle", {
     Title = "Auto Buy Rebirth Buttons (Gems)",
-    Description = "Automatically purchases Rebirth Buttons (Buttons 4-30) as new islands are unlocked",
+    Description = "Automatically purchases all unlocked Rebirth Buttons with Gems as new islands are unlocked",
     Default = State.AutoRebirthButtons,
     Callback = function(val)
         State.AutoRebirthButtons = val
@@ -1585,7 +1585,7 @@ end))
 -- 2. Auto Rebirth Thread (Farm Tab)
 table.insert(threads, task.spawn(function()
     while isRunning do
-        if State.AutoRebirth then
+        if State.AutoRebirth and not State.AutoProgMaster then
             if State.RebirthMode == "Max Rebirth" then
                 GameAPI.RebirthMaxTarget()
             elseif State.RebirthMode == "Best Affordable" then
@@ -1606,7 +1606,7 @@ end))
 -- 3. Auto Island Progression Thread (Farm Tab)
 table.insert(threads, task.spawn(function()
     while isRunning do
-        if State.AutoUnlockNextIsland then
+        if State.AutoUnlockNextIsland and not State.AutoProgMaster then
             local pData = GameAPI.GetPlayerData()
             local nextIsld = GameAPI.GetNextLockedIsland()
             if nextIsld and pData.Clicks >= nextIsld.cost then
@@ -1652,36 +1652,197 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- 4c. Auto Prog Egg & Auto Gold Worker Thread
+-- 4c. Master Auto Progression Engine Thread (Full Zero-To-Hero Speedrun Pipeline)
 table.insert(threads, task.spawn(function()
     local lastProgHatch = 0
     local lastProgClean = 0
-    while isRunning do
-        if State.AutoProgMaster then
-            local now = tick()
-            local isAllGold = GameAPI.IsEquippedTeamAllGold()
-            local pData = GameAPI.GetPlayerData()
+    local lastProgUpgrades = 0
+    local lastProgEquip = 0
+    local lastProgRebirth = 0
+    local lastProgClaim = 0
+    local lastProgPotion = 0
+    local lastProgBreakable = 0
+    local lastProgSecretQuest = 0
+    local lastProgMagmaSkin = 0
 
-            -- Clean inventory periodically if enabled
-            if State.AutoCleanPets and (now - lastProgClean > 4) then
-                lastProgClean = now
-                pcall(function()
-                    GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
-                end)
+    while isRunning do
+        task.wait(0.1)
+        if not State.AutoProgMaster then
+            continue
+        end
+
+        local now = tick()
+        local pData = GameAPI.GetPlayerData()
+        local lockedIsland = GameAPI.GetNextLockedIsland()
+        local allIslandsUnlocked = (lockedIsland == nil)
+        local isFullGoldEvent, eventGoldCount, maxSlots = GameAPI.HasFullGoldEventTeam()
+        local isAllGold = GameAPI.IsEquippedTeamAllGold()
+
+        -- 1. Global Rewards & Free Gifts
+        if State.AutoFreeGifts and (now - lastProgClaim > 12) then
+            lastProgClaim = now
+            pcall(function()
+                GameAPI.ClaimAllFreeGifts()
+                GameAPI.ClaimAllChests()
+                GameAPI.ClaimDaily()
+                GameAPI.ClaimAllAchievements()
+            end)
+        end
+
+        -- 2. Global Potions & Fruits
+        if State.AutoPotions and (now - lastProgPotion > 20) then
+            lastProgPotion = now
+            pcall(function()
+                GameAPI.AutoConsumePotions({
+                    ["Clicks Potion"] = true,
+                    ["Hatch Speed Potion"] = true,
+                    ["Luck Potion"] = true,
+                    ["Gems Potion"] = true,
+                    ["Clicks Speed Potion"] = true,
+                })
+                GameAPI.AutoConsumeFruits()
+            end)
+        end
+
+        -- 3. Upgrades: Map Mini Upgrades (+1 Pet Slot) & Rebirth Shop Buttons
+        if (now - lastProgUpgrades > 1.5) then
+            lastProgUpgrades = now
+            pcall(function()
+                if State.AutoMiniUpgrades then GameAPI.BuyAffordableMiniUpgrades() end
+                if State.AutoGemUpgrades then GameAPI.BuyAffordableGemUpgrades() end
+                if State.AutoRebirthButtons then GameAPI.BuyNextRebirthButton() end
+                if State.AutoDoubleJump then GameAPI.BuyNextDoubleJump() end
+            end)
+        end
+
+        -- 4. Inventory Cleaning (Keep top 15 pets, protect crafting candidates)
+        if State.AutoCleanPets and (now - lastProgClean > 3.5) then
+            lastProgClean = now
+            pcall(function()
+                GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
+            end)
+        end
+
+        -- 5. Golden Crafting (100% Guaranteed Chance Priority)
+        if State.AutoCraftGolden and (now - lastProgHatch > 0.5) then
+            pcall(function()
+                local crafted = GameAPI.CraftGoldenPets()
+                if crafted > 0 then
+                    GameAPI.EquipBest()
+                end
+            end)
+        end
+
+        -- ===================================================================
+        -- PHASE 1: ISLAND SPEEDRUN & 10M EVENT EGG QA RUSH
+        -- ===================================================================
+        if not allIslandsUnlocked then
+
+            -- A. Check Island Unlock Immediately if affordable
+            if State.AutoUnlockNextIsland and lockedIsland and pData.Clicks >= lockedIsland.cost then
+                local ok, msg = GameAPI.UnlockAndTeleportToNextIsland()
+                if ok then
+                    Window:Notify({ Title = "Island Unlocked!", Content = "🌟 Reached " .. tostring(lockedIsland.name) .. "!", Duration = 3 })
+                    pcall(GameAPI.EquipBest)
+                    task.wait(0.4)
+                end
             end
 
-            -- Auto Gold or Auto Open Eggs
-            if (State.AutoGold and not isAllGold) or State.AutoOpenProgEggs then
+            -- B. 10M EVENT EGG QA RUSH:
+            -- If clicks >= 1e16 (10Qa) and team not full gold event pets, hatch CandyCornEgg exclusively!
+            local canAffordEventEgg = (pData.Clicks >= 1e16)
+            if canAffordEventEgg and not isFullGoldEvent then
                 if (now - lastProgHatch > 0.35) then
                     lastProgHatch = now
-                    local bestEgg = GameAPI.GetBestAffordableEgg()
-                    if bestEgg and pData.Clicks >= bestEgg.cost then
-                        GameAPI.OpenEgg(bestEgg.name, 1)
+                    GameAPI.OpenEgg("CandyCornEgg", 1)
+                    pcall(GameAPI.CraftGoldenPets)
+                    pcall(GameAPI.EquipBest)
+                end
+                -- Hold clicks: DO NOT REBIRTH while completing the full gold event team!
+
+            -- C. REGULAR PROGRESSION (Before 10Qa clicks or after Full Gold Event Team obtained)
+            else
+                local isNearIslandUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.70)
+
+                -- Smart Rebirth:
+                if State.AutoRebirth and (now - lastProgRebirth > 0.3) then
+                    if not isNearIslandUnlock then
+                        -- Safe to multiply clicks: rebirth at maximum affordable button
+                        lastProgRebirth = now
+                        local maxInfo = GameAPI.GetMaxRebirthInfo()
+                        if maxInfo.CanAffordMax then
+                            GameAPI.RebirthMaxTarget()
+                        end
+                    end
+                end
+
+                -- Egg Hatching:
+                if (State.AutoOpenProgEggs or (State.AutoGold and not isAllGold)) and (now - lastProgHatch > 0.35) then
+                    lastProgHatch = now
+                    local isSufficient = GameAPI.ArePetsSufficientForIsland()
+                    if not isNearIslandUnlock and (not isSufficient or (State.AutoGold and not isAllGold)) then
+                        local bestEgg = GameAPI.GetBestAffordableEgg()
+                        if bestEgg and pData.Clicks >= bestEgg.cost then
+                            GameAPI.OpenEgg(bestEgg.name, 1)
+                            pcall(GameAPI.CraftGoldenPets)
+                            pcall(GameAPI.EquipBest)
+                        end
                     end
                 end
             end
+
+            -- Periodic Equip Best
+            if State.AutoEquipBest and (now - lastProgEquip > 4) then
+                lastProgEquip = now
+                pcall(GameAPI.EquipBest)
+            end
+
+        -- ===================================================================
+        -- PHASE 2: ENDGAME ROADMAP (All 16 islands unlocked!)
+        -- ===================================================================
+        else
+            -- 1st: Max Rebirth
+            if State.AutoRebirth and (now - lastProgRebirth > 0.3) then
+                lastProgRebirth = now
+                local maxInfo = GameAPI.GetMaxRebirthInfo()
+                if maxInfo.CanAffordMax then
+                    GameAPI.RebirthMaxTarget()
+                end
+            end
+
+            -- 2nd: Dynamic Skill Tree (Tech World First -> Coins Tree) & Breakables
+            if State.AutoSkillTree then
+                local bestWorld = GameAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Heaven"
+                if (now - lastProgBreakable > 0.05) then
+                    lastProgBreakable = now
+                    pcall(function()
+                        GameAPI.AttackBreakable(State.Breakables_IgnoreBossChest)
+                    end)
+                end
+                pcall(GameAPI.BuyAffordableSkillTree)
+            end
+
+            -- 3rd: Auto ??? Secret Dominus Quest (Feathers -> 2.5k Hatches -> Door)
+            if State.AutoSecretQuests and (now - lastProgSecretQuest > 0.4) then
+                lastProgSecretQuest = now
+                pcall(GameAPI.StepSecretQuest)
+            end
+
+            -- 4th: 10 Qi Rebirth Goal & Magma Click Skin
+            if State.AutoMagmaSkin and (now - lastProgMagmaSkin > 3) then
+                lastProgMagmaSkin = now
+                pcall(GameAPI.CheckAndEquipMagmaSkin)
+            end
+
+            -- Rainbow Claim & Pet Maintenance
+            if State.AutoClaimRainbowPets and (now - lastProgClaim > 5) then
+                pcall(GameAPI.ClaimRainbowPets)
+            end
+            if State.AutoEquipBest and (now - lastProgEquip > 4) then
+                lastProgEquip = now
+                pcall(GameAPI.EquipBest)
+            end
         end
-        task.wait(0.2)
     end
 end))
 
@@ -1717,7 +1878,7 @@ table.insert(threads, task.spawn(function()
     local lastZoneCheck = 0
     local skillTreeTimer = 0
     while isRunning do
-        if State.AutoBreakables then
+        if State.AutoBreakables and not State.AutoProgMaster then
             local pData = GameAPI.GetPlayerData()
             local targetIsland = GameAPI.GetBestBreakableIsland(State.Breakables_TargetWorld) or "Heaven"
 
@@ -1753,7 +1914,7 @@ end))
 -- 6b. Auto Skill Tree Perks Thread
 table.insert(threads, task.spawn(function()
     while isRunning do
-        if State.AutoSkillTree then
+        if State.AutoSkillTree and not State.AutoProgMaster then
             pcall(GameAPI.BuyAffordableSkillTree)
         end
         task.wait(1.5)
@@ -1833,7 +1994,7 @@ end))
 -- 8d. Auto ??? Secret Quests Worker Thread
 table.insert(threads, task.spawn(function()
     while isRunning do
-        if State.AutoSecretQuests then
+        if State.AutoSecretQuests and not State.AutoProgMaster then
             pcall(GameAPI.StepSecretQuest)
         end
         task.wait(0.35)
@@ -2041,6 +2202,14 @@ table.insert(threads, task.spawn(function()
 
             -- ProgCheckCard (Auto Prog Tab - The Buyer Checklist!)
             local pProgLines = {}
+            local isFullGoldEvent, eventGoldCount, maxSlots = GameAPI.HasFullGoldEventTeam()
+            if isFullGoldEvent then
+                table.insert(pProgLines, string.format("• 🍁 10M Event Egg: ✔ FULL GOLD TEAM EQUIPPED (%d/%d)", eventGoldCount, maxSlots))
+            elseif pData.Clicks >= 1e16 then
+                table.insert(pProgLines, string.format("• 🍁 10M Event Egg: ⚡ RUSHING FULL GOLD TEAM (%d/%d equipped)", eventGoldCount, maxSlots))
+            else
+                table.insert(pProgLines, string.format("• 🍁 10M Event Egg: Progress (%s / 10.00 Qa)", GameAPI.FormatNumber(pData.Clicks)))
+            end
             table.insert(pProgLines, "1st. Desert Gem Machine: Active (Click/Combo/Hatch/Rebirth Upgrades)")
             local stStatus = (stProg.TechComplete and "✔ TECH DONE" or string.format("Tech %d/%d (%d left)", stProg.TechBought, stProg.TechTotal, stProg.TechRemaining))
                 .. " ➔ " .. (stProg.CoinsComplete and "✔ COINS DONE" or string.format("Coins %d/%d", stProg.CoinsBought, stProg.CoinsTotal))
