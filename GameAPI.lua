@@ -41,6 +41,11 @@ pcall(function()
     MasteryFrontend = require(Client:WaitForChild("MasteryFrontend", 5))
 end)
 
+local IslandsFrontend = nil
+pcall(function()
+    IslandsFrontend = require(Client:WaitForChild("IslandsFrontend", 5))
+end)
+
 -- Channels
 local Channels = {
     Click = Network.Channel("Click"),
@@ -95,10 +100,13 @@ end)
 function GameAPI.GetPlayerData()
     local data = Stats.Local(true) or {}
     local curr = data.Currency or {}
+    local curClicks = (Currency and Currency.Get and Currency.Get("Clicks")) or curr.Clicks or 0
+    local curRebirths = (Currency and Currency.Get and Currency.Get("Rebirths")) or curr.Rebirths or 0
+    local curGems = (Currency and Currency.Get and Currency.Get("Gems")) or curr.Gems or 0
     return {
-        Clicks = curr.Clicks or 0,
-        Rebirths = curr.Rebirths or 0,
-        Gems = curr.Gems or 0,
+        Clicks = curClicks,
+        Rebirths = curRebirths,
+        Gems = curGems,
         Tokens = curr.Tokens or 0,
         CurrentIsland = data.CurrentIsland or "Spawn",
         AvailableRebirthButtons = data.AvailableRebirthButtons or 1,
@@ -143,7 +151,7 @@ function GameAPI.MaxRebirth()
     end
 end
 
--- Computes live data for the player's HIGHEST owned rebirth milestone button
+-- Computes live data for the player's HIGHEST AFFORDABLE rebirth milestone button
 function GameAPI.GetMaxRebirthInfo()
     local raw = Stats.Local(true) or {}
     local owned = raw.OwnedRebirthButtons or {}
@@ -155,84 +163,74 @@ function GameAPI.GetMaxRebirthInfo()
         end
     end
     table.sort(buttons)
-    local maxButtonIdx = buttons[#buttons] or 1
-    local maxEntry = Constants.Rebirths and Constants.Rebirths[maxButtonIdx]
-    local maxAmount = maxEntry and maxEntry.Amount or 1
 
     local costMultiplier = 1
-    if MasteryFrontend then
+    if MasteryFrontend and MasteryFrontend.GetPower then
         pcall(function()
             costMultiplier = MasteryFrontend.GetPower(raw, "RebirthCostMultiplier")
         end)
     end
 
-    local curRebirths = 0
-    if Currency then
-        curRebirths = Currency.Get("Rebirths") or 0
-    else
-        curRebirths = raw.Currency and raw.Currency.Rebirths or 0
+    local curRebirths = (Currency and Currency.Get and Currency.Get("Rebirths")) or (raw.Currency and raw.Currency.Rebirths) or 0
+    local curClicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (raw.Currency and raw.Currency.Clicks) or 0
+
+    local highestOwnedIdx = buttons[#buttons] or 1
+    local bestAffordableIdx = nil
+    local bestAffordableCost = 0
+    local bestAffordableAmount = 0
+
+    for _, btnIdx in ipairs(buttons) do
+        local entry = Constants.Rebirths and Constants.Rebirths[btnIdx]
+        if entry and entry.Amount then
+            local cost = 0
+            if Balancing and Balancing.Rebirths and Balancing.Rebirths.GetCost then
+                cost = Balancing.Rebirths.GetCost(entry.Amount, curRebirths, costMultiplier)
+            else
+                cost = entry.Amount * 1000
+            end
+            if curClicks >= cost then
+                bestAffordableIdx = btnIdx
+                bestAffordableCost = cost
+                bestAffordableAmount = entry.Amount
+            end
+        end
     end
 
-    local maxCost = 0
-    if Balancing and Balancing.Rebirths and Balancing.Rebirths.GetCost then
-        maxCost = Balancing.Rebirths.GetCost(maxAmount, curRebirths, costMultiplier)
-    else
-        maxCost = maxAmount * 1000
-    end
-
-    local curClicks = 0
-    if Currency then
-        curClicks = Currency.Get("Clicks") or 0
-    else
-        curClicks = raw.Currency and raw.Currency.Clicks or 0
-    end
-
-    local canAffordMax = (curClicks >= maxCost)
-    local progress = math.clamp(curClicks / math.max(1, maxCost), 0, 1)
+    local canAfford = (bestAffordableIdx ~= nil)
+    local targetBtnIdx = bestAffordableIdx or 1
+    local targetAmount = bestAffordableAmount > 0 and bestAffordableAmount or (Constants.Rebirths[targetBtnIdx] and Constants.Rebirths[targetBtnIdx].Amount or 1)
+    local targetCost = bestAffordableCost > 0 and bestAffordableCost or 1000
 
     return {
         Buttons = buttons,
-        MaxButtonIndex = maxButtonIdx,
-        MaxAmount = maxAmount,
-        MaxCost = maxCost,
+        MaxButtonIndex = targetBtnIdx,
+        HighestOwnedIndex = highestOwnedIdx,
+        MaxAmount = targetAmount,
+        MaxCost = targetCost,
         CurrentClicks = curClicks,
-        CanAffordMax = canAffordMax,
-        Progress = progress
+        CanAffordMax = canAfford,
+        BestAffordableIndex = targetBtnIdx,
+        Progress = math.clamp(curClicks / math.max(1, targetCost), 0, 1)
     }
 end
 
--- Strictly rebirths ONLY when player has accumulated enough clicks to afford their MAX owned button
+-- Rebirths at the highest affordable owned milestone button
 function GameAPI.RebirthMaxTarget(): (boolean, any)
     local info = GameAPI.GetMaxRebirthInfo()
-    if info.CanAffordMax and Channels.Rebirths then
-        Channels.Rebirths:FireServer("Rebirth", info.MaxButtonIndex)
-        return true, info
+    if Channels.Rebirths then
+        if info.CanAffordMax and info.BestAffordableIndex then
+            Channels.Rebirths:FireServer("Rebirth", info.BestAffordableIndex)
+            pcall(function() Channels.Rebirths:FireServer("MaxRebirth") end)
+            return true, info
+        end
+        pcall(function() Channels.Rebirths:FireServer("MaxRebirth") end)
     end
     return false, info
 end
 
 function GameAPI.GetBestAffordableRebirthIndex(): number
-    local pData = GameAPI.GetPlayerData()
-    local currentClicks = pData.Clicks
-    local bestIndex = 1
-
-    -- Check available rebirth buttons
-    local maxAvail = pData.AvailableRebirthButtons or 3
-    for idx = 1, maxAvail do
-        bestIndex = idx
-    end
-
-    -- If player owns additional buttons
-    if pData.OwnedRebirthButtons then
-        for k, v in pairs(pData.OwnedRebirthButtons) do
-            local num = tonumber(k) or tonumber(v)
-            if num and num > bestIndex then
-                bestIndex = num
-            end
-        end
-    end
-
-    return bestIndex
+    local info = GameAPI.GetMaxRebirthInfo()
+    return info.BestAffordableIndex or 1
 end
 
 --==============================================================================
@@ -850,9 +848,8 @@ local lastPotionUseTime: {[string]: number} = {}
 local lastFruitUseTime: {[string]: number} = {}
 
 -- Automatically consumes active potions when their boost duration expires or runs low (< 15s)
--- Throttled strictly to consume at most 1 potion per 60s per type, preventing inventory dumping
 function GameAPI.AutoConsumePotions(config: {[string]: boolean}?): number
-    if not BoostsFrontend or not Channels.Items then return 0 end
+    if not Channels.Items then return 0 end
     config = config or {
         ["Clicks Potion"] = true,
         ["Hatch Speed Potion"] = true,
@@ -861,27 +858,25 @@ function GameAPI.AutoConsumePotions(config: {[string]: boolean}?): number
         ["Clicks Speed Potion"] = true,
     }
 
-    local active = BoostsFrontend.GetAllActiveBoosts and BoostsFrontend.GetAllActiveBoosts() or {}
+    local active = (BoostsFrontend and BoostsFrontend.GetAllActiveBoosts and BoostsFrontend.GetAllActiveBoosts()) or {}
     local now = tick()
     local count = 0
 
     for potionName, enabled in pairs(config) do
         if enabled then
             local lastUse = lastPotionUseTime[potionName] or 0
-            if (now - lastUse) >= 60 then
-                local timeLeft = BoostsFrontend.GetTimeLeft and BoostsFrontend.GetTimeLeft(potionName) or (active[potionName] and active[potionName].remaining or 0)
+            if (now - lastUse) >= 10 then
+                local timeLeft = (BoostsFrontend and BoostsFrontend.GetTimeLeft and BoostsFrontend.GetTimeLeft(potionName)) or (active[potionName] and active[potionName].remaining or 0)
                 if timeLeft <= 15 then
                     local bestTier = GameAPI.GetBestOwnedPotionTier(potionName)
                     if bestTier then
                         local ok = GameAPI.UseItem(potionName, bestTier, 1)
                         if ok then
                             count = count + 1
-                            lastPotionUseTime[potionName] = now + 300 -- ensure cooldown protects inventory
-                            task.wait(0.2)
+                            lastPotionUseTime[potionName] = now
+                            task.wait(0.15)
                         end
                     end
-                else
-                    lastPotionUseTime[potionName] = math.max(lastUse, now + timeLeft - 15)
                 end
             end
         end
@@ -889,12 +884,12 @@ function GameAPI.AutoConsumePotions(config: {[string]: boolean}?): number
     return count
 end
 
--- Automatically eats fruits to maintain fruit buffs (1 at a time, never dumping inventory)
+-- Automatically eats fruits to maintain fruit buffs (1 at a time, protecting inventory)
 function GameAPI.AutoConsumeFruits(): number
-    if not BoostsFrontend or not Channels.Items then return 0 end
+    if not Channels.Items then return 0 end
     local stats = Stats.Local(true) or {}
     local items = stats.Items or {}
-    local fruitTypes = { "Apple", "Blueberry", "Strawberry", "Watermelon", "Green Apple" }
+    local fruitTypes = { "Apple", "Blueberry", "Strawberry", "Watermelon", "Green Apple", "Orange", "Banana", "Dragonfruit", "Pineapple", "Grape", "Pear" }
     local now = tick()
     local count = 0
 
@@ -902,18 +897,16 @@ function GameAPI.AutoConsumeFruits(): number
         local owned = items[fruit .. "_1"] or 0
         if owned > 0 then
             local lastUse = lastFruitUseTime[fruit] or 0
-            if (now - lastUse) >= 60 then
-                local timeLeft = BoostsFrontend.GetTimeLeft and BoostsFrontend.GetTimeLeft(fruit) or 0
-                local q = BoostsFrontend.GetQueue and BoostsFrontend.GetQueue(fruit) or {}
+            if (now - lastUse) >= 10 then
+                local timeLeft = (BoostsFrontend and BoostsFrontend.GetTimeLeft and BoostsFrontend.GetTimeLeft(fruit)) or 0
+                local q = (BoostsFrontend and BoostsFrontend.GetQueue and BoostsFrontend.GetQueue(fruit)) or {}
                 if #q == 0 or timeLeft <= 15 then
                     local ok = GameAPI.UseItem(fruit, 1, 1)
                     if ok then
                         count = count + 1
-                        lastFruitUseTime[fruit] = now + 180 -- safe buffer
-                        task.wait(0.2)
+                        lastFruitUseTime[fruit] = now
+                        task.wait(0.15)
                     end
-                else
-                    lastFruitUseTime[fruit] = math.max(lastUse, now + timeLeft - 15)
                 end
             end
         end
@@ -925,7 +918,7 @@ end
 function GameAPI.UseAllFruits(): number
     local stats = Stats.Local(true) or {}
     local items = stats.Items or {}
-    local fruitTypes = { "Apple", "Blueberry", "Strawberry", "Watermelon", "Green Apple" }
+    local fruitTypes = { "Apple", "Blueberry", "Strawberry", "Watermelon", "Green Apple", "Orange", "Banana", "Dragonfruit", "Pineapple", "Grape", "Pear" }
     local used = 0
 
     for _, fruit in ipairs(fruitTypes) do
@@ -935,7 +928,7 @@ function GameAPI.UseAllFruits(): number
             local ok = GameAPI.UseItem(fruit, 1, toUse)
             if ok then
                 used = used + toUse
-                task.wait(0.2)
+                task.wait(0.15)
             end
         end
     end
@@ -1071,53 +1064,140 @@ function GameAPI.TeleportToIsland(islandName: string): boolean
     return false
 end
 
-function GameAPI.UnlockIsland(islandName: string): boolean
-    if Channels.Portals then
+function GameAPI.IsIslandUnlocked(islandName: string): boolean
+    if IslandsFrontend and IslandsFrontend.IsUnlocked then
         local ok, res = pcall(function()
-            return Channels.Portals:InvokeServer("UnlockIslandByHitbox", islandName)
+            return IslandsFrontend.IsUnlocked(islandName)
         end)
-        return ok and res == true
+        if ok and res ~= nil then
+            return res == true
+        end
+    end
+    local stats = Stats.Local(true) or {}
+    local unlocked = stats.UnlockedIslands or {"Spawn"}
+    for _, isl in ipairs(unlocked) do
+        if isl == islandName then
+            return true
+        end
     end
     return false
 end
 
--- Checks if next locked island is affordable; if so, purchases and teleports there
+-- Returns the highest/furthest unlocked island in progression order
+function GameAPI.GetFurthestUnlockedIsland(): string
+    local list = GameAPI.GetOverworldIslands()
+    local furthest = "Spawn"
+    for _, islandInfo in ipairs(list) do
+        if GameAPI.IsIslandUnlocked(islandInfo.name) then
+            furthest = islandInfo.name
+        end
+    end
+    return furthest
+end
+
+function GameAPI.UnlockIsland(islandName: string): boolean
+    if GameAPI.IsIslandUnlocked(islandName) then
+        return true
+    end
+    if not Channels.Portals then return false end
+
+    -- 1. Try official PurchaseIsland remote
+    local pOk, pRes = pcall(function()
+        return Channels.Portals:InvokeServer("PurchaseIsland", islandName)
+    end)
+    if (pOk and pRes == true) or GameAPI.IsIslandUnlocked(islandName) then
+        return true
+    end
+
+    -- 2. Try UnlockIslandByHitbox remote
+    local hOk, hRes = pcall(function()
+        return Channels.Portals:InvokeServer("UnlockIslandByHitbox", islandName)
+    end)
+    if (hOk and hRes == true) or GameAPI.IsIslandUnlocked(islandName) then
+        return true
+    end
+
+    task.wait(0.1)
+    return GameAPI.IsIslandUnlocked(islandName)
+end
+
+-- Batch unlocks all affordable islands in sequential order
+function GameAPI.UnlockAllAffordableIslands(): (number, string?)
+    local count = 0
+    local lastUnlocked = nil
+    local maxIterations = 20
+
+    while maxIterations > 0 do
+        maxIterations = maxIterations - 1
+        local nextIsld = GameAPI.GetNextLockedIsland()
+        if not nextIsld then
+            break -- All islands already unlocked!
+        end
+
+        local pData = GameAPI.GetPlayerData()
+        if pData.Clicks < nextIsld.cost then
+            break -- Insufficient clicks for next island
+        end
+
+        local ok = GameAPI.UnlockIsland(nextIsld.name)
+        if ok or GameAPI.IsIslandUnlocked(nextIsld.name) then
+            count = count + 1
+            lastUnlocked = nextIsld.name
+            task.wait(0.12)
+        else
+            -- Hitbox / physical proximity fallback
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local portalModel = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Portals") and workspace._MAP.Portals:FindFirstChild(nextIsld.name)
+            if hrp and portalModel then
+                local portalPart = portalModel:FindFirstChild("Portal") or portalModel:FindFirstChildWhichIsA("BasePart")
+                if portalPart then
+                    local prevCF = hrp.CFrame
+                    hrp.CFrame = portalPart.CFrame
+                    task.wait(0.2)
+                    pcall(function() Channels.Portals:InvokeServer("PurchaseIsland", nextIsld.name) end)
+                    pcall(function() Channels.Portals:InvokeServer("UnlockIslandByHitbox", nextIsld.name) end)
+                    task.wait(0.15)
+                    if GameAPI.IsIslandUnlocked(nextIsld.name) then
+                        count = count + 1
+                        lastUnlocked = nextIsld.name
+                    else
+                        hrp.CFrame = prevCF
+                        break
+                    end
+                else
+                    break
+                end
+            else
+                break
+            end
+        end
+    end
+
+    if lastUnlocked then
+        GameAPI.TeleportToIsland(lastUnlocked)
+    end
+
+    return count, lastUnlocked
+end
+
+-- Checks if next locked island is affordable; if so, batch unlocks all affordable islands and teleports to the highest
 function GameAPI.UnlockAndTeleportToNextIsland(): (boolean, string)
     local nextIsland = GameAPI.GetNextLockedIsland()
     if not nextIsland then
         return false, "All islands already unlocked!"
     end
+
     local pData = GameAPI.GetPlayerData()
     if pData.Clicks < nextIsland.cost then
         return false, string.format("Need %s Clicks (Have %s)", GameAPI.FormatNumber(nextIsland.cost), GameAPI.FormatNumber(pData.Clicks))
     end
 
-    local ok = GameAPI.UnlockIsland(nextIsland.name)
-    if ok then
-        GameAPI.TeleportToIsland(nextIsland.name)
-        return true, "Unlocked & Teleported to " .. nextIsland.name
+    local count, lastUnlocked = GameAPI.UnlockAllAffordableIslands()
+    if count > 0 and lastUnlocked then
+        return true, string.format("Unlocked %d Island(s)! Reached %s!", count, lastUnlocked)
     end
 
-    -- Hitbox fallback
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local portalModel = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Portals") and workspace._MAP.Portals:FindFirstChild(nextIsland.name)
-    if hrp and portalModel then
-        local portalPart = portalModel:FindFirstChild("Portal") or portalModel:FindFirstChildWhichIsA("BasePart")
-        if portalPart then
-            local prevCF = hrp.CFrame
-            hrp.CFrame = portalPart.CFrame
-            task.wait(0.25)
-            local ok2 = GameAPI.UnlockIsland(nextIsland.name)
-            task.wait(0.2)
-            if ok2 then
-                GameAPI.TeleportToIsland(nextIsland.name)
-                return true, "Unlocked & Teleported to " .. nextIsland.name
-            else
-                hrp.CFrame = prevCF
-            end
-        end
-    end
     return false, "Hitbox unlock interaction failed"
 end
 
@@ -1412,16 +1492,9 @@ end
 
 -- Returns the next locked island the player is working towards
 function GameAPI.GetNextLockedIsland()
-    local pData = GameAPI.GetPlayerData()
-    local unlocked = pData.Raw and pData.Raw.UnlockedIslands or {"Spawn"}
-    local unlockedSet = {}
-    for _, isld in ipairs(unlocked) do
-        unlockedSet[isld] = true
-    end
-
     local islandList = GameAPI.GetOverworldIslands()
     for _, islandInfo in ipairs(islandList) do
-        if not unlockedSet[islandInfo.name] then
+        if not GameAPI.IsIslandUnlocked(islandInfo.name) then
             return islandInfo
         end
     end
