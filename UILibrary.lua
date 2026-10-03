@@ -316,27 +316,44 @@ function UILibrary.CreateWindow(config)
 
     -- Toggle State
     local isMinimized = false
-    MinBtn.MouseButton1Click:Connect(function()
-        isMinimized = not isMinimized
+    local function setMinimized(state)
+        isMinimized = state
         if isMinimized then
             BodyFrame.Visible = false
+            MinBtn.Text = "＋"
+            MinBtn.TextColor3 = Color3.fromRGB(192, 132, 252)
             tween(MainFrame, TweenInfo.new(0.2), {Size = UDim2.new(0, Size.X.Offset, 0, 42)})
         else
+            MinBtn.Text = "─"
+            MinBtn.TextColor3 = Color3.fromRGB(190, 180, 205)
             tween(MainFrame, TweenInfo.new(0.2), {Size = Size})
             task.delay(0.2, function()
                 if not isMinimized then BodyFrame.Visible = true end
             end)
+        end
+    end
+
+    MinBtn.MouseButton1Click:Connect(function()
+        setMinimized(not isMinimized)
+    end)
+    MinBtn.TouchTap:Connect(function()
+        setMinimized(not isMinimized)
+    end)
+
+    Header.InputBegan:Connect(function(input)
+        if isMinimized and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            setMinimized(false)
         end
     end)
 
     -- Floating Mobile Toggle Button (Draggable & Accessible on all devices)
     local FloatingBtn = Instance.new("ImageButton")
     FloatingBtn.Name = "FloatingToggleBtn"
-    FloatingBtn.Size = UDim2.new(0, 40, 0, 40)
+    FloatingBtn.Size = UDim2.new(0, 44, 0, 44)
     FloatingBtn.Position = UDim2.new(0, 16, 0.45, 0)
-    FloatingBtn.BackgroundColor3 = Color3.fromRGB(24, 18, 36)
+    FloatingBtn.BackgroundColor3 = Color3.fromRGB(28, 20, 44)
     FloatingBtn.BorderSizePixel = 0
-    FloatingBtn.ZIndex = 9999
+    FloatingBtn.ZIndex = 10000
     FloatingBtn.Parent = ScreenGui
 
     local FloatCorner = Instance.new("UICorner")
@@ -345,14 +362,14 @@ function UILibrary.CreateWindow(config)
 
     local FloatStroke = Instance.new("UIStroke")
     FloatStroke.Color = Color3.fromRGB(168, 85, 247)
-    FloatStroke.Thickness = 1.5
+    FloatStroke.Thickness = 1.8
     FloatStroke.Parent = FloatingBtn
 
     local FloatIcon = Instance.new("TextLabel")
     FloatIcon.Size = UDim2.new(1, 0, 1, 0)
     FloatIcon.BackgroundTransparency = 1
     FloatIcon.Text = "⚡"
-    FloatIcon.TextSize = 18
+    FloatIcon.TextSize = 20
     FloatIcon.TextColor3 = Color3.fromRGB(245, 240, 255)
     FloatIcon.Parent = FloatingBtn
 
@@ -382,6 +399,9 @@ function UILibrary.CreateWindow(config)
         MainFrame.Visible = not MainFrame.Visible
         if MainFrame.Visible then
             ScreenGui.Enabled = true
+            if isMinimized then
+                setMinimized(false)
+            end
             tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0.5})
         else
             tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})

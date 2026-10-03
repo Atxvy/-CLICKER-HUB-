@@ -761,6 +761,6 @@ end))
 
 Window:Notify({
     Title = "Clicker Hub Auto Prog",
-    Content = "Zero-to-Hero Speedrun Engine initialized!",
-    Duration = 3
+    Content = "Tap ⚡ on screen or press Right-Ctrl to toggle UI.",
+    Duration = 4
 })

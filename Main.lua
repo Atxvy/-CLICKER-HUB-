@@ -2015,8 +2015,8 @@ Globals.ClickerHub_Running = true
 
 Window:Notify({
     Title = "Clicker Hub Loaded",
-    Content = "Press Right-Ctrl to toggle UI visibility.",
-    Duration = 3.5
+    Content = "Tap ⚡ on screen or press Right-Ctrl to toggle UI.",
+    Duration = 4
 })
 
 print("[CLICKER HUB] Successfully initialized and running!")
