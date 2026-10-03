@@ -149,7 +149,7 @@ function GameAPI.GetMaxRebirthInfo()
     local owned = raw.OwnedRebirthButtons or {}
     local buttons = { 1, 2, 3 }
     for k, v in pairs(owned) do
-        local n = type(v) == "number" and v or (v == true and tonumber(k))
+        local n = type(v) == "number" and v or (v == true and tonumber(k)) or tonumber(v) or tonumber(k)
         if n and n >= 4 and Constants.Rebirths and Constants.Rebirths[n] then
             table.insert(buttons, n)
         end
@@ -292,6 +292,36 @@ function GameAPI.IsEquippedTeamAllGold(): boolean
     end
 
     return true
+end
+
+-- Checks whether player has a full equipped team of Golden (or better) pets from the 10M Event Egg
+function GameAPI.HasFullGoldEventTeam(): (boolean, number, number)
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+    local maxSlots = stats.MaxEquippedPets or 3
+
+    local eventPetIds = {
+        WitchCat = true, WitchDog = true, MapleLeaf = true,
+        CandyCorn = true, Candle = true, Gravestone = true, JackOLantern = true
+    }
+
+    local qualifyingCount = 0
+    local equippedCount = 0
+    for guid, _ in pairs(equipped) do
+        equippedCount = equippedCount + 1
+        local p = pets[guid]
+        if p then
+            local isGoldOrBetter = (p.v == "Golden" or p.v == "Rainbow" or p.v == "DarkMatter")
+            local isEventPet = eventPetIds[p.id] == true or (Directory.Pets and Directory.Pets[p.id] and Directory.Pets[p.id].Stats and (Directory.Pets[p.id].Stats.Clicks or 0) >= 350000000)
+            if isGoldOrBetter and isEventPet then
+                qualifyingCount = qualifyingCount + 1
+            end
+        end
+    end
+
+    local isFull = (equippedCount >= maxSlots and qualifyingCount >= maxSlots)
+    return isFull, qualifyingCount, maxSlots
 end
 
 -- Automatically converts batches of duplicate normal pets into Golden pets with 100% guaranteed chance priority
@@ -502,6 +532,16 @@ end
 function GameAPI.GetBestAffordableEgg()
     local pData = GameAPI.GetPlayerData()
     local curClicks = pData.Clicks
+
+    -- If player can afford 10M Event Egg (10 Qa / 1e16 clicks) and doesn't have a full gold event team yet, prioritize it!
+    local isFullGoldEvent = false
+    pcall(function()
+        isFullGoldEvent = GameAPI.HasFullGoldEventTeam()
+    end)
+    if curClicks >= 1e16 and not isFullGoldEvent then
+        return { name = "CandyCornEgg", cost = 1e16, island = "Spawn" }
+    end
+
     local unlocked = pData.Raw and pData.Raw.UnlockedIslands or {"Spawn"}
     local unlockedSet = {}
     for _, isl in ipairs(unlocked) do unlockedSet[isl] = true end
@@ -1639,7 +1679,7 @@ function GameAPI.BuyAffordableGemUpgrades(): number
     return bought
 end
 
--- Buys the next unlocked Rebirth Button with Gems (Buttons 4-30)
+-- Buys the next unlocked Rebirth Button with Gems (Buttons 4 to 101+)
 function GameAPI.BuyNextRebirthButton(): boolean
     local stats = Stats.Local(true) or {}
     local gems = stats.Currency and stats.Currency.Gems or 0
@@ -1647,8 +1687,8 @@ function GameAPI.BuyNextRebirthButton(): boolean
     local unlockedIslands = stats.UnlockedIslands or {"Spawn"}
 
     local ownedMap = {}
-    for _, idx in pairs(ownedList) do
-        local n = tonumber(idx)
+    for k, v in pairs(ownedList) do
+        local n = type(v) == "number" and v or (v == true and tonumber(k)) or tonumber(v) or tonumber(k)
         if n then ownedMap[n] = true end
     end
 
@@ -1656,19 +1696,29 @@ function GameAPI.BuyNextRebirthButton(): boolean
     for _, isl in pairs(unlockedIslands) do
         unlockedMap[isl] = true
     end
+    unlockedMap["Spawn"] = true
 
     if not Constants.Rebirths or not Channels.RebirthShop then return false end
 
-    for idx = 4, 30 do
+    -- Collect and sort all available rebirth button indices >= 4
+    local buttonIndices = {}
+    for k in pairs(Constants.Rebirths) do
+        local num = tonumber(k)
+        if num and num >= 4 then
+            table.insert(buttonIndices, num)
+        end
+    end
+    table.sort(buttonIndices)
+
+    for _, idx in ipairs(buttonIndices) do
         if not ownedMap[idx] then
             local rData = Constants.Rebirths[idx]
-            if rData and unlockedMap[rData.RequiredIsland] then
-                if gems >= rData.Cost then
-                    local ok = Channels.RebirthShop:InvokeServer("BuyRebirthButton", idx)
-                    return ok == true
-                end
+            local islandOk = (rData.RequiredIsland == nil or unlockedMap[rData.RequiredIsland] == true)
+            if islandOk and gems >= (rData.Cost or 0) then
+                local ok = Channels.RebirthShop:InvokeServer("BuyRebirthButton", idx)
+                return ok == true
             end
-            break -- sequential
+            break -- sequential: can only purchase buttons in strict sequential order
         end
     end
     return false
