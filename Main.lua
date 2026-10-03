@@ -375,8 +375,8 @@ AutoProgTab:AddToggle("AutoPotionsToggle_Prog", {
 })
 
 AutoProgTab:AddToggle("AutoSkillTreeToggle_Prog", {
-    Title = "Auto Skill Tree (Todo Skill Tree Check: Tech -> Coins)",
-    Description = "Farms breakables and buys Tech World perks first, then completes Overworld Coins tree",
+    Title = "Auto Skill Tree (Priority: Coins First -> Tech World)",
+    Description = "Alternates Volcano & Heaven breakables for Coins tree first, then warps to latest Tech World (Matrix) to finish Tech tree",
     Default = State.AutoSkillTree,
     Callback = function(val)
         State.AutoSkillTree = val
@@ -1810,16 +1810,49 @@ table.insert(threads, task.spawn(function()
                 end
             end
 
-            -- 2nd: Dynamic Skill Tree (Tech World First -> Coins Tree) & Breakables
+            -- 2nd: Dynamic Skill Tree (Priority: Coins First -> Volcano/Heaven Switching -> Latest Tech World Matrix) & Breakables
             if State.AutoSkillTree then
-                local bestWorld = GameAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Heaven"
+                local stProg = GameAPI.GetSkillTreeProgress()
+                local targetWorld = GameAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Volcano"
+
+                -- If player is not on the target breakables island, warp there
+                if targetWorld and targetWorld ~= pData.CurrentIsland then
+                    GameAPI.TeleportToIsland(targetWorld)
+                    task.wait(0.35)
+                    GameAPI.TeleportToBreakableZone(targetWorld, State.Breakables_IgnoreBossChest)
+                    task.wait(0.15)
+                end
+
+                -- Keep character anchored inside breakables zone
+                local zonePart = GameAPI.GetIslandBreakableZone(targetWorld, State.Breakables_IgnoreBossChest)
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
+                    GameAPI.TeleportToBreakableZone(targetWorld, State.Breakables_IgnoreBossChest)
+                end
+
+                -- Attack breakable
                 if (now - lastProgBreakable > 0.05) then
                     lastProgBreakable = now
+                    local okAtk = false
                     pcall(function()
-                        GameAPI.AttackBreakable(State.Breakables_IgnoreBossChest)
+                        okAtk = GameAPI.AttackBreakable(State.Breakables_IgnoreBossChest)
                     end)
+                    -- If no breakables on current Coins island, switch immediately
+                    if not okAtk and not stProg.CoinsComplete then
+                        local altIsland = GameAPI.ForceSwitchCoinsIsland()
+                        if altIsland and altIsland ~= pData.CurrentIsland then
+                            GameAPI.TeleportToIsland(altIsland)
+                            task.wait(0.35)
+                            GameAPI.TeleportToBreakableZone(altIsland, State.Breakables_IgnoreBossChest)
+                        end
+                    end
                 end
-                pcall(GameAPI.BuyAffordableSkillTree)
+
+                -- Continuously purchase affordable perks (Coins prioritized first!)
+                pcall(function()
+                    GameAPI.BuyAffordableSkillTree(not stProg.CoinsComplete)
+                end)
             end
 
             -- 3rd: Auto ??? Secret Dominus Quest (Feathers -> 2.5k Hatches -> Door)
@@ -2211,9 +2244,9 @@ table.insert(threads, task.spawn(function()
                 table.insert(pProgLines, string.format("• 🍁 10M Event Egg: Progress (%s / 10.00 Qa)", GameAPI.FormatNumber(pData.Clicks)))
             end
             table.insert(pProgLines, "1st. Desert Gem Machine: Active (Click/Combo/Hatch/Rebirth Upgrades)")
-            local stStatus = (stProg.TechComplete and "✔ TECH DONE" or string.format("Tech %d/%d (%d left)", stProg.TechBought, stProg.TechTotal, stProg.TechRemaining))
-                .. " ➔ " .. (stProg.CoinsComplete and "✔ COINS DONE" or string.format("Coins %d/%d", stProg.CoinsBought, stProg.CoinsTotal))
-            table.insert(pProgLines, "2nd. Todo Skill Tree Check: " .. stStatus)
+            local stCoinsStatus = stProg.CoinsComplete and "✔ COINS DONE" or string.format("Coins %d/%d (Volcano/Heaven)", stProg.CoinsBought, stProg.CoinsTotal)
+            local stTechStatus = stProg.TechComplete and "✔ TECH DONE" or string.format("Tech %d/%d (Matrix)", stProg.TechBought, stProg.TechTotal)
+            table.insert(pProgLines, "2nd. Skill Tree (Coins First): " .. stCoinsStatus .. " ➔ " .. stTechStatus)
             local domStatus = sProg.isUnlocked and "✔ UNLOCKED" or (sProg.allDone and "✔ READY TO CLAIM" or string.format("Feathers %d/10 • Hatches %d/2500", sProg.feathers.prog, sProg.hatch.prog))
             table.insert(pProgLines, "3rd. Auto ??? Dominus Quest: " .. domStatus)
             local targetQi = 1e19
