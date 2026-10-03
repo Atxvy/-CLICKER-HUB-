@@ -116,6 +116,15 @@ local State = {
     -- Master Engine
     MasterEnabled = true,
 
+    -- Pets Helper & Golden Engine
+    AutoGold = true,              -- Keep opening best egg until entire equipped team is Golden
+    AutoCraftGolden = true,       -- Golden machine 100% chance priority
+    ProtectCraftingPets = true,   -- Do not delete pets needed for golden crafting
+    AutoBestEggs = true,          -- Open highest affordable egg
+    AutoCleanPets = true,         -- Delete inferior weak pets
+    KeepTopPets = 15,             -- Keep top 15 strongest pets
+    AutoEquipBest = true,
+
     -- Phase 1 Settings (Early-to-Mid Game Speedrun)
     AutoClick = true,
     AutoMaxRebirth = true,
@@ -123,10 +132,6 @@ local State = {
     AutoMapUpgrades = true,       -- +1 pet slot, storage, speed
     AutoGemUpgrades = true,       -- Rebirth gem upgrades
     AutoRebirthButtons = true,    -- Rebirth shop milestone buttons with gems
-    AutoBestEggs = true,          -- Open highest affordable egg
-    AutoCleanPets = true,         -- Delete inferior weak pets
-    KeepTopPets = 15,             -- Keep top 15 strongest pets
-    AutoEquipBest = true,
     AutoFreeGifts = true,         -- Auto collect 12 free gifts, daily, chests
     AutoPotions = true,           -- Auto use best potions (clicks, speed, luck, gems)
 
@@ -223,13 +228,103 @@ DashTab:AddButton({
     Title = "Clean Pet Inventory Now",
     Description = "Deletes weak/inferior pets while preserving your top 15 pets and equipped ones",
     Callback = function()
-        local count = GameAPI.CleanOldPets(State.KeepTopPets)
+        local count = GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
         Window:Notify({ Title = "Inventory Cleaner", Content = string.format("Cleaned %d weak pets!", count), Duration = 2.5 })
     end
 })
 
 --==============================================================================
--- 2. PHASE 1: ISLAND SPEEDRUN TAB
+-- 2. PETS HELPER TAB (GOLDEN CRAFTING & INVENTORY MANAGEMENT)
+--==============================================================================
+local PetsHelperTab = Window:AddTab({ Title = "Pets Helper", Icon = "🐾" })
+
+PetsHelperTab:AddSection("GOLDEN TEAM AUTOMATION")
+PetsHelperTab:AddToggle("AutoGoldToggle", {
+    Title = "Auto Gold (Full Golden Team)",
+    Description = "Keeps opening best affordable eggs and crafts them in Golden Machine with 100% chance priority until your entire equipped team is Golden!",
+    Default = State.AutoGold,
+    Callback = function(val)
+        State.AutoGold = val
+        if val then
+            Window:Notify({ Title = "Auto Gold", Content = "Auto Gold enabled: Opening best eggs until all equipped are Golden!", Duration = 3 })
+        end
+    end
+})
+
+PetsHelperTab:AddToggle("AutoCraftGoldenToggle", {
+    Title = "Auto Craft Golden (100% Priority)",
+    Description = "Automatically converts batches of normal pets into Golden pets with guaranteed 100% success rate (batches of 6, or 5 with perk).",
+    Default = State.AutoCraftGolden,
+    Callback = function(val) State.AutoCraftGolden = val end
+})
+
+PetsHelperTab:AddToggle("ProtectCraftingPetsToggle", {
+    Title = "Protect Crafting Candidates (Do Not Delete)",
+    Description = "Prevents duplicate normal pets from being deleted so they can reach the 6-pet Golden crafting threshold.",
+    Default = State.ProtectCraftingPets,
+    Callback = function(val) State.ProtectCraftingPets = val end
+})
+
+PetsHelperTab:AddToggle("AutoEquipBestToggle_Pets", {
+    Title = "Auto Equip Best Pets",
+    Description = "Automatically keeps your highest multiplier pets equipped continuously",
+    Default = State.AutoEquipBest,
+    Callback = function(val) State.AutoEquipBest = val end
+})
+
+PetsHelperTab:AddSection("INVENTORY CLEANER (SMART TRASH REMOVAL)")
+PetsHelperTab:AddToggle("AutoCleanPetsToggle_Pets", {
+    Title = "Auto Clean Weak Pets",
+    Description = "Automatically deletes obsolete weak pets while safely keeping all Golden, Rainbow, Special, and crafting candidate pets",
+    Default = State.AutoCleanPets,
+    Callback = function(val) State.AutoCleanPets = val end
+})
+
+PetsHelperTab:AddSlider("KeepTopPetsSlider", {
+    Title = "Keep Top Pets Amount",
+    Description = "Number of strongest pets to preserve during cleaning",
+    Min = 5,
+    Max = 50,
+    Rounding = 1,
+    Default = State.KeepTopPets,
+    Callback = function(val) State.KeepTopPets = val end
+})
+
+PetsHelperTab:AddSection("INSTANT ACTIONS")
+PetsHelperTab:AddButton({
+    Title = "Craft Golden Pets Now (100% Guaranteed)",
+    Description = "Immediately runs Golden crafting on all eligible candidate batches",
+    Callback = function()
+        local crafted = GameAPI.CraftGoldenPets()
+        GameAPI.EquipBest()
+        Window:Notify({
+            Title = "Golden Machine",
+            Content = crafted > 0 and string.format("Crafted %d Golden Pet(s) with 100%% Chance!", crafted) or "No batches ready for 100% Golden crafting yet.",
+            Duration = 2.5
+        })
+    end
+})
+
+PetsHelperTab:AddButton({
+    Title = "Equip Best Pets Now",
+    Description = "Instantly equips highest multiplier pets from inventory",
+    Callback = function()
+        GameAPI.EquipBest()
+        Window:Notify({ Title = "Pets", Content = "Best pets equipped!", Duration = 2 })
+    end
+})
+
+PetsHelperTab:AddButton({
+    Title = "Clean Inventory Now",
+    Description = "Cleans obsolete pets while keeping top pets and crafting candidates safe",
+    Callback = function()
+        local cleaned = GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
+        Window:Notify({ Title = "Pet Cleaner", Content = string.format("Cleaned %d obsolete pets!", cleaned), Duration = 2.5 })
+    end
+})
+
+--==============================================================================
+-- 3. PHASE 1: ISLAND SPEEDRUN TAB
 --==============================================================================
 local Phase1Tab = Window:AddTab({ Title = "Phase 1: Islands", Icon = "🏝️" })
 
@@ -276,10 +371,17 @@ Phase1Tab:AddToggle("AutoGemUpgradesToggle", {
 })
 
 Phase1Tab:AddToggle("AutoBestEggsToggle", {
-    Title = "Auto Open Best Affordable Eggs (Smart Gating)",
-    Description = "Only hatches until equipped pets match the current island. Once pets are good enough, stops hatching and saves clicks for the next island!",
+    Title = "Auto Open Best Affordable Eggs",
+    Description = "Continuously hatches the highest affordable egg across your unlocked worlds",
     Default = State.AutoBestEggs,
     Callback = function(val) State.AutoBestEggs = val end
+})
+
+Phase1Tab:AddToggle("AutoGoldToggle_Phase1", {
+    Title = "Auto Gold (Prio 100% Golden Team)",
+    Description = "Keeps opening best eggs & crafts in Golden Machine with 100% chance priority until all equipped slots are Golden!",
+    Default = State.AutoGold,
+    Callback = function(val) State.AutoGold = val end
 })
 
 Phase1Tab:AddToggle("AutoCleanPetsToggle", {
@@ -308,6 +410,13 @@ Phase1Tab:AddToggle("AutoPotionsProgToggle", {
     Description = "Automatically consumes your best owned Clicks, Speed, Luck, and Gems potions",
     Default = State.AutoPotions,
     Callback = function(val) State.AutoPotions = val end
+})
+
+Phase1Tab:AddToggle("AutoMagmaSkinProgToggle_Phase1", {
+    Title = "Check % & Equip Magma Skin",
+    Description = "Tracks 10 Qi Rebirth goal and equips Magma Click Skin (+4 Egg Hatch Passive, 20% Hatch Speed)",
+    Default = State.AutoMagmaSkin,
+    Callback = function(val) State.AutoMagmaSkin = val end
 })
 
 --==============================================================================
@@ -498,6 +607,7 @@ table.insert(threads, task.spawn(function()
     local lastGiftCheck = 0
     local lastPotionCheck = 0
     local lastSkinCheck = 0
+    local lastCraftGolden = 0
 
     while isRunning do
         task.wait(0.1)
@@ -582,38 +692,56 @@ table.insert(threads, task.spawn(function()
                 end
             end
 
-            -- E. Inventory Cleaning (Keep top 15 pets, delete weak trash)
+            -- E. Inventory Cleaning (Keep top 15 pets, protect Golden crafting candidates)
             if State.AutoCleanPets and (now - lastPetClean > 3) then
                 lastPetClean = now
-                local cleaned = GameAPI.CleanOldPets(State.KeepTopPets)
+                local cleaned = GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
                 if cleaned > 0 then
                     currentActivity = string.format("Cleaned %d weak pets from inventory", cleaned)
                 end
             end
 
-            -- F. Auto Open Best Affordable Egg (Smart Island Pet Gating)
-            if State.AutoBestEggs and (now - lastEggHatch > 0.4) then
+            -- F. Auto Open Best Affordable Egg & Auto Gold (Full Golden Team)
+            if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatch > 0.35) then
                 lastEggHatch = now
+                local isAllGold = GameAPI.IsEquippedTeamAllGold()
                 local isSufficient, petReason, targetEgg = GameAPI.ArePetsSufficientForIsland()
                 local isNearIslandUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.70)
 
-                if isNearIslandUnlock then
+                -- 1. Auto Gold Priority: Keep hatching best affordable egg until all equipped slots are Golden!
+                if State.AutoGold and not isAllGold then
+                    local bestEgg = GameAPI.GetBestAffordableEgg()
+                    if bestEgg and pData.Clicks >= bestEgg.cost then
+                        currentActivity = string.format("[Auto Gold] Hatching %s (Crafting 100%% Golden Team)", bestEgg.name)
+                        GameAPI.OpenEgg(bestEgg.name, 1)
+                    end
+                elseif isNearIslandUnlock then
                     -- Within 70% of next island unlock cost: Save clicks instead of spending on eggs!
                     currentActivity = string.format("Saving clicks for %s (%s / %s)", lockedIsland.name, GameAPI.FormatNumber(pData.Clicks), GameAPI.FormatNumber(lockedIsland.cost))
-                elseif isSufficient then
+                elseif isSufficient and (not State.AutoGold or isAllGold) then
                     -- Equipped pets are already good enough for this island: Stop hatching and farm clicks!
                     currentActivity = string.format("Pets maxed for %s! Farming clicks for %s", pData.CurrentIsland, lockedIsland and lockedIsland.name or "endgame")
                 else
                     -- Need better pets for current island: Hatch best affordable egg!
                     local bestEgg = GameAPI.GetBestAffordableEgg()
-                    if bestEgg and pData.Clicks >= bestEgg.cost * 2 then
+                    if bestEgg and pData.Clicks >= bestEgg.cost then
                         currentActivity = "Hatching " .. bestEgg.name .. " (" .. petReason .. ")"
                         GameAPI.OpenEgg(bestEgg.name, 1)
                     end
                 end
             end
 
-            -- G. Auto Equip Best Pets
+            -- G. Auto Golden Machine Crafting (100% Guaranteed Chance Priority)
+            if State.AutoCraftGolden and (now - lastCraftGolden > 1.5) then
+                lastCraftGolden = now
+                local crafted = GameAPI.CraftGoldenPets()
+                if crafted > 0 then
+                    currentActivity = string.format("[Auto Gold] Crafted %d Golden Pet(s) with 100%% Chance!", crafted)
+                    pcall(GameAPI.EquipBest)
+                end
+            end
+
+            -- H. Auto Equip Best Pets
             if State.AutoEquipBest and (now - lastEquipBest > 4) then
                 lastEquipBest = now
                 GameAPI.EquipBest()
@@ -687,10 +815,19 @@ table.insert(threads, task.spawn(function()
                 end
             end
 
-            -- G. Clean & Equip Best Pets
+            -- G. Auto Golden Crafting (100% Chance Priority)
+            if State.AutoCraftGolden and (now - lastCraftGolden > 2) then
+                lastCraftGolden = now
+                local crafted = GameAPI.CraftGoldenPets()
+                if crafted > 0 then
+                    pcall(GameAPI.EquipBest)
+                end
+            end
+
+            -- H. Clean & Equip Best Pets
             if State.AutoCleanPets and (now - lastPetClean > 4) then
                 lastPetClean = now
-                GameAPI.CleanOldPets(State.KeepTopPets)
+                GameAPI.CleanOldPets(State.KeepTopPets, State.ProtectCraftingPets)
             end
             if State.AutoEquipBest and (now - lastEquipBest > 5) then
                 lastEquipBest = now
