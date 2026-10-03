@@ -650,11 +650,14 @@ table.insert(threads, task.spawn(function()
             if State.AutoUnlockIslands and lockedIsland then
                 if pData.Clicks >= lockedIsland.cost then
                     currentActivity = "🌟 Unlocking next island: " .. lockedIsland.name .. "!"
-                    local ok, msg = GameAPI.UnlockAndTeleportToNextIsland()
-                    if ok then
-                        Window:Notify({ Title = "Island Unlocked!", Content = "🚀 Reached " .. lockedIsland.name .. "!", Duration = 3 })
+                    local count, lastIsland = GameAPI.UnlockAllAffordableIslands()
+                    if count > 0 and lastIsland then
+                        Window:Notify({ Title = "Islands Unlocked!", Content = string.format("🚀 Unlocked %d Island(s)! Reached %s!", count, lastIsland), Duration = 3 })
                         pcall(GameAPI.EquipBest)
-                        task.wait(0.5)
+                        task.wait(0.3)
+                        pData = GameAPI.GetPlayerData()
+                        lockedIsland = GameAPI.GetNextLockedIsland()
+                        allIslandsUnlocked = (lockedIsland == nil)
                     end
                 end
             end
@@ -759,6 +762,19 @@ table.insert(threads, task.spawn(function()
                 if maxInfo.CanAffordMax then
                     currentActivity = string.format("[Endgame] Max Rebirth (+%s)", GameAPI.FormatNumber(maxInfo.MaxAmount))
                     GameAPI.RebirthMaxTarget()
+                end
+            end
+
+            -- A2. Keep hatching if team is not 100% full gold
+            local isAllGold = GameAPI.IsEquippedTeamAllGold()
+            if not isAllGold and (now - lastEggHatch > 0.35) then
+                lastEggHatch = now
+                local bestEgg = GameAPI.GetBestAffordableEgg()
+                if bestEgg and pData.Clicks >= bestEgg.cost then
+                    currentActivity = "[Auto Gold] Hatching " .. bestEgg.name .. " for Full Gold Team"
+                    GameAPI.OpenEgg(bestEgg.name, 1)
+                    pcall(GameAPI.CraftGoldenPets)
+                    pcall(GameAPI.EquipBest)
                 end
             end
 
@@ -892,6 +908,35 @@ table.insert(threads, task.spawn(function()
                     "• 3rd: ??? Quest: " .. qStr .. "\n" ..
                     "• 4th: Magma Skin: " .. magmaStr
             })
+        end)
+    end
+end))
+
+-- 4. Furthest Unlocked Map Periodic Teleport Thread (Every 30 Seconds)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(30)
+        pcall(function()
+            local furthest = GameAPI.GetFurthestUnlockedIsland()
+            if furthest and furthest ~= "" and furthest ~= "Spawn" then
+                GameAPI.TeleportToIsland(furthest)
+            end
+        end)
+    end
+end))
+
+-- 5. Auto Consumables & Rewards Thread (Potions, Fruits, Gifts, Chests)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(4.0)
+        pcall(function()
+            GameAPI.AutoConsumePotions()
+            GameAPI.AutoConsumeFruits()
+            GameAPI.ClaimAllFreeGifts()
+            GameAPI.ClaimAllChests()
+            GameAPI.ClaimDaily()
+            GameAPI.ClaimAllAchievements()
+            GameAPI.RollWheel()
         end)
     end
 end))
