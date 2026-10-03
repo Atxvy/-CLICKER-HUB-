@@ -71,6 +71,7 @@ local Channels = {
     PotionCrafting = Network.Channel("PotionCrafting"),
     Items = Network.Channel("Items"),
     ClickSkins = Network.Channel("ClickSkins"),
+    Prestige = Network.Channel("Prestige"),
 }
 
 -- Safe Frontend helpers
@@ -232,6 +233,64 @@ function GameAPI.GetBestAffordableRebirthIndex(): number
     local info = GameAPI.GetMaxRebirthInfo()
     return info.BestAffordableIndex or 1
 end
+
+--==============================================================================
+-- PRESTIGE
+--==============================================================================
+function GameAPI.GetPrestigeInfo()
+    local stats = Stats.Local(true) or {}
+    local curPrest = stats.Prestiges or 0
+    local tiers = (Balancing and Balancing.Prestige and Balancing.Prestige.Tiers) or {}
+    local nextTier = tiers[curPrest + 1]
+    local curRebirths = (Currency and Currency.Get and Currency.Get("Rebirths")) or (stats.Currency and stats.Currency.Rebirths) or 0
+
+    if not nextTier then
+        return {
+            CanPrestige = false,
+            CurrentPrestige = curPrest,
+            NextTier = nil,
+            RequiredRebirths = 0,
+            CurrentRebirths = curRebirths,
+            MissingRebirths = 0,
+            MaxPrestigeReached = true
+        }
+    end
+
+    local req = nextTier.RequiredRebirths or math.huge
+    local canPrestige = (curRebirths >= req)
+    return {
+        CanPrestige = canPrestige,
+        CurrentPrestige = curPrest,
+        NextTier = nextTier,
+        RequiredRebirths = req,
+        CurrentRebirths = curRebirths,
+        MissingRebirths = math.max(0, req - curRebirths),
+        MaxPrestigeReached = false
+    }
+end
+
+function GameAPI.CheckAndTriggerPrestige(): (boolean, string)
+    local info = GameAPI.GetPrestigeInfo()
+    if info.MaxPrestigeReached then
+        return false, "Max Prestige reached"
+    end
+    if not info.CanPrestige then
+        return false, string.format("Need %s Rebirths to Prestige", GameAPI.FormatNumber(info.RequiredRebirths))
+    end
+    if not Channels.Prestige then
+        return false, "Prestige channel not found"
+    end
+
+    local ok, res = pcall(function()
+        return Channels.Prestige:InvokeServer("Prestige")
+    end)
+    if ok and res == true then
+        task.wait(14)
+        return true, "Successfully Prestiged to Tier " .. tostring(info.CurrentPrestige + 1)
+    end
+    return false, "Prestige failed: " .. tostring(res)
+end
+
 
 --==============================================================================
 -- PETS
@@ -1055,12 +1114,51 @@ function GameAPI.GetIslandList(): {string}
 end
 
 function GameAPI.TeleportToIsland(islandName: string): boolean
+    local targetWorld = "Overworld"
+    if Directory and Directory.Islands and Directory.Islands[islandName] then
+        targetWorld = Directory.Islands[islandName].World or "Overworld"
+    end
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+
+    if targetWorld ~= curWorld and Channels.Portals then
+        pcall(function()
+            Channels.Portals:InvokeServer("TeleportToWorld", targetWorld)
+        end)
+        task.wait(0.6)
+    end
+
     if Channels.Portals then
         local ok, res = pcall(function()
             return Channels.Portals:InvokeServer("TeleportToIsland", islandName)
         end)
-        return ok and res == true
+        if ok and res == true then
+            return true
+        end
     end
+
+    if IslandsFrontend and IslandsFrontend.LocalTeleport then
+        local ok, res = pcall(function()
+            return IslandsFrontend.LocalTeleport(islandName)
+        end)
+        if ok and res == true then
+            return true
+        end
+    end
+
+    local islModel = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Islands") and workspace._MAP.Islands:FindFirstChild(islandName)
+    if islModel then
+        local interact = islModel:FindFirstChild("Interact")
+        local tp = interact and interact:FindFirstChild("Teleport")
+        local point = tp and (tp:FindFirstChild("Teleport") or tp:FindFirstChildWhichIsA("BasePart") or tp.PrimaryPart)
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and point then
+            hrp.CFrame = point.CFrame + Vector3.new(0, 3, 0)
+            return true
+        end
+    end
+
     return false
 end
 
@@ -1769,6 +1867,97 @@ function GameAPI.CleanOldPets(keepCount: number, protectCrafting: boolean?): num
 
     return #toDelete
 end
+
+-- Deletes obsolete weak pets based on furthest unlocked island (deletes world <= N - 2)
+function GameAPI.CleanWeakPets(protectCrafting: boolean?): number
+    if protectCrafting == nil then protectCrafting = true end
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+
+    local furthestIsland = GameAPI.GetFurthestUnlockedIsland()
+    local islandOrder = {
+        Spawn = 1, Winter = 2, Forest = 3, Desert = 4, Candy = 5, Beach = 6, Sakura = 7,
+        Volcano = 8, Rave = 9, Heaven = 10, Castle = 11, Mystical = 12, Hell = 13,
+        Base = 14, Spaceship = 15, Fragment = 16, Matrix = 17
+    }
+    local highestWorldIndex = islandOrder[furthestIsland] or 1
+    local deleteThreshold = highestWorldIndex - 2
+
+    local eggToIslandIndex = {
+        BasicEgg = 1, FlowerEgg = 1, AcornEgg = 1, SnowmanEgg = 2, WoodEgg = 3,
+        CactusEgg = 4, CottonCandyEgg = 5, ChocolateEgg = 5, PalmTreeEgg = 6, BeachBallEgg = 6,
+        BlossomEgg = 7, VolcanoEgg = 8, DiscoEgg = 9, AngelEgg = 10, CastleEgg = 11,
+        CursedEgg = 12, DemonicEgg = 13, TechEgg = 14, HolographicEgg = 14, ["404Egg"] = 15,
+        RedTechEgg = 15, FragmentedEgg = 16, MatrixEgg = 17
+    }
+
+    local petToWorld = {}
+    if Directory and Directory.Eggs then
+        for eggName, worldIdx in pairs(eggToIslandIndex) do
+            local eData = Directory.Eggs[eggName]
+            if eData and eData.Pets then
+                for _, p in ipairs(eData.Pets) do
+                    local pId = p.Value or p.Id
+                    if pId and not petToWorld[pId] then petToWorld[pId] = worldIdx end
+                end
+            end
+        end
+    end
+
+    local bestEgg = GameAPI.GetBestAffordableEgg()
+    local bestEggPets = {}
+    if bestEgg and Directory.Eggs and Directory.Eggs[bestEgg.name] then
+        local drops = Directory.Eggs[bestEgg.name].Pets or {}
+        for _, p in ipairs(drops) do
+            local pId = p.Value or p.Id
+            if pId then bestEggPets[pId] = true end
+        end
+    end
+
+    local normalCounts = {}
+    for guid, pData in pairs(pets) do
+        if pData.v == nil or pData.v == "Normal" then
+            normalCounts[pData.id] = (normalCounts[pData.id] or 0) + 1
+        end
+    end
+
+    local toDelete = {}
+    for guid, p in pairs(pets) do
+        if not equipped[guid] and not p.Locked and not p.l then
+            local isSpecial = (p.rarity == "Secret" or p.rarity == "Divine" or p.rarity == "Mega" or p.rarity == "Exclusive")
+            local isShiny = (p.Shiny or p.s or false)
+            local isVariant = (p.v == "Golden" or p.v == "Rainbow" or p.v == "DarkMatter")
+
+            if not isSpecial and not isShiny and not isVariant then
+                local petOrigin = petToWorld[p.id] or 1
+                if petOrigin <= deleteThreshold then
+                    local isBestEggDrop = bestEggPets[p.id] == true
+                    local isCraftingCandidate = protectCrafting and (isBestEggDrop or (normalCounts[p.id] and normalCounts[p.id] >= 2))
+                    if not isCraftingCandidate then
+                        table.insert(toDelete, guid)
+                    end
+                end
+            end
+        end
+    end
+
+    if #toDelete > 0 and Channels.Pets then
+        for i = 1, #toDelete, 50 do
+            local batch = {}
+            for j = i, math.min(i + 49, #toDelete) do
+                table.insert(batch, toDelete[j])
+            end
+            pcall(function()
+                Channels.Pets:FireServer("DeletePetsBulk", batch)
+            end)
+            task.wait(0.1)
+        end
+    end
+
+    return #toDelete
+end
+
 
 --==============================================================================
 -- GEM UPGRADES, REBIRTH BUTTONS & SKILL TREE ENGINE
