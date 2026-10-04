@@ -16,19 +16,16 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
+    local lp = LocalPlayer or Players.LocalPlayer or Players.PlayerAdded:Wait()
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    if pg then return pg end
     if gethui then
         local ok, h = pcall(gethui)
-        if ok and h then
-            return h
-        end
+        if ok and h then return h end
     end
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then
-        return cg
-    end
-    local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
-    local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
-    return pg or game:GetService("CoreGui")
+    if ok and cg then return cg end
+    return pg
 end
 
 local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
@@ -37,19 +34,31 @@ local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
     return t
 end
 
-function UILibrary.CreateWindow(config)
-    config = config or {}
-    local Title = config.Title or "CLICKER HUB"
-    local SubTitle = config.SubTitle or "Clicker Simulator Suite"
+function UILibrary.CreateWindow(...)
+    local args = {...}
+    local config = {}
+    for _, arg in ipairs(args) do
+        if type(arg) == "table" and arg ~= UILibrary then
+            config = arg
+            break
+        end
+    end
+
+    local Title = config.Title or "CLICKER SIMULATOR — AUTO PROGRESSION"
+    local SubTitle = config.SubTitle or config.Subtitle or "Zero-To-Hero Speedrun Engine [AUTOPROG]"
     local ToggleKey = config.ToggleKey or Enum.KeyCode.RightControl
     local camera = workspace.CurrentCamera
     local vp = camera and camera.ViewportSize or Vector2.new(1920, 1080)
-    local maxWidth = math.clamp(math.floor(vp.X - 24), 300, 620)
-    local maxHeight = math.clamp(math.floor(vp.Y - 36), 260, 440)
-    local Size = config.Size or UDim2.new(0, maxWidth, 0, maxHeight)
-    if vp.X < 660 or vp.Y < 480 then
-        Size = UDim2.new(0, maxWidth, 0, maxHeight)
+    
+    local targetWidth = 700
+    local targetHeight = 520
+    if config.Size and typeof(config.Size) == "UDim2" then
+        targetWidth = config.Size.X.Offset
+        targetHeight = config.Size.Y.Offset
     end
+    local maxWidth = math.clamp(math.floor(vp.X - 24), 300, targetWidth)
+    local maxHeight = math.clamp(math.floor(vp.Y - 36), 260, targetHeight)
+    local Size = UDim2.new(0, maxWidth, 0, maxHeight)
     local Connections = {}
 
     -- Clean up previous instances across all potential roots
@@ -73,45 +82,16 @@ function UILibrary.CreateWindow(config)
 
     local root = getRootGui()
 
-    -- Permanently suppress game black shade / screen dimming
-    task.spawn(function()
-        pcall(function()
-            local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-            if not pg then return end
-            local function suppressOverlay(gui)
-                if gui.Name == "GUIOverlay" then
-                    gui.Enabled = false
-                    gui:GetPropertyChangedSignal("Enabled"):Connect(function()
-                        if gui.Enabled then gui.Enabled = false end
-                    end)
-                    local function fixFrame(f)
-                        if f.Name == "Overlay" and f:IsA("Frame") then
-                            f.Visible = false
-                            f.BackgroundTransparency = 1
-                            f:GetPropertyChangedSignal("Visible"):Connect(function()
-                                if f.Visible then f.Visible = false end
-                            end)
-                            f:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
-                                if f.BackgroundTransparency < 1 then f.BackgroundTransparency = 1 end
-                            end)
-                        end
-                    end
-                    for _, c in ipairs(gui:GetChildren()) do fixFrame(c) end
-                    gui.ChildAdded:Connect(fixFrame)
-                end
-            end
-            for _, g in ipairs(pg:GetChildren()) do suppressOverlay(g) end
-            pg.ChildAdded:Connect(suppressOverlay)
-        end)
-    end)
-
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "ClickerHub_UI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.DisplayOrder = 999999
-    ScreenGui.Enabled = true
+    ScreenGui:SetAttribute("Immune", true)
+    ScreenGui:SetAttribute("NoScaling", true)
+    -- Parent to root FIRST, then set Enabled = true so game engine does not suppress it
     ScreenGui.Parent = root
+    ScreenGui.Enabled = true
 
     -- Notifications Overlay Frame
     local NotifContainer = Instance.new("Frame")
@@ -128,22 +108,17 @@ function UILibrary.CreateWindow(config)
     NotifLayout.Padding = UDim.new(0, 8)
     NotifLayout.Parent = NotifContainer
 
-    -- Main Frame (Electric Purple Dark Glass)
+    -- Main Frame (Electric Purple Dark Glass - perfectly centered)
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
+    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     MainFrame.Size = Size
-    MainFrame.Position = UDim2.new(0.5, -Size.X.Offset / 2, 0.5, -Size.Y.Offset / 2)
+    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     MainFrame.BackgroundColor3 = Color3.fromRGB(18, 15, 25)
     MainFrame.BorderSizePixel = 0
     MainFrame.ClipsDescendants = false
     MainFrame.Visible = true
     MainFrame.Parent = ScreenGui
-
-    table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-        if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
-            ScreenGui.Enabled = true
-        end
-    end))
 
     local MainCorner = Instance.new("UICorner")
     MainCorner.CornerRadius = UDim.new(0, 10)
@@ -154,33 +129,6 @@ function UILibrary.CreateWindow(config)
     MainStroke.Thickness = 1.2
     MainStroke.Transparency = 0.35
     MainStroke.Parent = MainFrame
-
-    -- Dragging Logic
-    local dragging = false
-    local dragInput, dragStart, startPos
-    MainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainFrame.Position
-        end
-    end)
-    MainFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end))
-    table.insert(Connections, UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end))
 
     -- Top Header Bar
     local Header = Instance.new("Frame")
@@ -204,13 +152,13 @@ function UILibrary.CreateWindow(config)
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Name = "Title"
-    TitleLabel.Size = UDim2.new(0, 300, 1, 0)
+    TitleLabel.Size = UDim2.new(1, -90, 1, 0)
     TitleLabel.Position = UDim2.new(0, 16, 0, 0)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = Title .. "  <font color=\"rgb(140,130,165)\">|</font>  <font color=\"rgb(192,132,252)\">" .. SubTitle .. "</font>"
     TitleLabel.RichText = true
     TitleLabel.TextColor3 = Color3.fromRGB(245, 240, 255)
-    TitleLabel.TextSize = 13
+    TitleLabel.TextSize = 15
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = Header
@@ -224,7 +172,7 @@ function UILibrary.CreateWindow(config)
     CloseBtn.BackgroundTransparency = 1
     CloseBtn.Text = "✕"
     CloseBtn.TextColor3 = Color3.fromRGB(190, 180, 205)
-    CloseBtn.TextSize = 12
+    CloseBtn.TextSize = 14
     CloseBtn.Font = Enum.Font.GothamBold
     CloseBtn.Parent = Header
 
@@ -240,7 +188,7 @@ function UILibrary.CreateWindow(config)
     MinBtn.BackgroundTransparency = 1
     MinBtn.Text = "─"
     MinBtn.TextColor3 = Color3.fromRGB(190, 180, 205)
-    MinBtn.TextSize = 12
+    MinBtn.TextSize = 14
     MinBtn.Font = Enum.Font.GothamBold
     MinBtn.Parent = Header
 
@@ -340,11 +288,31 @@ function UILibrary.CreateWindow(config)
         setMinimized(not isMinimized)
     end)
 
+    -- Draggable Window (Only by clicking the Header bar)
+    local headerDragging = false
+    local headerDragStart, headerStartPos
     Header.InputBegan:Connect(function(input)
-        if isMinimized and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            setMinimized(false)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if isMinimized then
+                setMinimized(false)
+            end
+            headerDragging = true
+            headerDragStart = input.Position
+            headerStartPos = MainFrame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    headerDragging = false
+                end
+            end)
         end
     end)
+    table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
+        if headerDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - headerDragStart
+            MainFrame.Position = UDim2.new(headerStartPos.X.Scale, headerStartPos.X.Offset + delta.X, headerStartPos.Y.Scale, headerStartPos.Y.Offset + delta.Y)
+        end
+    end))
 
     -- Floating Mobile Toggle Button (Draggable & Accessible on all devices)
     local FloatingBtn = Instance.new("ImageButton")
@@ -381,6 +349,12 @@ function UILibrary.CreateWindow(config)
             floatDragging = true
             floatDragStart = input.Position
             floatStartPos = FloatingBtn.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    floatDragging = false
+                end
+            end)
         end
     end)
     table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
@@ -389,16 +363,11 @@ function UILibrary.CreateWindow(config)
             FloatingBtn.Position = UDim2.new(floatStartPos.X.Scale, floatStartPos.X.Offset + delta.X, floatStartPos.Y.Scale, floatStartPos.Y.Offset + delta.Y)
         end
     end))
-    table.insert(Connections, UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            floatDragging = false
-        end
-    end))
 
     local function toggleUI()
         MainFrame.Visible = not MainFrame.Visible
+        ScreenGui.Enabled = true
         if MainFrame.Visible then
-            ScreenGui.Enabled = true
             if isMinimized then
                 setMinimized(false)
             end
@@ -413,9 +382,11 @@ function UILibrary.CreateWindow(config)
 
     CloseBtn.MouseButton1Click:Connect(function()
         MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
     end)
     CloseBtn.TouchTap:Connect(function()
         MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
     end)
 
     -- Toggle Hotkey
@@ -423,6 +394,17 @@ function UILibrary.CreateWindow(config)
         if processed then return end
         if input.KeyCode == ToggleKey then
             toggleUI()
+        end
+    end))
+
+    -- Anti-suppression listener: Ensure ScreenGui.Enabled stays true while MainFrame is visible
+    table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if MainFrame.Visible and not ScreenGui.Enabled then
+            task.defer(function()
+                if MainFrame.Visible and ScreenGui and ScreenGui.Parent then
+                    ScreenGui.Enabled = true
+                end
+            end)
         end
     end))
 
@@ -446,68 +428,84 @@ function UILibrary.CreateWindow(config)
         toggleUI()
     end
 
+    function Window:Show()
+        ScreenGui.Enabled = true
+        MainFrame.Visible = true
+        if isMinimized then
+            setMinimized(false)
+        end
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0.5})
+    end
+
+    function Window:Hide()
+        MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
+    end
+
     function Window:Notify(opts)
-        opts = opts or {}
-        local nTitle = opts.Title or "Notification"
-        local nContent = opts.Content or ""
-        local nDuration = opts.Duration or 3
+        pcall(function()
+            opts = opts or {}
+            local nTitle = opts.Title or "Notification"
+            local nContent = opts.Content or ""
+            local nDuration = opts.Duration or 3
 
-        local notif = Instance.new("Frame")
-        notif.Size = UDim2.new(1, 0, 0, 56)
-        notif.BackgroundColor3 = Color3.fromRGB(28, 22, 38)
-        notif.BackgroundTransparency = 1
-        notif.BorderSizePixel = 0
-        notif.Parent = NotifContainer
+            local notif = Instance.new("Frame")
+            notif.Size = UDim2.new(1, 0, 0, 56)
+            notif.BackgroundColor3 = Color3.fromRGB(28, 22, 38)
+            notif.BackgroundTransparency = 1
+            notif.BorderSizePixel = 0
+            notif.Parent = NotifContainer
 
-        local nCorner = Instance.new("UICorner")
-        nCorner.CornerRadius = UDim.new(0, 8)
-        nCorner.Parent = notif
+            local nCorner = Instance.new("UICorner")
+            nCorner.CornerRadius = UDim.new(0, 8)
+            nCorner.Parent = notif
 
-        local nStroke = Instance.new("UIStroke")
-        nStroke.Color = Color3.fromRGB(168, 85, 247)
-        nStroke.Thickness = 1
-        nStroke.Transparency = 1
-        nStroke.Parent = notif
+            local nStroke = Instance.new("UIStroke")
+            nStroke.Color = Color3.fromRGB(168, 85, 247)
+            nStroke.Thickness = 1
+            nStroke.Transparency = 1
+            nStroke.Parent = notif
 
-        local tLabel = Instance.new("TextLabel")
-        tLabel.Size = UDim2.new(1, -16, 0, 18)
-        tLabel.Position = UDim2.new(0, 12, 0, 8)
-        tLabel.BackgroundTransparency = 1
-        tLabel.Text = nTitle
-        tLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
-        tLabel.TextSize = 12
-        tLabel.Font = Enum.Font.GothamBold
-        tLabel.TextXAlignment = Enum.TextXAlignment.Left
-        tLabel.TextTransparency = 1
-        tLabel.Parent = notif
+            local tLabel = Instance.new("TextLabel")
+            tLabel.Size = UDim2.new(1, -16, 0, 18)
+            tLabel.Position = UDim2.new(0, 12, 0, 8)
+            tLabel.BackgroundTransparency = 1
+            tLabel.Text = nTitle
+            tLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
+            tLabel.TextSize = 12
+            tLabel.Font = Enum.Font.GothamBold
+            tLabel.TextXAlignment = Enum.TextXAlignment.Left
+            tLabel.TextTransparency = 1
+            tLabel.Parent = notif
 
-        local cLabel = Instance.new("TextLabel")
-        cLabel.Size = UDim2.new(1, -16, 0, 20)
-        cLabel.Position = UDim2.new(0, 12, 0, 26)
-        cLabel.BackgroundTransparency = 1
-        cLabel.Text = nContent
-        cLabel.TextColor3 = Color3.fromRGB(225, 220, 235)
-        cLabel.TextSize = 11
-        cLabel.Font = Enum.Font.Gotham
-        cLabel.TextXAlignment = Enum.TextXAlignment.Left
-        cLabel.TextTransparency = 1
-        cLabel.Parent = notif
+            local cLabel = Instance.new("TextLabel")
+            cLabel.Size = UDim2.new(1, -16, 0, 20)
+            cLabel.Position = UDim2.new(0, 12, 0, 26)
+            cLabel.BackgroundTransparency = 1
+            cLabel.Text = nContent
+            cLabel.TextColor3 = Color3.fromRGB(225, 220, 235)
+            cLabel.TextSize = 11
+            cLabel.Font = Enum.Font.Gotham
+            cLabel.TextXAlignment = Enum.TextXAlignment.Left
+            cLabel.TextTransparency = 1
+            cLabel.Parent = notif
 
-        -- Fade in
-        tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 0})
-        tween(nStroke, TweenInfo.new(0.2), {Transparency = 0.4})
-        tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 0})
-        tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 0})
+            -- Fade in
+            tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 0})
+            tween(nStroke, TweenInfo.new(0.2), {Transparency = 0.4})
+            tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 0})
+            tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 0})
 
-        task.delay(nDuration, function()
-            if notif and notif.Parent then
-                tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 1})
-                tween(nStroke, TweenInfo.new(0.2), {Transparency = 1})
-                tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 1})
-                tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 1})
-                task.wait(0.25)
-                pcall(function() notif:Destroy() end)
-            end
+            task.delay(nDuration, function()
+                if notif and notif.Parent then
+                    tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 1})
+                    tween(nStroke, TweenInfo.new(0.2), {Transparency = 1})
+                    tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 1})
+                    tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 1})
+                    task.wait(0.25)
+                    pcall(function() notif:Destroy() end)
+                end
+            end)
         end)
     end
 
@@ -549,8 +547,8 @@ function UILibrary.CreateWindow(config)
         TabLabel.BackgroundTransparency = 1
         TabLabel.Text = tabIcon .. "  " .. tabTitle
         TabLabel.TextColor3 = Color3.fromRGB(160, 150, 175)
-        TabLabel.TextSize = 12
-        TabLabel.Font = Enum.Font.GothamMedium
+        TabLabel.TextSize = 13
+        TabLabel.Font = Enum.Font.GothamBold
         TabLabel.TextXAlignment = Enum.TextXAlignment.Left
         TabLabel.Parent = TabBtn
 
@@ -616,7 +614,7 @@ function UILibrary.CreateWindow(config)
         local function createBaseRow(titleText, descText)
             local hasDesc = descText and descText ~= ""
             local el = Instance.new("Frame")
-            el.Size = UDim2.new(1, 0, 0, hasDesc and 58 or 42)
+            el.Size = UDim2.new(1, 0, 0, hasDesc and 64 or 46)
             el.BackgroundColor3 = Color3.fromRGB(25, 22, 35)
             el.BorderSizePixel = 0
             el.Parent = ContentScroll
@@ -632,29 +630,31 @@ function UILibrary.CreateWindow(config)
             s.Parent = el
 
             local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, -165, 0, 18)
-            title.Position = hasDesc and UDim2.new(0, 12, 0, 9) or UDim2.new(0, 12, 0.5, -9)
+            title.Size = UDim2.new(1, -165, 0, 20)
+            title.Position = hasDesc and UDim2.new(0, 12, 0, 9) or UDim2.new(0, 12, 0.5, -10)
             title.BackgroundTransparency = 1
             title.Text = titleText
             title.TextColor3 = Color3.fromRGB(245, 240, 255)
-            title.TextSize = 13
-            title.Font = Enum.Font.GothamMedium
+            title.TextSize = 14
+            title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.TextWrapped = true
+            title.RichText = true
             title.Parent = el
 
             if hasDesc then
                 local desc = Instance.new("TextLabel")
-                desc.Size = UDim2.new(1, -165, 0, 28)
-                desc.Position = UDim2.new(0, 12, 0, 27)
+                desc.Size = UDim2.new(1, -165, 0, 30)
+                desc.Position = UDim2.new(0, 12, 0, 30)
                 desc.BackgroundTransparency = 1
                 desc.Text = descText
-                desc.TextColor3 = Color3.fromRGB(155, 145, 175)
-                desc.TextSize = 11
-                desc.Font = Enum.Font.Gotham
+                desc.TextColor3 = Color3.fromRGB(165, 155, 185)
+                desc.TextSize = 12
+                desc.Font = Enum.Font.GothamMedium
                 desc.TextXAlignment = Enum.TextXAlignment.Left
                 desc.TextYAlignment = Enum.TextYAlignment.Top
                 desc.TextWrapped = true
+                desc.RichText = true
                 desc.Parent = el
             end
 
@@ -666,11 +666,11 @@ function UILibrary.CreateWindow(config)
 
         function TabMethods:AddSection(text)
             local sec = Instance.new("TextLabel")
-            sec.Size = UDim2.new(1, 0, 0, 24)
+            sec.Size = UDim2.new(1, 0, 0, 28)
             sec.BackgroundTransparency = 1
             sec.Text = string.upper(text)
             sec.TextColor3 = Color3.fromRGB(192, 132, 252)
-            sec.TextSize = 11
+            sec.TextSize = 13
             sec.Font = Enum.Font.GothamBold
             sec.TextXAlignment = Enum.TextXAlignment.Left
             sec.Parent = ContentScroll
@@ -680,7 +680,7 @@ function UILibrary.CreateWindow(config)
         function TabMethods:AddParagraph(opts)
             opts = opts or {}
             local el = Instance.new("Frame")
-            local minHeight = opts.Height or 78
+            local minHeight = opts.Height or 84
             el.Size = UDim2.new(1, 0, 0, minHeight)
             el.AutomaticSize = Enum.AutomaticSize.Y
             el.BackgroundColor3 = Color3.fromRGB(25, 21, 35)
@@ -698,44 +698,55 @@ function UILibrary.CreateWindow(config)
             s.Parent = el
 
             local pad = Instance.new("UIPadding")
-            pad.PaddingTop = UDim.new(0, 8)
-            pad.PaddingBottom = UDim.new(0, 10)
-            pad.PaddingLeft = UDim.new(0, 12)
-            pad.PaddingRight = UDim.new(0, 12)
+            pad.PaddingTop = UDim.new(0, 10)
+            pad.PaddingBottom = UDim.new(0, 12)
+            pad.PaddingLeft = UDim.new(0, 14)
+            pad.PaddingRight = UDim.new(0, 14)
+            el.Name = "Paragraph_" .. tostring((opts.Title or "Card"):gsub("%s+", ""))
             pad.Parent = el
 
+            local titleSize = opts.TitleSize or 16
+            local bodySize = opts.BodySize or 14
+
             local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, 0, 0, 18)
+            title.Name = "ParagraphTitle"
+            title.Size = UDim2.new(1, 0, 0, titleSize + 6)
             title.Position = UDim2.new(0, 0, 0, 0)
             title.BackgroundTransparency = 1
             title.Text = opts.Title or ""
             title.TextColor3 = Color3.fromRGB(192, 132, 252)
-            title.TextSize = 12
+            title.TextSize = titleSize
             title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Parent = el
 
             local body = Instance.new("TextLabel")
+            body.Name = "ParagraphBody"
             body.AutomaticSize = Enum.AutomaticSize.Y
             body.Size = UDim2.new(1, 0, 0, 0)
-            body.Position = UDim2.new(0, 0, 0, 20)
+            body.Position = UDim2.new(0, 0, 0, titleSize + 8)
             body.BackgroundTransparency = 1
             body.Text = opts.Content or ""
-            body.TextColor3 = Color3.fromRGB(215, 210, 230)
-            body.TextSize = 11
-            body.Font = Enum.Font.Gotham
+            body.TextColor3 = Color3.fromRGB(230, 225, 245)
+            body.TextSize = bodySize
+            body.Font = Enum.Font.GothamMedium
             body.TextXAlignment = Enum.TextXAlignment.Left
             body.TextYAlignment = Enum.TextYAlignment.Top
             body.TextWrapped = true
+            body.RichText = true
             body.Parent = el
 
-            local ParaObj = {}
+            local ParaObj = {
+                Frame = el,
+                TitleLabel = title,
+                BodyLabel = body,
+            }
             function ParaObj:Set(newOpts)
                 if type(newOpts) == "string" then
                     body.Text = newOpts
                 elseif type(newOpts) == "table" then
-                    if newOpts.Title then title.Text = newOpts.Title end
-                    if newOpts.Content then body.Text = newOpts.Content end
+                    if newOpts.Title then title.Text = tostring(newOpts.Title) end
+                    if newOpts.Content then body.Text = tostring(newOpts.Content) end
                 end
             end
             function ParaObj:SetText(content)
@@ -749,13 +760,13 @@ function UILibrary.CreateWindow(config)
             local el = createBaseRow(opts.Title or "Button", opts.Description)
 
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, 86, 0, 28)
-            btn.Position = UDim2.new(1, -98, 0.5, -14)
+            btn.Size = UDim2.new(0, 96, 0, 30)
+            btn.Position = UDim2.new(1, -108, 0.5, -15)
             btn.BackgroundColor3 = Color3.fromRGB(42, 32, 58)
             btn.Text = "Execute"
             btn.TextColor3 = Color3.fromRGB(230, 225, 240)
-            btn.TextSize = 12
-            btn.Font = Enum.Font.GothamMedium
+            btn.TextSize = 13
+            btn.Font = Enum.Font.GothamBold
             btn.Parent = el
 
             local btnCorner = Instance.new("UICorner")
@@ -865,8 +876,8 @@ function UILibrary.CreateWindow(config)
             title.BackgroundTransparency = 1
             title.Text = opts.Title or "Slider"
             title.TextColor3 = Color3.fromRGB(245, 240, 255)
-            title.TextSize = 13
-            title.Font = Enum.Font.GothamMedium
+            title.TextSize = 14
+            title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Parent = el
 
@@ -876,7 +887,7 @@ function UILibrary.CreateWindow(config)
             valLabel.BackgroundTransparency = 1
             valLabel.Text = tostring(currentVal) .. suffix
             valLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
-            valLabel.TextSize = 12
+            valLabel.TextSize = 13
             valLabel.Font = Enum.Font.GothamBold
             valLabel.TextXAlignment = Enum.TextXAlignment.Right
             valLabel.Parent = el
@@ -971,8 +982,8 @@ function UILibrary.CreateWindow(config)
             dropBtn.BackgroundColor3 = Color3.fromRGB(36, 28, 48)
             dropBtn.Text = "  " .. tostring(selected)
             dropBtn.TextColor3 = Color3.fromRGB(230, 225, 240)
-            dropBtn.TextSize = 11
-            dropBtn.Font = Enum.Font.GothamMedium
+            dropBtn.TextSize = 13
+            dropBtn.Font = Enum.Font.GothamBold
             dropBtn.TextXAlignment = Enum.TextXAlignment.Left
             dropBtn.Parent = el
 
@@ -1038,8 +1049,8 @@ function UILibrary.CreateWindow(config)
                     itemBtn.BackgroundTransparency = 1
                     itemBtn.Text = "  " .. tostring(val)
                     itemBtn.TextColor3 = Color3.fromRGB(220, 215, 235)
-                    itemBtn.TextSize = 11
-                    itemBtn.Font = Enum.Font.Gotham
+                    itemBtn.TextSize = 12
+                    itemBtn.Font = Enum.Font.GothamMedium
                     itemBtn.TextXAlignment = Enum.TextXAlignment.Left
                     itemBtn.ZIndex = 81
                     itemBtn.Parent = dropMenu
@@ -1105,8 +1116,8 @@ function UILibrary.CreateWindow(config)
             box.PlaceholderText = opts.Placeholder or "Type here..."
             box.TextColor3 = Color3.fromRGB(230, 225, 240)
             box.PlaceholderColor3 = Color3.fromRGB(130, 120, 150)
-            box.TextSize = 11
-            box.Font = Enum.Font.Gotham
+            box.TextSize = 13
+            box.Font = Enum.Font.GothamMedium
             box.TextXAlignment = Enum.TextXAlignment.Left
             box.Parent = el
 
@@ -1147,9 +1158,43 @@ function UILibrary.CreateWindow(config)
 
     function Window:Destroy()
         pcall(function()
-            ScreenGui:Destroy()
+            for _, conn in ipairs(Connections) do
+                pcall(function() conn:Disconnect() end)
+            end
+            if ScreenGui and ScreenGui.Parent then
+                ScreenGui:Destroy()
+            end
         end)
     end
+
+    -- Explicit initial visibility guarantee
+    ScreenGui.Enabled = true
+    MainFrame.Visible = true
+    BodyFrame.Visible = true
+
+    task.defer(function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
+
+    task.delay(0.1, function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
+
+    task.delay(0.35, function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
 
     return Window
 end
