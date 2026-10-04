@@ -101,6 +101,316 @@ ProgAPI.AutoRebirthFrontend = AutoRebirthFrontend
 ProgAPI.SkillTreeFrontend = SkillTreeFrontend
 ProgAPI.BreakablesFrontend = BreakablesFrontend
 
+--==============================================================================
+-- SESSION TRACKING, TELEMETRY & DISCORD WEBHOOK INTEGRATION
+--==============================================================================
+if not _G.__ProgAPI_SessionStats then
+    _G.__ProgAPI_SessionStats = {
+        Eggs = 0,
+        Mythicals = 0,
+        Secrets = 0,
+        Megas = 0,
+        StartTick = tick(),
+    }
+end
+ProgAPI.SessionStats = _G.__ProgAPI_SessionStats
+ProgAPI.WebhookUrl = ""
+ProgAPI.WebhookEnabled = true
+ProgAPI.CurrentActivity = "Auto Progression Active"
+ProgAPI.CurrentPhase = "Evaluating..."
+ProgAPI.SelectedEgg = "MatrixEgg"
+
+function ProgAPI.FormatSessionTime(): string
+    local startTick = (ProgAPI.SessionStats and ProgAPI.SessionStats.StartTick) or tick()
+    local elapsed = math.max(0, math.floor(tick() - startTick))
+    local hrs = math.floor(elapsed / 3600)
+    local mins = math.floor((elapsed % 3600) / 60)
+    local secs = elapsed % 60
+    return string.format("%02d:%02d:%02d", hrs, mins, secs)
+end
+
+function ProgAPI.GetCurrentEggLuckMultiplier(): number
+    local mult = 1
+    pcall(function()
+        local BoostsFrontend = nil
+        pcall(function() BoostsFrontend = require(Client:WaitForChild("BoostsFrontend", 2)) end)
+        if BoostsFrontend and BoostsFrontend.GetBoostMultiplier then
+            local b1 = BoostsFrontend.GetBoostMultiplier("Luck") or 1
+            local b2 = BoostsFrontend.GetBoostMultiplier("Super Luck") or 1
+            local b3 = BoostsFrontend.GetBoostMultiplier("Ultra Luck") or 1
+            mult = mult * b1 * b2 * b3
+        end
+    end)
+    pcall(function()
+        local raw = Stats.Local(true) or {}
+        if MasteryFrontend and MasteryFrontend.GetPower then
+            local mp = MasteryFrontend.GetPower(raw, "EggLuckMultiplier")
+            if mp and mp > 0 then mult = mult * mp end
+        end
+    end)
+    pcall(function()
+        local SkillTreeUtil = nil
+        pcall(function() SkillTreeUtil = require(Library:WaitForChild("Utils", 2):WaitForChild("SkillTreeUtil", 2)) end)
+        if SkillTreeFrontend and SkillTreeFrontend.GetPower and SkillTreeUtil and SkillTreeUtil.Power and SkillTreeUtil.Power.LuckMultiplier then
+            local sp = SkillTreeFrontend.GetPower(SkillTreeUtil.Power.LuckMultiplier)
+            if sp and sp > 0 then mult = mult * sp end
+        end
+    end)
+    return math.max(1, mult)
+end
+
+function ProgAPI.FormatLuck(mult: number?): string
+    local m = mult or ProgAPI.GetCurrentEggLuckMultiplier()
+    local pct = m * 100
+    if pct < 1000 then
+        return string.format("%.2f%%", pct)
+    else
+        local formatted = ProgAPI.FormatNumber(pct)
+        return formatted:upper() .. "%"
+    end
+end
+
+function ProgAPI.FormatHatchChance(val: number?): string
+    if not val or val ~= val then return "0%" end
+    if val >= 1 then
+        return string.format("%.1f%%", val)
+    elseif val >= 0.01 then
+        return string.format("%.3f%%", val)
+    elseif val >= 0.0001 then
+        return string.format("%.5f%%", val)
+    else
+        return string.format("%.7f%%", val)
+    end
+end
+
+function ProgAPI.GetEggDropChancesSummary(eggId: string?): string
+    local targetEgg = eggId or ProgAPI.SelectedEgg or "MatrixEgg"
+    local eggData = Directory.Eggs and Directory.Eggs[targetEgg]
+    if not eggData or not eggData.Pets then
+        return "N/A"
+    end
+
+    local rareItems = {}
+    for _, p in ipairs(eggData.Pets) do
+        local petId = p.Value
+        local petDef = Directory.Pets and Directory.Pets[petId]
+        local rarity = (petDef and petDef.Rarity) or "Unknown"
+        local name = (petDef and (petDef.Name or petDef.DisplayName)) or petId
+        local chance = nil
+        pcall(function()
+            if EggsFrontend and EggsFrontend.GetPetChance then
+                chance = EggsFrontend.GetPetChance(targetEgg, petId)
+            end
+        end)
+        if not chance then
+            chance = p.Weight or 0
+        end
+
+        if rarity == "Mythical" or rarity == "Mythic" or rarity == "Secret" or rarity == "Mega" or rarity == "Divine" or rarity == "Exclusive" then
+            table.insert(rareItems, {
+                Name = name,
+                Rarity = rarity,
+                Chance = chance,
+            })
+        end
+    end
+
+    if #rareItems == 0 then
+        return "Common / Standard Egg"
+    end
+
+    table.sort(rareItems, function(a, b)
+        local orderA = (Constants.RarityOrder and Constants.RarityOrder[a.Rarity]) or 0
+        local orderB = (Constants.RarityOrder and Constants.RarityOrder[b.Rarity]) or 0
+        if orderA ~= orderB then
+            return orderA < orderB
+        end
+        return a.Chance > b.Chance
+    end)
+
+    local parts = {}
+    for i = 1, math.min(3, #rareItems) do
+        local item = rareItems[i]
+        local chanceStr = ProgAPI.FormatHatchChance(item.Chance)
+        table.insert(parts, string.format("%s: %s", item.Name, chanceStr))
+    end
+
+    return table.concat(parts, " • ")
+end
+
+function ProgAPI.SendHatchWebhook(eggName: string, pet: any, petDef: any): boolean
+    local url = ProgAPI.WebhookUrl
+    if not url or url == "" then return false end
+    if not (url:find("discord.com/api/webhooks") or url:find("discordapp.com/api/webhooks")) then
+        return false
+    end
+
+    local httpReq = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request)
+    if not httpReq then return false end
+
+    local petName = (petDef and (petDef.Name or petDef.DisplayName)) or pet.PetId or pet.petId or "Unknown Pet"
+    local rarity = (petDef and petDef.Rarity) or (pet.isSecret and "Secret") or "Ultra Rare"
+    local variant = pet.Variant or pet.variant or "Normal"
+    local isShiny = (pet.IsShiny == true or pet.isShiny == true)
+
+    local chanceStr = "N/A"
+    pcall(function()
+        if EggsFrontend and EggsFrontend.GetPetChance then
+            local rawChance = EggsFrontend.GetPetChance(eggName, pet.PetId or pet.petId)
+            if rawChance then
+                chanceStr = ProgAPI.FormatHatchChance(rawChance)
+            end
+        end
+    end)
+
+    local embedColor = 0xF59E0B
+    if rarity == "Secret" then
+        embedColor = 0x9333EA
+    elseif rarity == "Mega" then
+        embedColor = 0xEF4444
+    elseif rarity == "Divine" then
+        embedColor = 0x06B6D4
+    elseif rarity == "Exclusive" then
+        embedColor = 0x3B82F6
+    end
+
+    local payload = {
+        username = "Zelqyn Hub • Clicker Simulator",
+        avatar_url = "https://i.imgur.com/8Q5FqWl.png",
+        embeds = {
+            {
+                title = "🎉 ULTRA RARE PET HATCHED! 🎉",
+                description = string.format("**%s** just hatched a rare **%s** pet!", LocalPlayer.Name, rarity),
+                color = embedColor,
+                fields = {
+                    { name = "👤 Player", value = LocalPlayer.Name, inline = true },
+                    { name = "🐾 Pet", value = petName, inline = true },
+                    { name = "✨ Rarity", value = rarity, inline = true },
+                    { name = "🧬 Variant", value = variant, inline = true },
+                    { name = "⭐ Shiny", value = isShiny and "Yes ⭐" or "No", inline = true },
+                    { name = "🥚 Egg", value = eggName or "Unknown", inline = true },
+                    { name = "🎲 Hatch Chance", value = chanceStr, inline = true },
+                    { name = "📊 Eggs Hatched (Session)", value = ProgAPI.FormatNumber(ProgAPI.SessionStats.Eggs), inline = true },
+                    { name = "⏱️ Session Time", value = ProgAPI.FormatSessionTime(), inline = true },
+                },
+                footer = { text = "Zelqyn Hub • Clicker Simulator Auto Progression" },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            }
+        }
+    }
+
+    local ok, res = pcall(function()
+        return httpReq({
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+    return ok
+end
+
+function ProgAPI.SendTestWebhook(): (boolean, string)
+    local url = ProgAPI.WebhookUrl
+    if not url or url == "" then
+        return false, "Webhook URL is empty! Please enter your Discord Webhook URL first."
+    end
+    if not (url:find("discord.com/api/webhooks") or url:find("discordapp.com/api/webhooks")) then
+        return false, "Invalid URL! Must start with https://discord.com/api/webhooks/..."
+    end
+
+    local httpReq = request or http_request or (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request)
+    if not httpReq then
+        return false, "No HTTP request function available on executor."
+    end
+
+    local payload = {
+        username = "Zelqyn Hub • Clicker Simulator",
+        avatar_url = "https://i.imgur.com/8Q5FqWl.png",
+        embeds = {
+            {
+                title = "🔔 DISCORD WEBHOOK TEST NOTIFICATION",
+                description = "Your Discord Webhook is successfully connected to **Zelqyn Hub**! You will receive notifications when a **Secret, Mega, Divine, or Exclusive** pet is hatched.",
+                color = 0x22C55E,
+                fields = {
+                    { name = "👤 Player", value = LocalPlayer.Name, inline = true },
+                    { name = "🐾 Sample Pet", value = "Neo (Secret)", inline = true },
+                    { name = "✨ Filter Rule", value = "Secret & Above ONLY (Mythics ignored)", inline = false },
+                    { name = "🥚 Sample Egg", value = "Matrix Egg", inline = true },
+                    { name = "⏱️ Session Time", value = ProgAPI.FormatSessionTime(), inline = true },
+                    { name = "📊 Eggs Hatched", value = ProgAPI.FormatNumber(ProgAPI.SessionStats.Eggs), inline = true },
+                },
+                footer = { text = "Zelqyn Hub • Clicker Simulator Auto Progression" },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            }
+        }
+    }
+
+    local ok, res = pcall(function()
+        return httpReq({
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+
+    if ok then
+        return true, "Test webhook sent successfully! Check your Discord channel."
+    else
+        return false, "Failed to send: " .. tostring(res)
+    end
+end
+
+-- Setup background egg hatch event listener
+local function setupHatchTracker()
+    if _G.__ProgAPI_HatchConn then
+        pcall(function() _G.__ProgAPI_HatchConn:Disconnect() end)
+        _G.__ProgAPI_HatchConn = nil
+    end
+
+    local eggChannel = Channels.Egg
+    if not eggChannel then return end
+
+    local ok, sig = pcall(function()
+        return eggChannel.OnClientEvent("HatchedBatch")
+    end)
+    if not ok or not sig then return end
+
+    _G.__ProgAPI_HatchConn = sig:Connect(function(eggName, petList, batchId)
+        if type(petList) ~= "table" then return end
+        local count = #petList
+        ProgAPI.SessionStats.Eggs = ProgAPI.SessionStats.Eggs + count
+        ProgAPI.SelectedEgg = eggName
+
+        for _, pet in ipairs(petList) do
+            local petId = pet.PetId or pet.petId
+            local petDef = Directory.Pets and Directory.Pets[petId]
+            local rarity = (petDef and petDef.Rarity) or "Unknown"
+            local rarityOrder = (Constants.RarityOrder and Constants.RarityOrder[rarity]) or 0
+            local isSecret = pet.isSecret == true or pet.IsSecret == true or rarity == "Secret" or rarity == "Divine" or rarity == "Mega"
+
+            if rarity == "Mythical" or rarity == "Mythic" then
+                ProgAPI.SessionStats.Mythicals = ProgAPI.SessionStats.Mythicals + 1
+            elseif rarity == "Secret" or isSecret then
+                ProgAPI.SessionStats.Secrets = ProgAPI.SessionStats.Secrets + 1
+            end
+            if rarity == "Mega" or pet.isMega == true then
+                ProgAPI.SessionStats.Megas = ProgAPI.SessionStats.Megas + 1
+            end
+
+            -- STRICT RULE: ONLY Secret or above! NEVER send for Mythic / Mythical!
+            local isAboveMythic = (rarityOrder > 5 or isSecret) and (rarity ~= "Mythical" and rarity ~= "Mythic")
+            if isAboveMythic and ProgAPI.WebhookEnabled and ProgAPI.WebhookUrl and ProgAPI.WebhookUrl ~= "" then
+                task.spawn(function()
+                    ProgAPI.SendHatchWebhook(eggName, pet, petDef)
+                end)
+            end
+        end
+    end)
+end
+pcall(setupHatchTracker)
+
 -- Safe no-op to avoid interfering with game native UI modals and tabs
 function ProgAPI.SuppressBlackShade()
     return true
@@ -1143,6 +1453,7 @@ end
 
 function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean?): (boolean, string)
     if not eggName or eggName == "" then return false, "No egg specified" end
+    ProgAPI.SelectedEgg = eggName
 
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
@@ -2924,10 +3235,60 @@ end
 local blackScreenGui = nil
 local savedGuiStates = {}
 local blackScreenInputConn = nil
+local blackScreenRefreshTask = nil
+local blackScreenRowLabels = {}
 local originalTransparencies = {}
 local isMapsRemoved = false
 
 ProgAPI.OnBlackScreenToggled = nil
+
+local function updateBlackScreenTelemetry()
+    if not blackScreenGui or not blackScreenGui.Enabled then return end
+    local pData = ProgAPI.GetPlayerData()
+    local curPets = 0
+    local maxPets = 0
+    pcall(function()
+        local Pets = require(Client:WaitForChild("Pets", 2))
+        if Pets and Pets.GetInventoryCount then
+            curPets = Pets.GetInventoryCount()
+        end
+        if Pets and Pets.GetEffectiveMaxInventoryPets then
+            maxPets = Pets.GetEffectiveMaxInventoryPets()
+        end
+    end)
+
+    local eggName = ProgAPI.SelectedEgg or "MatrixEgg"
+    local eggData = Directory.Eggs and Directory.Eggs[eggName]
+    local eggDispName = (eggData and (eggData.Name or eggData.DisplayName)) or eggName
+    local eggCost = 0
+    local eggCurr = (eggData and eggData.Info and eggData.Info.Currency) or "Clicks"
+    pcall(function()
+        if EggsFrontend and EggsFrontend.GetEggCost then
+            eggCost = EggsFrontend.GetEggCost(eggName)
+        end
+    end)
+
+    local luckMult = ProgAPI.GetCurrentEggLuckMultiplier()
+
+    if blackScreenRowLabels.Clicks then blackScreenRowLabels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
+    if blackScreenRowLabels.Rebirths then blackScreenRowLabels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
+    if blackScreenRowLabels.Gems then blackScreenRowLabels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
+    if blackScreenRowLabels.World then blackScreenRowLabels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
+    if blackScreenRowLabels.Island then blackScreenRowLabels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
+    if blackScreenRowLabels.PetInv then blackScreenRowLabels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
+    if blackScreenRowLabels.SelectedEgg then
+        blackScreenRowLabels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
+    end
+    if blackScreenRowLabels.EggLuck then blackScreenRowLabels.EggLuck.Text = ProgAPI.FormatLuck(luckMult) end
+    if blackScreenRowLabels.Activity then blackScreenRowLabels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
+    if blackScreenRowLabels.Chances then blackScreenRowLabels.Chances.Text = ProgAPI.GetEggDropChancesSummary(eggName) end
+
+    if blackScreenRowLabels.EggsHatched then blackScreenRowLabels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
+    if blackScreenRowLabels.Mythicals then blackScreenRowLabels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
+    if blackScreenRowLabels.Secrets then blackScreenRowLabels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
+    if blackScreenRowLabels.Megas then blackScreenRowLabels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
+    if blackScreenRowLabels.SessionTime then blackScreenRowLabels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+end
 
 function ProgAPI.SetBlackScreen(enabled: boolean)
     pcall(function()
@@ -3005,53 +3366,116 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             bg.Parent = blackScreenGui
 
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(0, 520, 0, 220)
+            card.Size = UDim2.new(0, 460, 0, 560)
             card.AnchorPoint = Vector2.new(0.5, 0.5)
             card.Position = UDim2.new(0.5, 0, 0.5, 0)
-            card.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
+            card.BackgroundColor3 = Color3.fromRGB(11, 14, 21)
             card.BorderSizePixel = 0
             card.Parent = bg
 
             local cardCorner = Instance.new("UICorner")
-            cardCorner.CornerRadius = UDim.new(0, 16)
+            cardCorner.CornerRadius = UDim.new(0, 14)
             cardCorner.Parent = card
 
             local cardStroke = Instance.new("UIStroke")
-            cardStroke.Color = Color3.fromRGB(168, 85, 247)
-            cardStroke.Thickness = 2
-            cardStroke.Transparency = 0.2
+            cardStroke.Color = Color3.fromRGB(37, 99, 235)
+            cardStroke.Thickness = 1.5
+            cardStroke.Transparency = 0
             cardStroke.Parent = card
 
             local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, 0, 0, 50)
-            title.Position = UDim2.new(0, 0, 0, 22)
-            title.BackgroundTransparency = 1
-            title.Text = "Premium Script !"
-            title.TextColor3 = Color3.fromRGB(255, 255, 255)
-            title.TextSize = 36
+            title.Text = "ZELQYN HUB • CLICKER SIMULATOR"
             title.Font = Enum.Font.GothamBold
+            title.TextSize = 17
+            title.TextColor3 = Color3.fromRGB(255, 255, 255)
+            title.Position = UDim2.new(0, 22, 0, 18)
+            title.Size = UDim2.new(1, -44, 0, 22)
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.BackgroundTransparency = 1
             title.Parent = card
 
             local sub = Instance.new("TextLabel")
-            sub.Size = UDim2.new(1, -40, 0, 48)
-            sub.Position = UDim2.new(0, 20, 0, 76)
+            sub.Text = "3D rendering disabled • Session statistics"
+            sub.Font = Enum.Font.Gotham
+            sub.TextSize = 12
+            sub.TextColor3 = Color3.fromRGB(115, 135, 165)
+            sub.Position = UDim2.new(0, 22, 0, 42)
+            sub.Size = UDim2.new(1, -44, 0, 16)
+            sub.TextXAlignment = Enum.TextXAlignment.Left
             sub.BackgroundTransparency = 1
-            sub.Text = "⚡ <b>3D Rendering Disabled • CPU & GPU Saver Active</b> ⚡\nMemory and processor load minimized for 24/7 background AFK farming."
-            sub.RichText = true
-            sub.TextColor3 = Color3.fromRGB(192, 132, 252)
-            sub.TextSize = 14
-            sub.Font = Enum.Font.GothamMedium
-            sub.TextWrapped = true
             sub.Parent = card
 
+            local divider = Instance.new("Frame")
+            divider.Position = UDim2.new(0, 22, 0, 66)
+            divider.Size = UDim2.new(1, -44, 0, 1)
+            divider.BackgroundColor3 = Color3.fromRGB(25, 33, 48)
+            divider.BorderSizePixel = 0
+            divider.Parent = card
+
+            local container = Instance.new("Frame")
+            container.Position = UDim2.new(0, 22, 0, 76)
+            container.Size = UDim2.new(1, -44, 0, 380)
+            container.BackgroundTransparency = 1
+            container.Parent = card
+
+            local function addRow(lblText, defaultVal, yPos)
+                local rowFrame = Instance.new("Frame")
+                rowFrame.Size = UDim2.new(1, 0, 0, 20)
+                rowFrame.Position = UDim2.new(0, 0, 0, yPos)
+                rowFrame.BackgroundTransparency = 1
+                rowFrame.Parent = container
+
+                local lbl = Instance.new("TextLabel")
+                lbl.Text = lblText
+                lbl.Font = Enum.Font.RobotoMono
+                lbl.TextSize = 12.5
+                lbl.TextColor3 = Color3.fromRGB(235, 240, 250)
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.Size = UDim2.new(0, 175, 1, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.Parent = rowFrame
+
+                local val = Instance.new("TextLabel")
+                val.Text = defaultVal
+                val.Font = Enum.Font.RobotoMono
+                val.TextSize = 12.5
+                val.TextColor3 = Color3.fromRGB(215, 220, 235)
+                val.TextXAlignment = Enum.TextXAlignment.Left
+                val.Position = UDim2.new(0, 178, 0, 0)
+                val.Size = UDim2.new(1, -178, 1, 0)
+                val.TextTruncate = Enum.TextTruncate.AtEnd
+                val.BackgroundTransparency = 1
+                val.Parent = rowFrame
+
+                return val
+            end
+
+            blackScreenRowLabels = {}
+            blackScreenRowLabels.Clicks = addRow("Clicks", "0", 0)
+            blackScreenRowLabels.Rebirths = addRow("Rebirths", "0", 20)
+            blackScreenRowLabels.Gems = addRow("Gems", "0", 40)
+            blackScreenRowLabels.World = addRow("World", "Overworld", 60)
+            blackScreenRowLabels.Island = addRow("Island", "Spawn", 80)
+            blackScreenRowLabels.PetInv = addRow("Pet Inventory", "0 / 0", 100)
+            blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", "Matrix Egg", 120)
+            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", "100%", 140)
+
+            blackScreenRowLabels.Activity = addRow("Current Activity", "Auto Farm Active", 168)
+            blackScreenRowLabels.Chances = addRow("Top Drop Chances", "Loading...", 188)
+
+            blackScreenRowLabels.EggsHatched = addRow("Eggs Hatched (Session)", "0", 216)
+            blackScreenRowLabels.Mythicals = addRow("Mythicals (Session)", "0", 236)
+            blackScreenRowLabels.Secrets = addRow("Secrets (Session)", "0", 256)
+            blackScreenRowLabels.Megas = addRow("Megas (Session)", "0", 276)
+            blackScreenRowLabels.SessionTime = addRow("Session Time", "00:00:00", 296)
+
             local restoreBtn = Instance.new("TextButton")
-            restoreBtn.Name = "RestoreBtn"
-            restoreBtn.Size = UDim2.new(0, 260, 0, 42)
-            restoreBtn.AnchorPoint = Vector2.new(0.5, 0)
-            restoreBtn.Position = UDim2.new(0.5, 0, 0, 136)
-            restoreBtn.BackgroundColor3 = Color3.fromRGB(126, 58, 242)
+            restoreBtn.Name = "DisableBtn"
+            restoreBtn.Position = UDim2.new(0, 22, 0, 468)
+            restoreBtn.Size = UDim2.new(1, -44, 0, 44)
+            restoreBtn.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
             restoreBtn.BorderSizePixel = 0
-            restoreBtn.Text = "↺  Restore UI / Resume 3D"
+            restoreBtn.Text = "Disable Black Screen"
             restoreBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             restoreBtn.TextSize = 15
             restoreBtn.Font = Enum.Font.GothamBold
@@ -3059,7 +3483,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             restoreBtn.Parent = card
 
             local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 8)
+            btnCorner.CornerRadius = UDim.new(0, 10)
             btnCorner.Parent = restoreBtn
 
             restoreBtn.MouseButton1Click:Connect(function()
@@ -3067,19 +3491,33 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             end)
 
             local hint = Instance.new("TextLabel")
-            hint.Size = UDim2.new(1, 0, 0, 20)
-            hint.Position = UDim2.new(0, 0, 0, 186)
+            hint.Position = UDim2.new(0, 22, 0, 520)
+            hint.Size = UDim2.new(1, -44, 0, 18)
             hint.BackgroundTransparency = 1
             hint.Text = "Click button above or press RightControl to restore"
-            hint.TextColor3 = Color3.fromRGB(140, 130, 160)
-            hint.TextSize = 12
+            hint.TextColor3 = Color3.fromRGB(115, 130, 155)
+            hint.TextSize = 11
             hint.Font = Enum.Font.Gotham
+            hint.TextXAlignment = Enum.TextXAlignment.Center
             hint.Parent = card
 
             blackScreenGui.Parent = targetParent
         end
 
         blackScreenGui.Enabled = true
+
+        -- Start periodic telemetry refresh
+        if blackScreenRefreshTask then
+            pcall(function() task.cancel(blackScreenRefreshTask) end)
+            blackScreenRefreshTask = nil
+        end
+        blackScreenRefreshTask = task.spawn(function()
+            while blackScreenGui and blackScreenGui.Enabled and blackScreenGui.Parent do
+                pcall(updateBlackScreenTelemetry)
+                task.wait(0.8)
+            end
+        end)
+        pcall(updateBlackScreenTelemetry)
 
         if not blackScreenInputConn then
             local UserInputService = game:GetService("UserInputService")
@@ -3090,6 +3528,11 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             end)
         end
     else
+        if blackScreenRefreshTask then
+            pcall(function() task.cancel(blackScreenRefreshTask) end)
+            blackScreenRefreshTask = nil
+        end
+
         if blackScreenInputConn then
             blackScreenInputConn:Disconnect()
             blackScreenInputConn = nil
