@@ -478,6 +478,25 @@ task.spawn(function()
     pcall(AutoProgAPI.RedeemAllCodes)
     pcall(AutoProgAPI.ClaimAllFreeGifts)
     pcall(AutoProgAPI.ClaimDaily)
+    pcall(AutoProgAPI.EquipBest)
+end)
+
+-- Rejoin & Startup Teleport Guarantee: If in Phase 2 / Coins Skill Tree, immediately teleport to Heaven breakables arena!
+task.spawn(function()
+    task.wait(1.8)
+    pcall(function()
+        local pData = AutoProgAPI.GetPlayerData()
+        local lockedIsland = AutoProgAPI.GetNextLockedIsland()
+        if lockedIsland == nil and State.AutoSkillTree then
+            local stProg = AutoProgAPI.GetSkillTreeProgress()
+            if not stProg.CoinsComplete then
+                AutoProgAPI.TeleportToWorld("Overworld")
+                AutoProgAPI.TeleportToIsland("Heaven")
+                task.wait(0.4)
+                AutoProgAPI.TeleportToBreakableZone("Heaven")
+            end
+        end
+    end)
 end)
 
 --==============================================================================
@@ -626,7 +645,7 @@ table.insert(threads, task.spawn(function()
     local lastFurthestTpTick = 0
 
     while isRunning do
-        task.wait(0.1)
+        task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
         pcall(function()
             local now = tick()
@@ -724,7 +743,7 @@ table.insert(threads, task.spawn(function()
         else
             currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
 
-            -- 1. Periodic Furthest Map Teleport Every 30 Seconds
+            -- 1. Periodic Map Teleport Check Every 30 Seconds
             if (now - lastFurthestTpTick > 30) then
                 lastFurthestTpTick = now
                 local stProg = AutoProgAPI.GetSkillTreeProgress()
@@ -733,6 +752,17 @@ table.insert(threads, task.spawn(function()
                     local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                     if pData.CurrentIsland ~= furthest then
                         AutoProgAPI.TeleportToIsland(furthest)
+                    end
+                elseif State.AutoSkillTree then
+                    -- If Coins skill tree is NOT done, enforce that player is in Heaven breakables arena!
+                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local hPos = AutoProgAPI.GetBreakableZonePosition("Heaven")
+                    if hrp and hPos and (hrp.Position - hPos).Magnitude > 220 then
+                        AutoProgAPI.TeleportToWorld("Overworld")
+                        task.wait(0.3)
+                        AutoProgAPI.TeleportToIsland("Heaven")
+                        task.wait(0.3)
+                        AutoProgAPI.TeleportToBreakableZone("Heaven")
                     end
                 end
             end
