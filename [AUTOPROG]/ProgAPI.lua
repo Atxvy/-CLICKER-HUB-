@@ -3734,7 +3734,8 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         if blackScreenGui then
-            blackScreenGui.Enabled = false
+            pcall(function() blackScreenGui:Destroy() end)
+            blackScreenGui = nil
         end
 
         -- Restore all previously hidden ScreenGuis
