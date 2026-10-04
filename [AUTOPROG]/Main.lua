@@ -412,8 +412,8 @@ Phase3Tab:AddToggle("AutoMatrixEggToggle_P3", {
 })
 
 Phase3Tab:AddToggle("AutoMythicFilterToggle_P3", {
-    Title = "Mythic Only Filter (Delete Non-Mythic Pets)",
-    Description = "Keeps ONLY Mythic / Secret pets, deleting all non-mythics and weak unequipped pets",
+    Title = "Keep Mythic & Above (Delete Non-Mythic)",
+    Description = "Strictly keeps Mythic, Secret, Mega, Divine, and Exclusive pets; deletes Common, Rare, Epic, Legendary",
     Default = State.AutoMythicFilter,
     Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
 })
