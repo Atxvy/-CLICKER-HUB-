@@ -741,7 +741,9 @@ table.insert(threads, task.spawn(function()
             if State.AutoMaxRebirth then
                 local maxInfo = AutoProgAPI.GetMaxRebirthInfo()
                 if maxInfo.CanAffordMax then
-                    currentActivity = string.format("[Endgame] Max Rebirth (+%s)", AutoProgAPI.FormatNumber(maxInfo.BestAffordableAmount))
+                    if not State.AutoSkillTree then
+                        currentActivity = string.format("[Endgame] Max Rebirth (+%s)", AutoProgAPI.FormatNumber(maxInfo.BestAffordableAmount))
+                    end
                     AutoProgAPI.RebirthMaxTarget()
                 end
             end
