@@ -1514,9 +1514,19 @@ function ProgAPI.GetMaxEggOpenAmount(eggName: string?): number
     local stats = Stats.Local(true) or {}
     local curInv = 0
     for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
-    local maxInv = stats.MaxInventoryPets or 200
-    local freeSlots = math.max(1, maxInv - curInv)
-    maxCount = math.min(maxCount, freeSlots)
+    local maxInv = 200
+    pcall(function()
+        local Pets = require(Client:WaitForChild("Pets", 2))
+        if Pets and Pets.GetEffectiveMaxInventoryPets then
+            maxInv = Pets.GetEffectiveMaxInventoryPets()
+        elseif stats.MaxInventoryPets then
+            maxInv = stats.MaxInventoryPets
+        end
+    end)
+    local freeSlots = math.max(0, maxInv - curInv)
+    if freeSlots > 0 then
+        maxCount = math.min(maxCount, freeSlots)
+    end
 
     -- Check affordability if eggName is known
     if eggName then
@@ -1581,45 +1591,73 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
-    if not skipTeleport then
-        local needsTp = true
-        if hrp and targetPart then
-            local dist = (hrp.Position - targetPart.Position).Magnitude
-            if dist <= 18 then
-                needsTp = false
-            end
+    if hrp and targetPart then
+        local dist = (hrp.Position - targetPart.Position).Magnitude
+        if dist > 16 then
+            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+            task.wait(0.08)
         end
-        if needsTp then
-            ProgAPI.TeleportToEgg(eggName)
-            task.wait(0.25)
-        end
+    elseif not skipTeleport then
+        ProgAPI.TeleportToEgg(eggName)
+        task.wait(0.25)
     end
 
-    local stats = Stats.Local(true) or {}
+    -- Proactive Inventory Check & Cleaning BEFORE invoking the server!
+    local isP3 = ProgAPI.IsPhase3 and ProgAPI.IsPhase3()
     local curInv = 0
     for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
-    local maxInv = stats.MaxInventoryPets or 150
-    if curInv >= maxInv - 5 then
-        ProgAPI.CleanWeakPets(true)
-        task.wait(0.1)
+    local maxInv = 200
+    pcall(function()
+        local Pets = require(Client:WaitForChild("Pets", 2))
+        if Pets and Pets.GetEffectiveMaxInventoryPets then
+            maxInv = Pets.GetEffectiveMaxInventoryPets()
+        elseif stats.MaxInventoryPets then
+            maxInv = stats.MaxInventoryPets
+        end
+    end)
+
+    if curInv + amount >= maxInv - 2 then
+        if isP3 then
+            pcall(ProgAPI.CleanNonMythicPets)
+            pcall(ProgAPI.CraftGoldenPets)
+        else
+            pcall(ProgAPI.CraftGoldenPets)
+            local cleaned = ProgAPI.CleanWeakPets(true)
+            if cleaned == 0 then
+                -- Inventory still near capacity; relax crafting candidate protection to avoid deadlock
+                ProgAPI.CleanWeakPets(false)
+            end
+        end
+        task.wait(0.08)
     end
 
     local guid = HttpService:GenerateGUID(false)
-    local ok, res = pcall(function()
+    local ok, res, reason = pcall(function()
         return Channels.Egg:InvokeServer("Open", eggName, amount, guid)
     end)
-
-    if not ok or res == false then
-        pcall(function()
-            ok, res = pcall(function() return Channels.Egg:InvokeServer("Open", eggName, amount) end)
-        end)
-    end
 
     if ok and (res == true or type(res) == "table") then
         return true, "Successfully opened " .. eggName
     end
 
-    return false, "Failed to open egg: " .. tostring(res)
+    -- If server rejected due to full inventory, clean immediately
+    if tostring(reason):lower():find("full") or tostring(res):lower():find("full") then
+        if isP3 then
+            pcall(ProgAPI.CleanNonMythicPets)
+        else
+            pcall(ProgAPI.CraftGoldenPets)
+            pcall(function() ProgAPI.CleanWeakPets(false) end)
+        end
+    end
+
+    -- If server rejected due to distance, re-snap character
+    if tostring(reason):lower():find("far") or tostring(res):lower():find("far") then
+        if hrp and targetPart then
+            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+        end
+    end
+
+    return false, "Failed to open egg: " .. tostring(reason or res)
 end
 
 function ProgAPI.EquipBest()
@@ -3337,6 +3375,9 @@ local blackScreenGui = nil
 local savedGuiStates = {}
 local blackScreenInputConn = nil
 local blackScreenRefreshTask = nil
+local blackScreenChildAddedConn = nil
+local blackScreenPropConns = {}
+local blackScreenTradeConn = nil
 local blackScreenRowLabels = {}
 local originalTransparencies = {}
 local isMapsRemoved = false
@@ -3429,16 +3470,62 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
     if not targetParent then targetParent = pg end
 
     if enabled then
-        -- Hide all ScreenGuis in PlayerGui to eliminate 2D UI draw calls and lingering labels
+        -- Suppress and listen for all ScreenGuis in PlayerGui
+        local function suppressGui(ch)
+            if not ch or not ch:IsA("ScreenGui") then return end
+            if ch == blackScreenGui or ch.Name == "ClickerHub_BlackScreen" then return end
+            if savedGuiStates[ch] == nil then
+                savedGuiStates[ch] = ch.Enabled
+            end
+            ch.Enabled = false
+        end
+
         if pg then
             for _, ch in ipairs(pg:GetChildren()) do
-                if ch:IsA("ScreenGui") and ch ~= blackScreenGui then
-                    if savedGuiStates[ch] == nil then
-                        savedGuiStates[ch] = ch.Enabled
-                    end
-                    ch.Enabled = false
+                suppressGui(ch)
+                if ch:IsA("ScreenGui") and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" and not blackScreenPropConns[ch] then
+                    blackScreenPropConns[ch] = ch:GetPropertyChangedSignal("Enabled"):Connect(function()
+                        if blackScreenGui and blackScreenGui.Enabled and ch.Enabled and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" then
+                            ch.Enabled = false
+                        end
+                    end)
                 end
             end
+
+            if not blackScreenChildAddedConn then
+                blackScreenChildAddedConn = pg.ChildAdded:Connect(function(ch)
+                    if ch:IsA("ScreenGui") and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" then
+                        suppressGui(ch)
+                        if not blackScreenPropConns[ch] then
+                            blackScreenPropConns[ch] = ch:GetPropertyChangedSignal("Enabled"):Connect(function()
+                                if blackScreenGui and blackScreenGui.Enabled and ch.Enabled and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" then
+                                    ch.Enabled = false
+                                end
+                            end)
+                        end
+                    end
+                end)
+            end
+        end
+
+        -- Strictly auto-decline incoming trade requests during Black Screen
+        if not blackScreenTradeConn then
+            pcall(function()
+                local TradeFrontend = require(Client:WaitForChild("TradeFrontend", 2))
+                if TradeFrontend and TradeFrontend.TradeRequestReceived then
+                    blackScreenTradeConn = TradeFrontend.TradeRequestReceived:Connect(function(otherPlayer)
+                        pcall(function()
+                            TradeFrontend.TradeRequestDecision(otherPlayer, false)
+                        end)
+                        pcall(function()
+                            local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
+                            if Trading then
+                                Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
+                            end
+                        end)
+                    end)
+                end
+            end)
         end
 
         if not blackScreenGui or not blackScreenGui.Parent then
@@ -3720,15 +3807,52 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
 
         blackScreenGui.Enabled = true
 
-        -- Start periodic telemetry refresh
+        -- Start periodic telemetry refresh & continuous anti-disruption watchdog
         if blackScreenRefreshTask then
             pcall(function() task.cancel(blackScreenRefreshTask) end)
             blackScreenRefreshTask = nil
         end
         blackScreenRefreshTask = task.spawn(function()
             while blackScreenGui and blackScreenGui.Enabled and blackScreenGui.Parent do
+                -- 1. Continuously enforce 3D rendering disabled
+                pcall(function()
+                    local RunService = game:GetService("RunService")
+                    if RunService and RunService.Set3dRenderingEnabled then
+                        RunService:Set3dRenderingEnabled(false)
+                    end
+                end)
+
+                -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered
+                if blackScreenGui then
+                    blackScreenGui.Enabled = true
+                    blackScreenGui.DisplayOrder = 2147483647
+                    if targetParent and blackScreenGui.Parent ~= targetParent then
+                        blackScreenGui.Parent = targetParent
+                    end
+                end
+
+                -- 3. Continuously suppress all other game ScreenGuis and popups
+                if pg then
+                    for _, ch in ipairs(pg:GetChildren()) do
+                        if ch:IsA("ScreenGui") and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" and ch.Enabled then
+                            if savedGuiStates[ch] == nil then
+                                savedGuiStates[ch] = ch.Enabled
+                            end
+                            ch.Enabled = false
+                        end
+                    end
+                    pcall(function()
+                        local trading = pg:FindFirstChild("Trading")
+                        if trading and trading.Enabled then trading.Enabled = false end
+                        local msg = pg:FindFirstChild("Message")
+                        if msg and msg.Enabled then msg.Enabled = false end
+                        local prompt = pg:FindFirstChild("InputPrompt")
+                        if prompt and prompt.Enabled then prompt.Enabled = false end
+                    end)
+                end
+
                 pcall(updateBlackScreenTelemetry)
-                task.wait(0.8)
+                task.wait(0.5)
             end
         end)
         pcall(updateBlackScreenTelemetry)
@@ -3752,10 +3876,32 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             blackScreenInputConn = nil
         end
 
+        if blackScreenChildAddedConn then
+            blackScreenChildAddedConn:Disconnect()
+            blackScreenChildAddedConn = nil
+        end
+
+        if blackScreenTradeConn then
+            blackScreenTradeConn:Disconnect()
+            blackScreenTradeConn = nil
+        end
+
+        for ch, conn in pairs(blackScreenPropConns) do
+            pcall(function() conn:Disconnect() end)
+        end
+        table.clear(blackScreenPropConns)
+
         if blackScreenGui then
             pcall(function() blackScreenGui:Destroy() end)
             blackScreenGui = nil
         end
+
+        pcall(function()
+            local RunService = game:GetService("RunService")
+            if RunService and RunService.Set3dRenderingEnabled then
+                RunService:Set3dRenderingEnabled(true)
+            end
+        end)
 
         -- Restore all previously hidden ScreenGuis
         if pg then
@@ -3835,6 +3981,7 @@ function ProgAPI.SetDisableInGameSettings(enabled: boolean)
         HidePetsOwn = enabled,
         TransparentPets = enabled,
         DisableServerMessages = enabled,
+        TradeRequests = not enabled,
     }
 
     for settingName, val in pairs(targetSettings) do
@@ -3873,5 +4020,23 @@ end
 
 -- Automatically disable egg animations upon initialization
 pcall(ProgAPI.DisableEggAnimation)
+
+-- Automatically auto-decline incoming trade requests to prevent interference
+pcall(function()
+    local TradeFrontend = require(Client:WaitForChild("TradeFrontend", 2))
+    if TradeFrontend and TradeFrontend.TradeRequestReceived then
+        TradeFrontend.TradeRequestReceived:Connect(function(otherPlayer)
+            pcall(function()
+                TradeFrontend.TradeRequestDecision(otherPlayer, false)
+            end)
+            pcall(function()
+                local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
+                if Trading then
+                    Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
+                end
+            end)
+        end)
+    end
+end)
 
 return ProgAPI
