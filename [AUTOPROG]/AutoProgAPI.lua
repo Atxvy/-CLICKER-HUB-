@@ -1071,9 +1071,10 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
         if m and m:GetAttribute("BreakableUID") then
             local z = tostring(m:GetAttribute("BreakableZone") or "")
             local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
+            local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
             local hp = m:GetAttribute("BreakableHP") or 0
-            if hp > 0 then
-                if z:find(islandName) or (islandName == "Heaven" and (bName:find("heavengiant") or bName:find("giantchest") or z:find("HugeHeavenChest"))) then
+            if hp > 0 and (not isBoss) then
+                if z:find(islandName) or z == "" then
                     count = count + 1
                 end
             end
@@ -1083,11 +1084,9 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
 end
 
 -- Teleports character directly to breakable & executes simultaneous Player Click + Pet Strikes
--- Actively targets Heaven Boss Chest (HeavenGiantChest) when on Heaven!
+-- Targets standard coins & tech breakables (skipping high-HP boss chests)
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
-    if ignoreBossChest == nil then
-        ignoreBossChest = (targetIsland ~= "Heaven" and ignoreBossChest ~= false)
-    end
+    if ignoreBossChest == nil then ignoreBossChest = true end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false, "No character" end
@@ -1112,41 +1111,20 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
     local bestDist = math.huge
 
     if breakablesFolder then
-        -- 1. Scan for closest active breakable in zone (actively including Heaven Boss Chest)
         for _, f in ipairs(breakablesFolder:GetChildren()) do
             local m = f:FindFirstChildWhichIsA("Model") or f
             if m and m:GetAttribute("BreakableUID") then
                 local bZone = tostring(m:GetAttribute("BreakableZone") or "")
                 local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
                 local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-                local isHeavenBoss = (targetIsland == "Heaven" and (bName:find("heavengiant") or bName:find("giantchest") or bZone:find("HugeHeavenChest")))
-                local allowTarget = (not isBoss) or (not ignoreBossChest) or isHeavenBoss
 
-                if (bZone == "" or bZone:find(targetIsland) or isHeavenBoss) and allowTarget then
+                if (not isBoss or not ignoreBossChest) and (bZone == "" or bZone:find(targetIsland)) then
                     local hp = m:GetAttribute("BreakableHP") or 1
                     if hp > 0 then
                         local dist = (m:GetPivot().Position - hrp.Position).Magnitude
                         if dist < bestDist then
                             bestDist = dist
                             targetModel = m
-                        end
-                    end
-                end
-            end
-        end
-
-        -- 2. Fallback: If no normal target found on Heaven, lock onto HeavenGiantChest
-        if not targetModel and targetIsland == "Heaven" then
-            for _, f in ipairs(breakablesFolder:GetChildren()) do
-                local m = f:FindFirstChildWhichIsA("Model") or f
-                if m and m:GetAttribute("BreakableUID") then
-                    local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-                    local bZone = tostring(m:GetAttribute("BreakableZone") or "")
-                    if bName:find("heavengiant") or bName:find("giantchest") or bZone:find("HugeHeavenChest") then
-                        local hp = m:GetAttribute("BreakableHP") or 1
-                        if hp > 0 then
-                            targetModel = m
-                            break
                         end
                     end
                 end
@@ -1207,7 +1185,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     -- Continuously attempt to buy affordable skill tree perks
     pcall(function() ProgAPI.BuyAffordableSkillTree(not stProg.CoinsComplete) end)
 
-    -- 1. Coins Skill Tree NOT done: Farm Heaven (including Heaven Boss Chest) and Volcano!
+    -- 1. Coins Skill Tree NOT done: Farm Heaven and Volcano breakables!
     if not stProg.CoinsComplete then
         local stats = Stats.Local(true) or {}
         local curIsland = stats.CurrentIsland or "Heaven"
@@ -1227,7 +1205,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
             return "Switched Coins Zone", activeCoinsIsland
         end
 
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, false)
+        local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, true)
         pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
         return "Attacking " .. tostring(targetName or "Breakables"), activeCoinsIsland
 
@@ -1242,7 +1220,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end
 
         local techTarget = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, false)
+        local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, true)
         pcall(function() ProgAPI.BuyAffordableSkillTree(false) end)
         return "Attacking " .. tostring(targetName or "Tech Breakables"), techTarget
     end
