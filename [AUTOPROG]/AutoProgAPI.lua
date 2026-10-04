@@ -1256,7 +1256,7 @@ function ProgAPI.StrikeBreakable(targetModel: Model): boolean
     return true
 end
 
--- Teleports directly next to nearest breakable with zero delay & rapidly destroys it
+-- Destroys everything near the player in the breakables arena simultaneously with zero delay
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
     if ignoreBossChest == nil then ignoreBossChest = true end
     local char = LocalPlayer.Character or (LocalPlayer.CharacterAdded and LocalPlayer.CharacterAdded:Wait())
@@ -1265,7 +1265,7 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
 
     local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
 
-    -- Only teleport across worlds/islands if far away (> 220 studs)
+    -- If player is far outside the zone arena (> 220 studs), teleport to arena
     if zonePos and (hrp.Position - zonePos).Magnitude > 220 then
         ProgAPI.TeleportToIsland(targetIsland)
         task.wait(0.3)
@@ -1277,53 +1277,97 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
         pcall(function() BreakablesFrontend.EnterZone(targetIsland .. "/1") end)
     end
 
-    -- 1. Find whatever breakable is closest to the player
-    local targetModel, targetDist = ProgAPI.GetNearestBreakable(targetIsland, 180, ignoreBossChest)
-    if not targetModel then
-        if zonePos and (hrp.Position - zonePos).Magnitude > 40 then
-            ProgAPI.TeleportToBreakableZone(targetIsland)
+    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+    if not bf then return false, "No breakables folder" end
+
+    -- 1. Scan for ALL breakables near the player (within 50 studs)
+    local nearby = {}
+    local anyInArena = {}
+    for _, child in ipairs(bf:GetChildren()) do
+        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
+        if m and m:IsA("Model") then
+            local uid = m:GetAttribute("BreakableUID")
+            local hp = m:GetAttribute("BreakableHP") or 0
+            local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
+            local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
+            if uid and hp > 0 and (not isBoss or not ignoreBossChest) then
+                local ok, pivot = pcall(function() return m:GetPivot() end)
+                if ok and pivot then
+                    local mPos = pivot.Position
+                    local distToPlayer = (mPos - hrp.Position).Magnitude
+                    local distToZone = zonePos and (mPos - zonePos).Magnitude or distToPlayer
+
+                    if distToZone < 160 then
+                        table.insert(anyInArena, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
+                        if distToPlayer <= 50 then
+                            table.insert(nearby, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
+                        end
+                    end
+                end
+            end
         end
-        return false, "Waiting for breakables in " .. targetIsland
     end
 
-    -- 2. Snap instantly right to this breakable (0ms delay!)
-    ProgAPI.SnapToBreakable(targetModel)
-    if BreakablesFrontend then
-        pcall(function()
-            BreakablesFrontend.SetExternalTarget(targetModel)
-            BreakablesFrontend.ReportClick(targetModel)
-        end)
-    end
-
-    local displayName = targetModel:GetAttribute("BreakableId") or targetModel.Name
-
-    -- 3. Strike loop until destroyed or timeout
-    local tStart = os.clock()
-    while os.clock() - tStart < 0.25 do
-        if not targetModel.Parent or (targetModel:GetAttribute("BreakableHP") or 0) <= 0 then
-            break
+    -- 2. If nothing is within 50 studs, but some exist in the arena: teleport right to the closest one!
+    if #nearby == 0 and #anyInArena > 0 then
+        table.sort(anyInArena, function(a, b) return a.dist < b.dist end)
+        local closest = anyInArena[1]
+        hrp.CFrame = CFrame.new(closest.pos + Vector3.new(0, 2.5, 0))
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        table.insert(nearby, closest)
+    elseif #nearby == 0 and #anyInArena == 0 then
+        -- No breakables in arena right now: stand on the arena pad waiting for respawn wave
+        if zonePos and (hrp.Position - zonePos).Magnitude > 30 then
+            hrp.CFrame = CFrame.new(zonePos + Vector3.new(0, 2.5, 0))
         end
-        ProgAPI.StrikeBreakable(targetModel)
-        task.wait(0.02)
+        return false, "Waiting for breakables respawn"
     end
 
-    -- 4. ZERO-DELAY CHAINING: If target was destroyed, immediately find and snap to the next nearest breakable
-    if not targetModel.Parent or (targetModel:GetAttribute("BreakableHP") or 0) <= 0 then
-        local nextTarget = ProgAPI.GetNearestBreakable(targetIsland, 180, ignoreBossChest)
-        if nextTarget then
-            ProgAPI.SnapToBreakable(nextTarget)
-            if BreakablesFrontend then
-                pcall(function()
-                    BreakablesFrontend.SetExternalTarget(nextTarget)
-                    BreakablesFrontend.ReportClick(nextTarget)
+    -- 3. DESTROY EVERYTHING NEAR HIM SIMULTANEOUSLY WITH ZERO DELAY!
+    table.sort(nearby, function(a, b) return a.dist < b.dist end)
+    local primaryTarget = nearby[1]
+
+    -- Face the closest breakable
+    hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(primaryTarget.pos.X, hrp.Position.Y, primaryTarget.pos.Z))
+
+    local stats = Stats.Local() or {}
+    local equipped = stats.EquippedPets or {}
+    if next(equipped) == nil then
+        pcall(ProgAPI.EquipBest)
+        stats = Stats.Local() or {}
+        equipped = stats.EquippedPets or {}
+    end
+
+    -- Strike ALL nearby breakables in parallel!
+    for _, item in ipairs(nearby) do
+        if Channels.Breakables then
+            task.spawn(function()
+                pcall(function() Channels.Breakables:InvokeServer("Click", item.uid) end)
+            end)
+            for guid in pairs(equipped) do
+                task.spawn(function()
+                    pcall(function() Channels.Breakables:InvokeServer("Hit", item.uid, guid) end)
                 end)
             end
-            ProgAPI.StrikeBreakable(nextTarget)
-            displayName = nextTarget:GetAttribute("BreakableId") or nextTarget.Name
+        end
+        if BreakablesFrontend then
+            pcall(function()
+                BreakablesFrontend.ReportClick(item.model)
+                for guid in pairs(equipped) do
+                    BreakablesFrontend.ReportStrike(guid)
+                end
+            end)
         end
     end
 
-    return true, displayName
+    ProgAPI.Click()
+
+    local names = {}
+    for i = 1, math.min(3, #nearby) do
+        table.insert(names, nearby[i].name)
+    end
+    return true, table.concat(names, ", ") .. string.format(" (%d nearby)", #nearby)
 end
 
 -- Executes the Coins (Heaven ONLY) -> Tech World breakables pipeline
