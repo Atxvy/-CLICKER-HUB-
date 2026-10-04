@@ -16,9 +16,15 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h then return h end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then return cg end
     local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
     local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
-    return pg or game:GetService("CoreGui")
+    return pg
 end
 
 local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
@@ -63,43 +69,13 @@ function UILibrary.CreateWindow(config)
 
     local root = getRootGui()
 
-    -- Permanently suppress game black shade / screen dimming
-    task.spawn(function()
-        pcall(function()
-            local pg = LocalPlayer:WaitForChild("PlayerGui", 5)
-            if not pg then return end
-            local function suppressOverlay(gui)
-                if gui.Name == "GUIOverlay" then
-                    gui.Enabled = false
-                    gui:GetPropertyChangedSignal("Enabled"):Connect(function()
-                        if gui.Enabled then gui.Enabled = false end
-                    end)
-                    local function fixFrame(f)
-                        if f.Name == "Overlay" and f:IsA("Frame") then
-                            f.Visible = false
-                            f.BackgroundTransparency = 1
-                            f:GetPropertyChangedSignal("Visible"):Connect(function()
-                                if f.Visible then f.Visible = false end
-                            end)
-                            f:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
-                                if f.BackgroundTransparency < 1 then f.BackgroundTransparency = 1 end
-                            end)
-                        end
-                    end
-                    for _, c in ipairs(gui:GetChildren()) do fixFrame(c) end
-                    gui.ChildAdded:Connect(fixFrame)
-                end
-            end
-            for _, g in ipairs(pg:GetChildren()) do suppressOverlay(g) end
-            pg.ChildAdded:Connect(suppressOverlay)
-        end)
-    end)
-
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "ClickerHub_UI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.DisplayOrder = 999999
+    ScreenGui:SetAttribute("Immune", true)
+    ScreenGui:SetAttribute("NoScaling", true)
     ScreenGui.Enabled = true
     ScreenGui.Parent = root
 
@@ -128,19 +104,6 @@ function UILibrary.CreateWindow(config)
     MainFrame.ClipsDescendants = false
     MainFrame.Visible = true
     MainFrame.Parent = ScreenGui
-
-    table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-        if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
-            task.defer(function()
-                ScreenGui.Enabled = true
-            end)
-        end
-    end))
-    table.insert(Connections, RunService.Heartbeat:Connect(function()
-        if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
-            ScreenGui.Enabled = true
-        end
-    end))
 
     local MainCorner = Instance.new("UICorner")
     MainCorner.CornerRadius = UDim.new(0, 10)
