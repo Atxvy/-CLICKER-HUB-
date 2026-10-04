@@ -1079,7 +1079,7 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
             local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
             local hp = m:GetAttribute("BreakableHP") or 0
             if hp > 0 and (not isBoss) then
-                if z:find(islandName) or z == "" then
+                if z:find(islandName) then
                     count = count + 1
                 end
             end
@@ -1161,7 +1161,7 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
                 local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
                 local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
 
-                if (not isBoss or not ignoreBossChest) and (bZone == "" or bZone:find(targetIsland)) then
+                if (not isBoss or not ignoreBossChest) and bZone:find(targetIsland) then
                     local hp = m:GetAttribute("BreakableHP") or 1
                     if hp > 0 then
                         local dist = (m:GetPivot().Position - hrp.Position).Magnitude
@@ -1206,43 +1206,43 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
         end)
     end
 
-    -- 3. PLAYER RAPID SCREEN TAPPING VIA VIRTUAL INPUT MANAGER
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        if cam and vim then
-            local sPos, onScreen = cam:WorldToViewportPoint(tPos)
-            if onScreen and sPos.Z > 0 then
-                for _ = 1, 4 do
+    -- 3. PLAYER RAPID SCREEN TAPPING VIA VIRTUAL INPUT MANAGER & BURST HITS
+    local vim = game:GetService("VirtualInputManager")
+    local equipped = stats.EquippedPets or {}
+
+    for burst = 1, 3 do
+        if not targetModel.Parent or (targetModel:GetAttribute("BreakableHP") or 0) <= 0 then
+            break
+        end
+
+        pcall(function()
+            if cam and vim then
+                local sPos, onScreen = cam:WorldToViewportPoint(tPos)
+                if onScreen and sPos.Z > 0 then
                     vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, true, game, 0)
-                    task.wait(0.015)
+                    task.wait(0.012)
                     vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, false, game, 0)
-                    task.wait(0.02)
                 end
             end
-        end
-    end)
-
-    -- 4. DIRECT SERVER CLICK RPC + CLICK POWER
-    if Channels.Breakables and uid then
-        pcall(function()
-            Channels.Breakables:InvokeServer("Click", uid)
         end)
-    end
-    ProgAPI.Click()
 
-    -- 5. PET STRIKES: ALL EQUIPPED PETS HIT SIMULTANEOUSLY
-    local equipped = stats.EquippedPets or {}
-    for guid, _ in pairs(equipped) do
         if Channels.Breakables and uid then
-            pcall(function()
-                Channels.Breakables:InvokeServer("Hit", uid, guid)
-            end)
+            pcall(function() Channels.Breakables:InvokeServer("Click", uid) end)
+            for guid in pairs(equipped) do
+                pcall(function() Channels.Breakables:InvokeServer("Hit", uid, guid) end)
+            end
         end
+
         if BreakablesFrontend then
             pcall(function()
-                BreakablesFrontend.ReportStrike(guid)
+                BreakablesFrontend.ReportClick(targetModel)
+                for guid in pairs(equipped) do
+                    BreakablesFrontend.ReportStrike(guid)
+                end
             end)
         end
+        ProgAPI.Click()
+        task.wait(0.03)
     end
 
     local displayName = targetModel:GetAttribute("BreakableId") or targetModel.Name
@@ -1278,19 +1278,33 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end
 
         local activeOnCur = ProgAPI.GetActiveBreakablesCount(activeCoinsIsland, "1")
-        -- Only switch if we've been here at least 10 seconds AND there are 0 breakables, OR 45 seconds have passed
-        if (now - lastBreakablesSwitchTick > 10 and activeOnCur == 0) or (now - lastBreakablesSwitchTick > 45) then
-            lastBreakablesSwitchTick = now
-            activeCoinsIsland = (activeCoinsIsland == "Volcano") and "Heaven" or "Volcano"
-            ProgAPI.TeleportToIsland(activeCoinsIsland)
-            task.wait(0.3)
-            ProgAPI.TeleportToBreakableZone(activeCoinsIsland)
-            task.wait(0.2)
+
+        -- RULE: ONLY switch islands when ALL breakables in the current island are destroyed (activeOnCur == 0)!
+        -- If there are still breakables available on this island, NEVER switch to the other island!
+        if activeOnCur == 0 then
+            local otherIsland = (activeCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+            local otherCount = ProgAPI.GetActiveBreakablesCount(otherIsland, "1")
+
+            -- If the other island has active breakables ready, switch to it!
+            if otherCount > 0 then
+                activeCoinsIsland = otherIsland
+                ProgAPI.TeleportToIsland(activeCoinsIsland)
+                task.wait(0.3)
+                ProgAPI.TeleportToBreakableZone(activeCoinsIsland)
+                task.wait(0.2)
+                return "Zone Cleared! Switched to " .. activeCoinsIsland, activeCoinsIsland
+            else
+                -- Both islands are currently cleared! Stay in current breakable zone and wait for respawn.
+                ProgAPI.TeleportToBreakableZone(activeCoinsIsland)
+                return "All Cleared! Waiting Respawn in " .. activeCoinsIsland, activeCoinsIsland
+            end
         end
 
+        -- There ARE breakables alive on this island (activeOnCur > 0):
+        -- Break EVERY SINGLE ONE in this zone before ever switching!
         local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, true)
         pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
-        return "Attacking " .. tostring(targetName or "Breakables"), activeCoinsIsland
+        return "Attacking " .. tostring(targetName or "Breakable") .. " (" .. activeOnCur .. " left)", activeCoinsIsland
 
     -- 2. Coins skill tree complete: Teleport to latest Tech World (Matrix) to farm Tech Coins!
     else
