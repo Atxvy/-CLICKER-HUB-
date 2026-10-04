@@ -28,12 +28,12 @@ Configs.Default = {
     AutoSkillTree = true,
     AutoMagmaSkin = true,
     AutoRainbowClaim = true,
-    -- Phase 3: ??? Secret Quest & Dominus Fortune
+    -- Phase 2: ??? Secret Quest
     AutoSecretQuest = true,
     AutoCollectFeathers = true,
     AutoSecretCraftGolden = true,
     AutoUnlockSecretDoor = true,
-    AutoDominusFortune = true,
+    -- Phase 3: Endgame Skill Tree (39/39) & Preparation
     -- Phase 4: Endgame Matrix Mythics
     AutoMatrixEgg = true,
     AutoMythicFilter = true,
