@@ -1616,6 +1616,27 @@ function ProgAPI.GetIslandBreakableZone(islandName: string?, ignoreBossChest: bo
     local interact = isl and isl:FindFirstChild("Interact")
     local bZones = interact and interact:FindFirstChild("BreakableZones")
     if bZones then
+        -- In Heaven: if not ignoring boss chests, check if HugeHeavenChest has an active target or exists!
+        if islandName == "Heaven" and not ignoreBossChest then
+            local hugeZone = bZones:FindFirstChild("HugeHeavenChest")
+            local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+            local hasHugeBreakable = false
+            if bf then
+                for _, child in ipairs(bf:GetChildren()) do
+                    local m = child:FindFirstChildWhichIsA("Model") or child
+                    local bId = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
+                    local hp = m:GetAttribute("BreakableHP") or 1
+                    if (bId:find("giant") or bId:find("huge") or bId:find("heaven")) and hp > 0 then
+                        hasHugeBreakable = true
+                        break
+                    end
+                end
+            end
+            if (hasHugeBreakable or math.random(1, 4) == 1) and hugeZone and hugeZone:IsA("BasePart") then
+                return hugeZone, "Heaven/HugeHeavenChest"
+            end
+        end
+
         local normalZone = bZones:FindFirstChild("1")
         if normalZone and normalZone:IsA("BasePart") then
             return normalZone, islandName .. "/1"
@@ -1833,15 +1854,21 @@ function ProgAPI.AttackBreakable(ignoreBossChest: boolean?, islandName: string?)
                 if entry and entry.hp > 0 and not (ignoreBossChest and entry.isBoss) then
                     local distToZone = (entry.pos - zonePart.Position).Magnitude
                     local distToPlayer = (entry.pos - hrp.Position).Magnitude
-                    if distToZone < 140 or distToPlayer < 45 then
-                        table.insert(candidates, { entry = entry, dist = distToPlayer })
+                    if distToZone < 160 or distToPlayer < 50 or (not ignoreBossChest and entry.isBoss) then
+                        table.insert(candidates, { entry = entry, dist = distToPlayer, isBoss = entry.isBoss })
                     end
                 end
             end
         end
 
         if #candidates > 0 then
-            table.sort(candidates, function(a, b) return a.dist < b.dist end)
+            table.sort(candidates, function(a, b)
+                if not ignoreBossChest then
+                    if a.isBoss and not b.isBoss then return true end
+                    if not a.isBoss and b.isBoss then return false end
+                end
+                return a.dist < b.dist
+            end)
             targetModel = candidates[1].entry.model
             targetUID = candidates[1].entry.uid
             currentTargetModel = targetModel
@@ -2021,7 +2048,8 @@ function ProgAPI.BuyAffordableSkillTree(preferCoins: boolean?): number
 end
 
 -- Executes the exact dynamic Skill Tree & Breakables loop transferred from [CLICKER HUB]
-function ProgAPI.StepBreakablesPipeline(): (string, string)
+function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, string)
+    if attackBigChests == nil then attackBigChests = true end
     local stProg = ProgAPI.GetSkillTreeProgress()
     local targetWorld = ProgAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Heaven"
     local pData = ProgAPI.GetPlayerData()
@@ -2033,27 +2061,38 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end)
     end)
 
+    local ignoreBoss = not attackBigChests
+
     -- If player is not on the target breakables island, warp there
     if targetWorld and targetWorld ~= pData.CurrentIsland then
         ProgAPI.TeleportToIsland(targetWorld)
         task.wait(0.35)
-        ProgAPI.TeleportToBreakableZone(targetWorld, true)
+        ProgAPI.TeleportToBreakableZone(targetWorld, ignoreBoss)
         task.wait(0.15)
     end
 
     -- Keep character anchored inside breakables zone
-    local zonePart = ProgAPI.GetIslandBreakableZone(targetWorld, true)
+    local zonePart = ProgAPI.GetIslandBreakableZone(targetWorld, ignoreBoss)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
-        ProgAPI.TeleportToBreakableZone(targetWorld, true)
+        ProgAPI.TeleportToBreakableZone(targetWorld, ignoreBoss)
+    end
+
+    -- Periodically sync HugeHeavenChest snapshot when on Heaven
+    if targetWorld == "Heaven" and attackBigChests then
+        pcall(function()
+            if Channels.Breakables then
+                Channels.Breakables:InvokeServer("Get", "Heaven/HugeHeavenChest")
+            end
+        end)
     end
 
     -- Attack breakable
     local okAtk = false
     local targetName, dmg = nil, nil
     pcall(function()
-        okAtk, targetName, dmg = ProgAPI.AttackBreakable(true, targetWorld)
+        okAtk, targetName, dmg = ProgAPI.AttackBreakable(ignoreBoss, targetWorld)
     end)
 
     -- If no breakables on current Coins island, switch immediately between Volcano and Heaven so it never stops!
@@ -2318,11 +2357,50 @@ function ProgAPI.ClaimAllFreeGifts(): number
     return claimed
 end
 
+function ProgAPI.ClaimHellChest(): boolean
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local chests = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Interact")
+        and workspace._MAP.Interact:FindFirstChild("Chests")
+    local hc = chests and chests:FindFirstChild("Hell Chest")
+    local hb = hc and hc:FindFirstChild("Hitbox")
+    if hrp and hb and firetouchinterest then
+        pcall(function()
+            firetouchinterest(hrp, hb, 0)
+            task.wait(0.02)
+            firetouchinterest(hrp, hb, 1)
+        end)
+        return true
+    end
+    return false
+end
+
 function ProgAPI.ClaimAllChests(): number
     local claimed = 0
     if Channels.BeachChest then
         local ok = pcall(function() return Channels.BeachChest:InvokeServer("Claim") end)
         if ok then claimed = claimed + 1 end
+    end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local chests = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Interact")
+        and workspace._MAP.Interact:FindFirstChild("Chests")
+    if chests and hrp and firetouchinterest then
+        for _, cName in ipairs({ "Hell Chest", "Grand Chest", "Beach Chest" }) do
+            local c = chests:FindFirstChild(cName)
+            local hb = c and c:FindFirstChild("Hitbox")
+            if hb then
+                pcall(function()
+                    firetouchinterest(hrp, hb, 0)
+                    task.wait(0.02)
+                    firetouchinterest(hrp, hb, 1)
+                    claimed = claimed + 1
+                end)
+            end
+        end
     end
     return claimed
 end
@@ -2464,6 +2542,141 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
     end
 
     return false, tostring(res2 or "In progress")
+end
+
+--==============================================================================
+-- PERFORMANCE & MISC OPTIMIZATIONS (Black Screen 3D Render & Remove Maps)
+--==============================================================================
+local blackScreenGui = nil
+local originalTransparencies = {}
+local isMapsRemoved = false
+
+function ProgAPI.SetBlackScreen(enabled: boolean)
+    pcall(function()
+        local RunService = game:GetService("RunService")
+        if RunService and RunService.Set3dRenderingEnabled then
+            RunService:Set3dRenderingEnabled(not enabled)
+        end
+    end)
+
+    if enabled then
+        if not blackScreenGui then
+            local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+            local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+            if not pg then return end
+
+            blackScreenGui = Instance.new("ScreenGui")
+            blackScreenGui.Name = "ClickerHub_BlackScreen"
+            blackScreenGui.ResetOnSpawn = false
+            blackScreenGui.DisplayOrder = 999998
+            blackScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+            local bg = Instance.new("Frame")
+            bg.Name = "BlackBackground"
+            bg.Size = UDim2.new(1, 0, 1, 0)
+            bg.Position = UDim2.new(0, 0, 0, 0)
+            bg.BackgroundColor3 = Color3.fromRGB(6, 4, 10)
+            bg.BorderSizePixel = 0
+            bg.Parent = blackScreenGui
+
+            local card = Instance.new("Frame")
+            card.Size = UDim2.new(0, 500, 0, 190)
+            card.AnchorPoint = Vector2.new(0.5, 0.5)
+            card.Position = UDim2.new(0.5, 0, 0.5, 0)
+            card.BackgroundColor3 = Color3.fromRGB(18, 14, 26)
+            card.BorderSizePixel = 0
+            card.Parent = bg
+
+            local cardCorner = Instance.new("UICorner")
+            cardCorner.CornerRadius = UDim.new(0, 12)
+            cardCorner.Parent = card
+
+            local cardStroke = Instance.new("UIStroke")
+            cardStroke.Color = Color3.fromRGB(168, 85, 247)
+            cardStroke.Thickness = 2
+            cardStroke.Parent = card
+
+            local title = Instance.new("TextLabel")
+            title.Size = UDim2.new(1, 0, 0, 48)
+            title.Position = UDim2.new(0, 0, 0, 24)
+            title.BackgroundTransparency = 1
+            title.Text = "Premium Script !"
+            title.TextColor3 = Color3.fromRGB(255, 255, 255)
+            title.TextSize = 34
+            title.Font = Enum.Font.GothamBold
+            title.Parent = card
+
+            local sub = Instance.new("TextLabel")
+            sub.Size = UDim2.new(1, -40, 0, 56)
+            sub.Position = UDim2.new(0, 20, 0, 80)
+            sub.BackgroundTransparency = 1
+            sub.Text = "⚡ <b>3D Rendering Disabled • CPU & GPU Saver Active</b> ⚡\nMemory and processor load minimized for 24/7 background AFK farming."
+            sub.RichText = true
+            sub.TextColor3 = Color3.fromRGB(192, 132, 252)
+            sub.TextSize = 15
+            sub.Font = Enum.Font.GothamMedium
+            sub.TextWrapped = true
+            sub.Parent = card
+
+            local hint = Instance.new("TextLabel")
+            hint.Size = UDim2.new(1, 0, 0, 24)
+            hint.Position = UDim2.new(0, 0, 0, 146)
+            hint.BackgroundTransparency = 1
+            hint.Text = "Clicker Hub UI remains fully active above"
+            hint.TextColor3 = Color3.fromRGB(140, 130, 160)
+            hint.TextSize = 12
+            hint.Font = Enum.Font.Gotham
+            hint.Parent = card
+
+            blackScreenGui.Parent = pg
+        end
+        blackScreenGui.Enabled = true
+    else
+        if blackScreenGui then
+            blackScreenGui.Enabled = false
+        end
+    end
+end
+
+function ProgAPI.SetRemoveMaps(enabled: boolean)
+    isMapsRemoved = enabled
+    local islands = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Islands")
+    if not islands then return end
+
+    if enabled then
+        for _, isl in ipairs(islands:GetChildren()) do
+            local map = isl:FindFirstChild("Map")
+            local decor = map and map:FindFirstChild("Decor")
+            if decor then
+                for _, obj in ipairs(decor:GetDescendants()) do
+                    if obj:IsA("BasePart") then
+                        if originalTransparencies[obj] == nil then
+                            originalTransparencies[obj] = obj.Transparency
+                        end
+                        obj.Transparency = 1
+                    elseif obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+                        if originalTransparencies[obj] == nil then
+                            originalTransparencies[obj] = obj.Enabled
+                        end
+                        obj.Enabled = false
+                    end
+                end
+            end
+        end
+    else
+        for obj, orig in pairs(originalTransparencies) do
+            pcall(function()
+                if obj and obj.Parent then
+                    if obj:IsA("BasePart") then
+                        obj.Transparency = orig
+                    elseif obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+                        obj.Enabled = orig
+                    end
+                end
+            end)
+        end
+        table.clear(originalTransparencies)
+    end
 end
 
 return ProgAPI
