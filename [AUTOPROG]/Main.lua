@@ -179,6 +179,7 @@ local LiveStatusCard = DashTab:AddParagraph({
     Title = "Progression Telemetry",
     Content = "Initializing..."
 })
+_G.ClickerSimulatorAutoProgCard = LiveStatusCard
 
 DashTab:AddSection("QUICK ACTIONS")
 DashTab:AddButton({
