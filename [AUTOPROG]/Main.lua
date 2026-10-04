@@ -22,14 +22,24 @@
 --   - Auto open best egg until entire equipped team is 100% Golden
 --
 -- • PHASE 2 (Endgame Roadmap - All 17 Islands Unlocked):
---   - Periodic furthest map teleport every 30 seconds
---   - Continuous Max Rebirth at highest milestone button
---   - Keep opening best egg (MatrixEgg / CandyCornEgg) until 100% of equipped team is Golden
 --   - Priority 1: Desert Machine & Rebirth Shop gem upgrades maxing
 --   - Priority 2: Skill Tree Coins First (Volcano <-> Heaven breakables alternation) -> Tech Coins Tree
---   - 10 Qi Rebirth goal & Magma click skin (+4 Egg Hatch, +20% Speed)
---   - Auto ??? Secret Questline solver (Feathers, Hatches, Door)
+--
+-- • PHASE 3 (??? Secret Area Questline Solver):
+--   - Auto accept quest at Spawn Door
+--   - Step 1: Click 3,500 Times
+--   - Step 2: Collect 10 Feathers across maps via instant touch interest
+--   - Step 3: Craft 15 Golden Pets (hatches & crafts)
+--   - Step 4: Hatch 2,500 Eggs (dynamic auto hatch)
+--   - Step 5: Unlocks Dominus Secret Door and triggers Phase 4
+--
+-- • PHASE 4 (Endgame Matrix Mythic Pipeline):
+--   - Auto open Matrix Egg (highest endgame egg in Tech World)
+--   - Mythic Only Filter: Delete all non-mythic pets
+--   - Auto craft Golden Mythics & Rainbow Mythics
 --   - Auto claim finished Rainbow pets
+--   - Equip 100% full Rainbow Mythic team
+--   - 10 Qi Rebirth goal & Magma click skin (+4 Egg Hatch, +20% Speed)
 --==============================================================================
 
 local Players = game:GetService("Players")
@@ -393,64 +403,117 @@ Phase2Tab:AddToggle("AutoPrestigeToggle_P2", {
 })
 
 --==============================================================================
--- 4. PHASE 3: MATRIX MYTHICS TAB
+-- 4. PHASE 3: ??? SECRET QUEST TAB
 --==============================================================================
-local Phase3Tab = Window:AddTab({ Title = "Phase 3: Matrix Mythics", Icon = "🧬" })
+local Phase3Tab = Window:AddTab({ Title = "Phase 3: ??? Quest", Icon = "🗝️" })
 
-Phase3Tab:AddSection("PHASE 3 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase3Tab:AddSection("PHASE 3 SETTINGS (??? SECRET AREA QUESTLINE)")
 Phase3Tab:AddParagraph({
     Title = "Phase 3 Strategy",
-    Content = "Activates automatically after Phase 2 (Desert Machine & Skill Tree) is 100% complete!\n" ..
+    Content = "Activates automatically after Phase 2 (Skill Tree 100% complete)!\n" ..
+              "• Automatically accepts the ??? Quest at Spawn Door\n" ..
+              "• Step 1: Click 3,500 Times (high speed)\n" ..
+              "• Step 2: Collect 10 Feathers across maps (instant touch interest)\n" ..
+              "• Step 3: Craft 15 Golden Pets (hatches & crafts)\n" ..
+              "• Step 4: Hatch 2,500 Eggs (dynamic auto hatch)\n" ..
+              "• Step 5: Unlocks the Dominus Secret Door and transitions to Phase 4!"
+})
+
+local Phase3ProgressCard = Phase3Tab:AddParagraph({
+    Title = "??? Quest Status",
+    Content = "Evaluating...",
+    TitleSize = 16,
+    BodySize = 13,
+})
+_G.ClickerSimulatorPhase3ProgressCard = Phase3ProgressCard
+
+Phase3Tab:AddToggle("AutoSecretQuestToggle", {
+    Title = "Enable ??? Questline Automation",
+    Description = "Automatically completes all 4 objectives and unlocks the secret door",
+    Default = State.AutoSecretQuest ~= false,
+    Callback = function(val) State.AutoSecretQuest = val; Configs.Set("AutoSecretQuest", val) end
+})
+
+Phase3Tab:AddToggle("AutoCollectFeathersToggle", {
+    Title = "Auto Collect Feathers",
+    Description = "Automatically gathers all 10 feathers required for the secret quest",
+    Default = State.AutoCollectFeathers ~= false,
+    Callback = function(val) State.AutoCollectFeathers = val; Configs.Set("AutoCollectFeathers", val) end
+})
+
+Phase3Tab:AddToggle("AutoSecretCraftGoldenToggle", {
+    Title = "Auto Craft Golden Pets for Quest",
+    Description = "Hatches and crafts normal pets into Golden pets to complete the 15/15 requirement",
+    Default = State.AutoSecretCraftGolden ~= false,
+    Callback = function(val) State.AutoSecretCraftGolden = val; Configs.Set("AutoSecretCraftGolden", val) end
+})
+
+Phase3Tab:AddToggle("AutoUnlockSecretDoorToggle", {
+    Title = "Auto Unlock Spawn Secret Door",
+    Description = "Teleports to Spawn Door and claims the completed questline",
+    Default = State.AutoUnlockSecretDoor ~= false,
+    Callback = function(val) State.AutoUnlockSecretDoor = val; Configs.Set("AutoUnlockSecretDoor", val) end
+})
+
+--==============================================================================
+-- 5. PHASE 4: MATRIX MYTHICS TAB
+--==============================================================================
+local Phase4Tab = Window:AddTab({ Title = "Phase 4: Matrix Mythics", Icon = "🧬" })
+
+Phase4Tab:AddSection("PHASE 4 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase4Tab:AddParagraph({
+    Title = "Phase 4 Strategy",
+    Content = "Activates automatically after Phase 3 (??? Secret Quest) is 100% complete!\n" ..
               "• Auto Open Matrix Egg (highest endgame egg in Tech World)\n" ..
-              "• Pauses Auto Rebirth (preserves 100% of clicks for Matrix Egg)\n" ..
+              "• Rebirth at Max Milestone Only (preserves clicks for Matrix Egg)\n" ..
               "• Mythic Pet Filter: Deletes all non-mythic pets (Common/Rare/Epic/Legendary) and weak pets\n" ..
               "• Auto Crafts Golden Mythics & Rainbow Mythics\n" ..
               "• Equips best pets as Rainbow Mythics are created, replacing old pets until team is 100% Rainbow Mythics!"
 })
 
-Phase3Tab:AddToggle("AutoMatrixEggToggle_P3", {
+Phase4Tab:AddToggle("AutoMatrixEggToggle_P4", {
     Title = "Auto Open Matrix Egg",
     Description = "Continuously hatches Matrix Egg on Matrix Island in Tech World",
     Default = State.AutoMatrixEgg,
     Callback = function(val) State.AutoMatrixEgg = val; Configs.Set("AutoMatrixEgg", val) end
 })
 
-Phase3Tab:AddToggle("AutoMythicFilterToggle_P3", {
+Phase4Tab:AddToggle("AutoMythicFilterToggle_P4", {
     Title = "Keep Mythic & Above (Delete Non-Mythic)",
     Description = "Strictly keeps Mythic, Secret, Mega, Divine, and Exclusive pets; deletes Common, Rare, Epic, Legendary",
     Default = State.AutoMythicFilter,
     Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
 })
 
-Phase3Tab:AddToggle("AutoCraftMythicsToggle_P3", {
+Phase4Tab:AddToggle("AutoCraftMythicsToggle_P4", {
     Title = "Auto Craft Golden & Rainbow Mythics",
     Description = "Automatically crafts Golden and Rainbow versions of Mythic pets",
     Default = State.AutoCraftMythics,
     Callback = function(val) State.AutoCraftMythics = val; Configs.Set("AutoCraftMythics", val) end
 })
 
-Phase3Tab:AddToggle("AutoReplaceTeamToggle_P3", {
+Phase4Tab:AddToggle("AutoReplaceTeamToggle_P4", {
     Title = "Auto Replace Team with Rainbow Mythics",
     Description = "Equips best pets as Rainbow Mythics are forged, replacing weaker old pets",
     Default = State.AutoReplaceTeam,
     Callback = function(val) State.AutoReplaceTeam = val; Configs.Set("AutoReplaceTeam", val) end
 })
 
-Phase3Tab:AddToggle("PauseRebirthToggle_P3", {
+Phase4Tab:AddToggle("PauseRebirthToggle_P4", {
     Title = "Rebirth at Max Milestone Only",
     Description = "Waits until no more Next Rebirth button, then rebirths to the max affordable milestone",
-    Default = State.PauseRebirthPhase3,
-    Callback = function(val) State.PauseRebirthPhase3 = val; Configs.Set("PauseRebirthPhase3", val) end
+    Default = (State.PauseRebirthPhase4 ~= nil) and State.PauseRebirthPhase4 or State.PauseRebirthPhase3,
+    Callback = function(val) State.PauseRebirthPhase4 = val; State.PauseRebirthPhase3 = val; Configs.Set("PauseRebirthPhase4", val) end
 })
 
-Phase3Tab:AddToggle("AutoRainbowClaimToggle_P3", {
+Phase4Tab:AddToggle("AutoRainbowClaimToggle_P4", {
     Title = "Auto Claim Rainbow Pets",
     Description = "Automatically collects finished pets from the Rainbow Machine",
     Default = State.AutoRainbowClaim,
     Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
 })
 
-Phase3Tab:AddToggle("AutoMagmaSkinToggle_P3", {
+Phase4Tab:AddToggle("AutoMagmaSkinToggle_P4", {
     Title = "10 Qi Rebirth Goal & Magma Click Skin",
     Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
     Default = State.AutoMagmaSkin,
@@ -726,8 +789,8 @@ table.insert(threads, task.spawn(function()
 end))
 
 -- THREAD 2: DEDICATED CONTINUOUS REBIRTH ENGINE
--- Phase 1 & 2: Rebirth as long as affordable (RebirthBestAffordable)
--- Phase 3: Max Rebirth only (RebirthMaxTarget)
+-- Phase 1, 2, 3: Rebirth as long as affordable (RebirthBestAffordable)
+-- Phase 4: Max Rebirth only (RebirthMaxTarget)
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
@@ -738,12 +801,12 @@ table.insert(threads, task.spawn(function()
         if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
 
-            local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
-            if isP3 then
-                -- Phase 3: Rebirth at MAX milestone only
+            local isP4 = AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4()
+            if isP4 then
+                -- Phase 4: Rebirth at MAX milestone only
                 pcall(AutoProgAPI.RebirthMaxTarget)
             else
-                -- Phase 1 & Phase 2: Rebirth as long as they can afford it
+                -- Phase 1, Phase 2, Phase 3: Rebirth as long as they can afford it
                 pcall(AutoProgAPI.RebirthBestAffordable)
             end
         end
@@ -968,7 +1031,10 @@ table.insert(threads, task.spawn(function()
             local lockedIsland = AutoProgAPI.GetNextLockedIsland()
             local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
             local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
+            local isSkillTreeDone = AutoProgAPI.IsSkillTreeMaxed and AutoProgAPI.IsSkillTreeMaxed()
+            local isSecretQuestDone = AutoProgAPI.IsSecretQuestComplete and AutoProgAPI.IsSecretQuestComplete()
             local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
+            local isP4 = AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4()
 
             -- =====================================================================
             -- STEP 1 (PHASE 1: ISLAND SPEEDRUN)
@@ -1061,13 +1127,42 @@ table.insert(threads, task.spawn(function()
             -- 1. Desert Gem Machine & Rebirth Shop Maxing (Thread 8 & 9)
             -- 2. Max Skill Tree (Dominus Area for Coins -> Matrix for Tech Coins) (Thread 13)
             -- =====================================================================
-            elseif not isP3 then
+            elseif not isSkillTreeDone then
                 currentPhaseText = "👑 PHASE 2: ENDGAME PREPARATION"
                 -- Thread 13 handles breakables and skill tree purchasing.
 
             -- =====================================================================
-            -- PHASE 3: ENDGAME MATRIX MYTHIC PIPELINE
-            -- Condition: All 17 islands unlocked AND Skill Tree 100% maxed (Coins 36/36 & Tech 13/13)!
+            -- PHASE 3: ??? SECRET AREA QUESTLINE
+            -- Condition: All 17 islands unlocked, Skill Tree 100% maxed, but ??? quest not done!
+            -- Objectives:
+            -- 1. Accept Quest at Spawn Door
+            -- 2. Click 3,500 Times
+            -- 3. Collect 10 Feathers across maps
+            -- 4. Craft 15 Golden Pets
+            -- 5. Hatch 2,500 Eggs
+            -- 6. Unlock the Spawn Door and claim questline
+            -- =====================================================================
+            elseif not isSecretQuestDone then
+                currentPhaseText = "🗝️ PHASE 3: ??? SECRET QUEST"
+                local p3Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("MatrixEgg")) or 2.0
+                if State.AutoSecretQuest ~= false and not isEggHatching and (now - lastEggHatchTick >= p3Delay) then
+                    lastEggHatchTick = now
+                    isEggHatching = true
+                    lastEggHatchStartTick = now
+                    task.spawn(function()
+                        local pcallOk, stepSuccess, stepMsg = pcall(AutoProgAPI.StepSecretQuest)
+                        if pcallOk and stepMsg and type(stepMsg) == "string" then
+                            currentActivity = tostring(stepMsg)
+                        elseif pcallOk and type(stepSuccess) == "string" then
+                            currentActivity = tostring(stepSuccess)
+                        end
+                        isEggHatching = false
+                    end)
+                end
+
+            -- =====================================================================
+            -- PHASE 4: ENDGAME MATRIX MYTHIC PIPELINE
+            -- Condition: All 17 islands unlocked, Skill Tree 100% maxed, AND ??? Questline complete!
             -- Strategy:
             -- 1. Auto Open Matrix Egg (highest endgame egg in Tech World)
             -- 2. Max Rebirth Only (Thread 2 fires at Max milestone button)
@@ -1076,11 +1171,11 @@ table.insert(threads, task.spawn(function()
             -- 5. Gradually replaces equipped team until 100% Rainbow Mythics!
             -- =====================================================================
             else
-                currentPhaseText = "🧬 PHASE 3: MATRIX MYTHIC PIPELINE"
+                currentPhaseText = "🧬 PHASE 4: MATRIX MYTHIC PIPELINE"
 
                 local curWorld = pData.CurrentWorld or "Overworld"
                 if curWorld ~= "Techworld" and curWorld ~= "Space" then
-                    currentActivity = "[Phase 3: Matrix] Teleporting to Tech World..."
+                    currentActivity = "[Phase 4: Matrix] Teleporting to Tech World..."
                     AutoProgAPI.TeleportToWorld("Techworld")
                     task.wait(0.5)
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
@@ -1090,7 +1185,7 @@ table.insert(threads, task.spawn(function()
 
                 local curIsland = pData.CurrentIsland or ""
                 if curIsland ~= "Matrix" then
-                    currentActivity = "[Phase 3: Matrix] Teleporting to Matrix Island..."
+                    currentActivity = "[Phase 4: Matrix] Teleporting to Matrix Island..."
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
                     task.wait(0.5)
                     return
@@ -1112,14 +1207,14 @@ table.insert(threads, task.spawn(function()
                         hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         task.wait(0.08)
                     elseif dist > 20 then
-                        currentActivity = "[Phase 3: Matrix] Teleporting to Matrix Egg in Tech World..."
+                        currentActivity = "[Phase 4: Matrix] Teleporting to Matrix Egg in Tech World..."
                         AutoProgAPI.TeleportToEgg("MatrixEgg")
                         task.wait(0.3)
                     end
 
                     if pData.Clicks >= matrixCost then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
-                        currentActivity = string.format("[Phase 3: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
+                        currentActivity = string.format("[Phase 4: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
                         isEggHatching = true
                         lastEggHatchStartTick = now
                         task.spawn(function()
@@ -1154,7 +1249,7 @@ table.insert(threads, task.spawn(function()
                         if dist > 16 and targetPart and hrp then
                             hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         end
-                        currentActivity = string.format("[Phase 3: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
+                        currentActivity = string.format("[Phase 4: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
                 end
 
@@ -1171,7 +1266,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 if isAllRainbowMythic then
-                    currentActivity = string.format("🌟 [Phase 3: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
+                    currentActivity = string.format("🌟 [Phase 4: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
                 end
 
                 -- 10 Qi Rebirth Goal & Magma Click Skin
@@ -1239,6 +1334,9 @@ local function updateTelemetry()
             end
         end
 
+        local qInfo = ProgAPI.GetSecretQuestInfo and ProgAPI.GetSecretQuestInfo()
+        local questStr = qInfo and (qInfo.IsDoorUnlocked and "🔓 Dominus Door Unlocked!" or tostring(qInfo.CurrentStep)) or "N/A"
+
         -- 2. Statistical Progression Telemetry Card
         local cardTitle = "Progression Telemetry"
         local cardContent = string.format(
@@ -1248,6 +1346,7 @@ local function updateTelemetry()
             "🏝️ <b>Islands:</b> %s\n" ..
             "🐾 <b>Pet Team:</b> %s\n" ..
             "🌳 <b>Skill Tree:</b> %s\n" ..
+            "🗝️ <b>??? Quest:</b> %s\n" ..
             "🔥 <b>Magma Skin:</b> %s",
             ProgAPI.FormatNumber(pData.Clicks or 0),
             ProgAPI.FormatNumber(pData.Rebirths or 0),
@@ -1258,6 +1357,7 @@ local function updateTelemetry()
             tostring(islandProgressStr),
             tostring(teamStr),
             tostring(stStr),
+            tostring(questStr),
             tostring(magmaStr)
         )
 
@@ -1271,6 +1371,33 @@ local function updateTelemetry()
             end
             if LiveStatusCard.BodyLabel then
                 pcall(function() LiveStatusCard.BodyLabel.Text = cardContent end)
+            end
+        end
+
+        if Phase3ProgressCard and qInfo then
+            local qContent = string.format(
+                "🎯 <b>Status:</b> %s\n" ..
+                "🖱️ <b>Clicks:</b> %s / %s (%s)\n" ..
+                "🪶 <b>Feathers:</b> %d / %d (%s)\n" ..
+                "⭐ <b>Golden Crafts:</b> %d / %d (%s)\n" ..
+                "🥚 <b>Hatch Eggs:</b> %s / %s (%s)\n" ..
+                "🚪 <b>Spawn Door:</b> %s",
+                tostring(qInfo.CurrentStep),
+                ProgAPI.FormatNumber(qInfo.Clicks.Progress), ProgAPI.FormatNumber(qInfo.Clicks.Amount), qInfo.Clicks.Done and "✅" or "⏳",
+                qInfo.Feathers.Progress, qInfo.Feathers.Amount, qInfo.Feathers.Done and "✅" or "⏳",
+                qInfo.Golden.Progress, qInfo.Golden.Amount, qInfo.Golden.Done and "✅" or "⏳",
+                ProgAPI.FormatNumber(qInfo.Hatch.Progress), ProgAPI.FormatNumber(qInfo.Hatch.Amount), qInfo.Hatch.Done and "✅" or "⏳",
+                qInfo.IsDoorUnlocked and "🔓 UNLOCKED" or (qInfo.AllQuestsDone and "READY TO UNLOCK" or "LOCKED")
+            )
+            Phase3ProgressCard:Set({
+                Title = "??? Quest Status",
+                Content = qContent
+            })
+            if Phase3ProgressCard.TitleLabel then
+                pcall(function() Phase3ProgressCard.TitleLabel.Text = "??? Quest Status" end)
+            end
+            if Phase3ProgressCard.BodyLabel then
+                pcall(function() Phase3ProgressCard.BodyLabel.Text = qContent end)
             end
         end
 
