@@ -155,9 +155,9 @@ if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
 -- UI INITIALIZATION
 --==============================================================================
 local Window = UILibrary:CreateWindow({
-    Title = "CLICKER SIMULATOR — AUTO PROGRESSION",
-    SubTitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
-    Subtitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
+    Title = "CLICKER HUB • CLICKER SIMULATOR",
+    SubTitle = "Auto Progression • Zero To Hero",
+    Subtitle = "Auto Progression • Zero To Hero",
     Size = UDim2.fromOffset(700, 520),
     AccentColor = Color3.fromRGB(0, 170, 255),
     Theme = "Dark",
@@ -541,7 +541,7 @@ MiscTab:AddSection("PERFORMANCE & CPU SAVER")
 local blackScreenToggleObj
 blackScreenToggleObj = MiscTab:AddToggle("BlackScreenToggle", {
     Title = "Black Screen / 3D Render Off (Save CPU & Memory)",
-    Description = "Disables 3D engine rendering and displays centered Zelqyn Hub live telemetry & session overlay",
+    Description = "Disables 3D engine rendering and displays centered Clicker Hub live telemetry & session overlay",
     Default = State.BlackScreen,
     Callback = function(val)
         if State.BlackScreen == val then return end
@@ -712,8 +712,15 @@ end))
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
-        task.wait(0.15)
+        task.wait(0.12)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
+
+        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
+        if isP3 then
+            -- Pause rebirth completely in Phase 3 so all clicks are preserved for Matrix Egg!
+            task.wait(0.5)
+            continue
+        end
 
         -- Phase 1 smart pause: accumulating clicks for next island unlock
         if AutoProgAPI.IsSmartRebirthPaused and AutoProgAPI.IsSmartRebirthPaused() then
@@ -721,20 +728,25 @@ table.insert(threads, task.spawn(function()
             continue
         end
 
-
-        -- USER RULE: Wait until no more 'Next Rebirth' button (Goal visible = false)!
-        -- When there is a Next Rebirth pending (Image 2), wait!
-        if AutoProgAPI.HasNextRebirthGoal and AutoProgAPI.HasNextRebirthGoal() then
-            task.wait(0.3)
-            continue
-        end
-
+        local allIslandsUnlocked = AutoProgAPI.AreAllIslandsUnlocked()
         local now = tick()
-        if now - lastRebirthAttempt > 0.4 then
+        if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
-            local maxInfo = ProgAPI.GetMaxRebirthInfo()
-            if maxInfo and maxInfo.CanAffordMax and maxInfo.BestAffordableIndex >= maxInfo.MaxButtonIndex then
-                ProgAPI.RebirthMaxTarget()
+
+            if not allIslandsUnlocked then
+                -- PHASE 1 RULE: As long as they can rebirth, immediately rebirth at the best affordable button!
+                -- Does NOT wait for Goal or button 57!
+                pcall(AutoProgAPI.RebirthBestAffordable)
+            else
+                -- PHASE 2: Rebirth until max button is reached
+                local maxInfo = AutoProgAPI.GetMaxRebirthInfo()
+                if maxInfo and maxInfo.CanAffordMax and maxInfo.BestAffordableIndex then
+                    if maxInfo.BestAffordableIndex >= maxInfo.MaxButtonIndex then
+                        pcall(AutoProgAPI.RebirthMaxTarget)
+                    else
+                        pcall(AutoProgAPI.RebirthBestAffordable)
+                    end
+                end
             end
         end
     end
@@ -892,8 +904,8 @@ table.insert(threads, task.spawn(function()
                 if stProg.CoinsComplete and not stProg.TechComplete then
                     local pData = AutoProgAPI.GetPlayerData()
                     local curWorld = pData.CurrentWorld or "Overworld"
-                    local MF = AutoProgAPI.GetMinigamesFrontend and AutoProgAPI.GetMinigamesFrontend()
-                    if (MF and MF.Active and MF.Active() == "DominusArea") or (curWorld ~= "Techworld" and curWorld ~= "Space") then
+                    if AutoProgAPI.IsInMinigame() or (curWorld ~= "Techworld" and curWorld ~= "Space") then
+                        AutoProgAPI.ExitMinigame()
                         AutoProgAPI.TeleportToWorld("Techworld")
                         task.wait(0.4)
                     end
@@ -987,7 +999,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 -- 3. Auto buy egg for pets & auto gold pets
-                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick > 0.35) then
+                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick >= 0.1) then
                     lastEggHatchTick = now
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
@@ -1034,7 +1046,7 @@ table.insert(threads, task.spawn(function()
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
 
                 -- 1. Auto Open Matrix Egg:
-                if State.AutoMatrixEgg and (now - lastEggHatchTick > 0.35) then
+                if State.AutoMatrixEgg and (now - lastEggHatchTick >= 0.1) then
                     lastEggHatchTick = now
                     local matrixCost = 2.5e25
                     local eggModel, targetPart = AutoProgAPI.FindEggModel("MatrixEgg")
@@ -1070,10 +1082,9 @@ table.insert(threads, task.spawn(function()
                             pcall(AutoProgAPI.EquipBest)
                         end
                     else
-                        -- Not enough clicks yet for Matrix Egg: Accumulate clicks on Matrix Island!
-                        if pData.CurrentIsland ~= "Matrix" and (now - lastTeleportTick > 3) then
-                            lastTeleportTick = now
-                            AutoProgAPI.TeleportToIsland("Matrix")
+                        -- Not enough clicks yet for Matrix Egg: Stay directly on Matrix Egg to click & hatch!
+                        if dist > 18 then
+                            AutoProgAPI.TeleportToEgg("MatrixEgg")
                         end
                         currentActivity = string.format("[Phase 3: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
