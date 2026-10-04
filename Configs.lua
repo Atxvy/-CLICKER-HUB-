@@ -42,6 +42,8 @@ Configs.Default = {
     OptimizeGameSettings = true,
     WalkSpeed = 16,
     JumpPower = 50,
+    WebhookUrl = "",
+    WebhookEnabled = true,
 }
 
 Configs.Current = table.clone(Configs.Default)
