@@ -702,9 +702,11 @@ function UILibrary.CreateWindow(config)
             pad.PaddingBottom = UDim.new(0, 10)
             pad.PaddingLeft = UDim.new(0, 12)
             pad.PaddingRight = UDim.new(0, 12)
+            el.Name = "Paragraph_" .. tostring((opts.Title or "Card"):gsub("%s+", ""))
             pad.Parent = el
 
             local title = Instance.new("TextLabel")
+            title.Name = "ParagraphTitle"
             title.Size = UDim2.new(1, 0, 0, 18)
             title.Position = UDim2.new(0, 0, 0, 0)
             title.BackgroundTransparency = 1
@@ -716,6 +718,7 @@ function UILibrary.CreateWindow(config)
             title.Parent = el
 
             local body = Instance.new("TextLabel")
+            body.Name = "ParagraphBody"
             body.AutomaticSize = Enum.AutomaticSize.Y
             body.Size = UDim2.new(1, 0, 0, 0)
             body.Position = UDim2.new(0, 0, 0, 20)
@@ -729,13 +732,17 @@ function UILibrary.CreateWindow(config)
             body.TextWrapped = true
             body.Parent = el
 
-            local ParaObj = {}
+            local ParaObj = {
+                Frame = el,
+                TitleLabel = title,
+                BodyLabel = body,
+            }
             function ParaObj:Set(newOpts)
                 if type(newOpts) == "string" then
                     body.Text = newOpts
                 elseif type(newOpts) == "table" then
-                    if newOpts.Title then title.Text = newOpts.Title end
-                    if newOpts.Content then body.Text = newOpts.Content end
+                    if newOpts.Title then title.Text = tostring(newOpts.Title) end
+                    if newOpts.Content then body.Text = tostring(newOpts.Content) end
                 end
             end
             function ParaObj:SetText(content)
