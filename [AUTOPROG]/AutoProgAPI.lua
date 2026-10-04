@@ -296,7 +296,7 @@ function ProgAPI.GetPrestigeInfo()
         }
     end
 
-    local reqRebirths = nextTier.Rebirths or 1e12
+    local reqRebirths = nextTier.RequiredRebirths or nextTier.Rebirths or 1e16
     return {
         CanPrestige = (curRebirths >= reqRebirths),
         CurrentPrestige = curPrest,
@@ -920,7 +920,7 @@ end
 
 
 function ProgAPI.BuyAffordableMiniUpgrades(): number
-    if not Directory.MiniUpgrades or not Channels.MiniUpgrades then return 0 end
+    if not Channels.MiniUpgrades then return 0 end
     local stats = Stats.Local(true) or {}
     local gems = stats.Currency and stats.Currency.Gems or 0
     local bought = 0
@@ -929,16 +929,21 @@ function ProgAPI.BuyAffordableMiniUpgrades(): number
 
     for _, isl in ipairs(islandNames) do
         if ProgAPI.IsIslandUnlocked(isl) then
-            local cost = (Directory.MiniUpgrades[isl] and Directory.MiniUpgrades[isl].Cost) or 500000000
+            local cost = 500000000
+            pcall(function()
+                if Directory.MiniUpgrades and Directory.MiniUpgrades[isl] then
+                    cost = Directory.MiniUpgrades[isl].Cost or cost
+                end
+            end)
             local owned = stats.MiniUpgrades and stats.MiniUpgrades[isl]
             if not owned and gems >= cost then
-                local ok = pcall(function()
+                local ok, res = pcall(function()
                     return Channels.MiniUpgrades:InvokeServer("Buy", isl)
                 end)
-                if ok then
+                if ok and res == true then
                     gems = gems - cost
                     bought = bought + 1
-                    task.wait(0.1)
+                    task.wait(0.08)
                 end
             end
         end
@@ -1138,27 +1143,54 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
 
     local uid = targetModel:GetAttribute("BreakableUID")
     local pivot = targetModel:GetPivot()
+    local tPos = pivot.Position
+    local eyePos = tPos + Vector3.new(0, 1.5, 3.2)
 
-    -- 1. TELEPORT DIRECTLY ONTO / NEXT TO THE TARGET BREAKABLE
-    hrp.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 1.5, 2.5), pivot.Position)
+    -- 1. TELEPORT DIRECTLY NEXT TO THE TARGET BREAKABLE & AIM AT IT
+    hrp.CFrame = CFrame.lookAt(eyePos, tPos)
     hrp.AssemblyLinearVelocity = Vector3.zero
     hrp.AssemblyAngularVelocity = Vector3.zero
 
-    -- 2. DUAL DAMAGE: PLAYER CLICK DAMAGE + FRONTEND TARGETING
+    local cam = workspace.CurrentCamera
+    if cam then
+        cam.CFrame = CFrame.lookAt(eyePos + Vector3.new(0, 2.5, 3.5), tPos)
+    end
+
+    -- 2. ENTER ZONE & SET TARGET IN FRONTEND
+    local zoneId = targetIsland .. "/1"
+    if BreakablesFrontend then
+        pcall(function()
+            BreakablesFrontend.EnterZone(zoneId)
+            BreakablesFrontend.SetExternalTarget(targetModel)
+            BreakablesFrontend.ReportClick(targetModel)
+        end)
+    end
+
+    -- 3. PLAYER RAPID SCREEN TAPPING VIA VIRTUAL INPUT MANAGER
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        if cam and vim then
+            local sPos, onScreen = cam:WorldToViewportPoint(tPos)
+            if onScreen and sPos.Z > 0 then
+                for _ = 1, 4 do
+                    vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, true, game, 0)
+                    task.wait(0.015)
+                    vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, false, game, 0)
+                    task.wait(0.02)
+                end
+            end
+        end
+    end)
+
+    -- 4. DIRECT SERVER CLICK RPC + CLICK POWER
     if Channels.Breakables and uid then
         pcall(function()
             Channels.Breakables:InvokeServer("Click", uid)
         end)
     end
-    if BreakablesFrontend then
-        pcall(function()
-            BreakablesFrontend.SetExternalTarget(targetModel)
-            BreakablesFrontend.ReportClick(targetModel)
-        end)
-    end
     ProgAPI.Click()
 
-    -- 3. PET STRIKES: ALL EQUIPPED PETS HIT SIMULTANEOUSLY
+    -- 5. PET STRIKES: ALL EQUIPPED PETS HIT SIMULTANEOUSLY
     local equipped = stats.EquippedPets or {}
     for guid, _ in pairs(equipped) do
         if Channels.Breakables and uid then
@@ -1188,7 +1220,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     -- 1. Coins Skill Tree NOT done: Farm Heaven and Volcano breakables!
     if not stProg.CoinsComplete then
         local stats = Stats.Local(true) or {}
-        local curIsland = stats.CurrentIsland or "Heaven"
+        local curIsland = stats.CurrentIsland or "Spawn"
         local curWorld = stats.CurrentWorld or "Overworld"
 
         if curWorld ~= "Overworld" then
@@ -1196,13 +1228,22 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
             task.wait(0.5)
         end
 
+        -- Ensure player is on activeCoinsIsland
+        if curIsland ~= activeCoinsIsland then
+            ProgAPI.TeleportToIsland(activeCoinsIsland)
+            lastBreakablesSwitchTick = now
+            task.wait(0.4)
+            return "Teleported to " .. activeCoinsIsland, activeCoinsIsland
+        end
+
         local activeOnCur = ProgAPI.GetActiveBreakablesCount(activeCoinsIsland, "1")
-        if activeOnCur == 0 or (now - lastBreakablesSwitchTick > 30) then
+        -- Only switch if we've been here at least 8 seconds AND there are 0 breakables, OR 30 seconds have passed
+        if (now - lastBreakablesSwitchTick > 8 and activeOnCur == 0) or (now - lastBreakablesSwitchTick > 30) then
             lastBreakablesSwitchTick = now
             activeCoinsIsland = (activeCoinsIsland == "Volcano") and "Heaven" or "Volcano"
             ProgAPI.TeleportToIsland(activeCoinsIsland)
-            task.wait(0.3)
-            return "Switched Coins Zone", activeCoinsIsland
+            task.wait(0.4)
+            return "Switched Coins Zone to " .. activeCoinsIsland, activeCoinsIsland
         end
 
         local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, true)
@@ -1212,7 +1253,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     -- 2. Coins skill tree complete: Teleport to latest Tech World (Matrix) to farm Tech Coins!
     else
         local stats = Stats.Local(true) or {}
-        local curWorld = stats.CurrentWorld or "Techworld"
+        local curWorld = stats.CurrentWorld or "Overworld"
 
         if curWorld ~= "Techworld" then
             ProgAPI.TeleportToWorld("Techworld")
@@ -1220,6 +1261,13 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end
 
         local techTarget = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
+        local curIsland = stats.CurrentIsland or ""
+        if curIsland ~= techTarget then
+            ProgAPI.TeleportToIsland(techTarget)
+            task.wait(0.4)
+            return "Teleported to " .. techTarget, techTarget
+        end
+
         local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, true)
         pcall(function() ProgAPI.BuyAffordableSkillTree(false) end)
         return "Attacking " .. tostring(targetName or "Tech Breakables"), techTarget
