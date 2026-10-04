@@ -3300,24 +3300,22 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
     end)
 
-    local targetParent = nil
-    pcall(function()
-        if typeof(gethui) == "function" then
-            targetParent = gethui()
-        end
-    end)
-    if not targetParent then
-        pcall(function()
-            targetParent = game:GetService("CoreGui")
-        end)
-    end
-    if not targetParent then
-        local lp = LocalPlayer or game:GetService("Players").LocalPlayer
-        targetParent = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
-    end
-
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    local targetParent = pg
+
+    pcall(function()
+        if typeof(gethui) == "function" then
+            local h = gethui()
+            if h then
+                local test = Instance.new("Folder")
+                test.Parent = h
+                test:Destroy()
+                targetParent = h
+            end
+        end
+    end)
+    if not targetParent then targetParent = pg end
 
     if enabled then
         -- Hide all ScreenGuis in PlayerGui to eliminate 2D UI draw calls and lingering labels
@@ -3333,15 +3331,17 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         if not blackScreenGui or not blackScreenGui.Parent then
-            if not targetParent then return end
+            if not targetParent and not pg then return end
 
             pcall(function()
-                for _, ch in ipairs(targetParent:GetChildren()) do
-                    if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                        ch:Destroy()
+                if targetParent then
+                    for _, ch in ipairs(targetParent:GetChildren()) do
+                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                            ch:Destroy()
+                        end
                     end
                 end
-                if pg then
+                if pg and pg ~= targetParent then
                     for _, ch in ipairs(pg:GetChildren()) do
                         if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
                             ch:Destroy()
@@ -3530,7 +3530,14 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             hint.TextXAlignment = Enum.TextXAlignment.Center
             hint.Parent = card
 
-            blackScreenGui.Parent = targetParent
+            local okParent = pcall(function()
+                blackScreenGui.Parent = targetParent
+            end)
+            if not okParent and pg then
+                pcall(function()
+                    blackScreenGui.Parent = pg
+                end)
+            end
         end
 
         blackScreenGui.Enabled = true
