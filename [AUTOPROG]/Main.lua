@@ -121,8 +121,9 @@ end
 local AutoProgAPI = ProgAPI -- Backward compatibility alias
 local Configs = loadModule("Configs.lua")
 
--- Suppress game black shade
+-- Suppress game black shade & disable egg animation
 pcall(ProgAPI.SuppressBlackShade)
+pcall(ProgAPI.DisableEggAnimation)
 
 -- Clean up any prior running AutoProg instance
 if _G.ClickerSimulatorAutoProgCleanup then
@@ -937,6 +938,7 @@ end))
 table.insert(threads, task.spawn(function()
     local lastTeleportTick = 0
     local lastEggHatchTick = 0
+    local isEggHatching = false
     local lastSkinTick = 0
     local lastQuestTick = 0
     local lastFurthestTpTick = 0
@@ -1003,7 +1005,7 @@ table.insert(threads, task.spawn(function()
 
                 -- 3. Auto buy egg for pets & auto gold pets
                 local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
-                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick >= hatchDelay) then
+                if (State.AutoBestEggs or State.AutoGold) and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
@@ -1011,15 +1013,27 @@ table.insert(threads, task.spawn(function()
                     if not isAllGold and canAffordBestEgg and isSafeEgg then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
-                        AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
-                        pcall(AutoProgAPI.CraftGoldenPets)
-                        pcall(AutoProgAPI.EquipBest)
+                        isEggHatching = true
+                        task.spawn(function()
+                            pcall(function()
+                                AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
+                                pcall(AutoProgAPI.CraftGoldenPets)
+                                pcall(AutoProgAPI.EquipBest)
+                            end)
+                            isEggHatching = false
+                        end)
                     elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg and isSafeEgg then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s", hatchAmount, bestEgg.name, bestEgg.island)
-                        AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
-                        pcall(AutoProgAPI.CraftGoldenPets)
-                        pcall(AutoProgAPI.EquipBest)
+                        isEggHatching = true
+                        task.spawn(function()
+                            pcall(function()
+                                AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
+                                pcall(AutoProgAPI.CraftGoldenPets)
+                                pcall(AutoProgAPI.EquipBest)
+                            end)
+                            isEggHatching = false
+                        end)
                     end
                 end
 
@@ -1059,8 +1073,8 @@ table.insert(threads, task.spawn(function()
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
                 local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
 
-                -- 1. Auto Open Matrix Egg:
-                if State.AutoMatrixEgg and (now - lastEggHatchTick >= hatchDelay) then
+                -- 1. Auto Open Matrix Egg (runs non-blocking in task.spawn without client animations)
+                if State.AutoMatrixEgg and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
                     local matrixCost = 2.5e25
                     local eggModel, targetPart = AutoProgAPI.FindEggModel("MatrixEgg")
@@ -1077,24 +1091,30 @@ table.insert(threads, task.spawn(function()
                     if pData.Clicks >= matrixCost then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
                         currentActivity = string.format("[Phase 3: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
-                        AutoProgAPI.OpenEgg("MatrixEgg", hatchAmount)
+                        isEggHatching = true
+                        task.spawn(function()
+                            pcall(function()
+                                AutoProgAPI.OpenEgg("MatrixEgg", hatchAmount, true)
 
-                        -- 2. Mythic Pet Filter & Cleaner: Delete non-mythics and old weak pets
-                        if State.AutoMythicFilter then
-                            pcall(AutoProgAPI.CleanNonMythicPets)
-                        end
+                                -- 2. Mythic Pet Filter & Cleaner: Delete non-mythics and old weak pets
+                                if State.AutoMythicFilter then
+                                    pcall(AutoProgAPI.CleanNonMythicPets)
+                                end
 
-                        -- 3. Auto Craft Golden & Rainbow Mythics
-                        if State.AutoCraftMythics then
-                            pcall(AutoProgAPI.CraftGoldenPets)
-                            pcall(AutoProgAPI.CraftRainbowPets)
-                            pcall(AutoProgAPI.ClaimRainbowPets)
-                        end
+                                -- 3. Auto Craft Golden & Rainbow Mythics
+                                if State.AutoCraftMythics then
+                                    pcall(AutoProgAPI.CraftGoldenPets)
+                                    pcall(AutoProgAPI.CraftRainbowPets)
+                                    pcall(AutoProgAPI.ClaimRainbowPets)
+                                end
 
-                        -- 4. Auto Replace Team with Mythics
-                        if State.AutoReplaceTeam then
-                            pcall(AutoProgAPI.EquipBest)
-                        end
+                                -- 4. Auto Replace Team with Mythics
+                                if State.AutoReplaceTeam then
+                                    pcall(AutoProgAPI.EquipBest)
+                                end
+                            end)
+                            isEggHatching = false
+                        end)
                     else
                         -- Not enough clicks yet for Matrix Egg: Stay directly on Matrix Egg to click & hatch!
                         if dist > 18 then
