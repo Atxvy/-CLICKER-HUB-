@@ -151,6 +151,9 @@ end
 -- Load state from Configs
 local State = Configs.Load()
 if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
+_G.State = State
+_G.ProgAPI = ProgAPI
+_G.AutoProgAPI = AutoProgAPI
 
 --==============================================================================
 -- UI INITIALIZATION
