@@ -1063,46 +1063,68 @@ end
 
 --==============================================================================
 -- BREAKABLES PIPELINE (Heaven Exclusive for Coins -> Tech World for Tech Coins)
+-- Transferred directly from tested [CLICKER HUB] implementation
 --==============================================================================
-function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
-    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return 0 end
-    local zonePos = ProgAPI.GetBreakableZonePosition(islandName)
-    local count = 0
-    for _, child in ipairs(bf:GetChildren()) do
-        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
-        if m and m:IsA("Model") then
-            local uid = m:GetAttribute("BreakableUID")
-            local hp = m:GetAttribute("BreakableHP") or 0
-            if uid and hp > 0 then
-                local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-                local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-                if not isBoss then
-                    local z = tostring(m:GetAttribute("BreakableZone") or "")
-                    local inZone = z:find(islandName) ~= nil
-                    if not inZone and zonePos then
-                        local ok, pivot = pcall(function() return m:GetPivot() end)
-                        if ok and pivot then
-                            inZone = (pivot.Position - zonePos).Magnitude < 160
-                        end
-                    end
-                    if inZone then
-                        count = count + 1
-                    end
+
+-- Target lock / focus fire cache
+local currentTargetUID: string? = nil
+local currentTargetModel: Model? = nil
+
+-- Finds the breakable zone part and zone ID for an island
+function ProgAPI.GetIslandBreakableZone(islandName: string?, ignoreBossChest: boolean?): (Instance?, string?)
+    if ignoreBossChest == nil then ignoreBossChest = true end
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    local islands = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Islands")
+    local isl = islands and islands:FindFirstChild(islandName)
+    local interact = isl and isl:FindFirstChild("Interact")
+    local bZones = interact and interact:FindFirstChild("BreakableZones")
+    if bZones then
+        local normalZone = bZones:FindFirstChild("1")
+        if normalZone and normalZone:IsA("BasePart") then
+            return normalZone, islandName .. "/1"
+        end
+        for _, child in ipairs(bZones:GetChildren()) do
+            if child:IsA("BasePart") then
+                local cName = child.Name:lower()
+                if not (ignoreBossChest and (cName:find("huge") or cName:find("boss") or cName:find("giant") or cName:find("chest"))) then
+                    return child, islandName .. "/" .. child.Name
+                end
+            end
+        end
+        local part = bZones:FindFirstChildWhichIsA("BasePart")
+        if part then
+            return part, islandName .. "/" .. part.Name
+        end
+    end
+
+    -- Check _THINGS._BreakableZones
+    local thingsBZones = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("_BreakableZones")
+    if thingsBZones then
+        local targetZoneName = (islandName .. "/1"):lower()
+        for _, z in ipairs(thingsBZones:GetChildren()) do
+            if z.Name:lower() == targetZoneName then
+                return z, z.Name
+            end
+        end
+        for _, z in ipairs(thingsBZones:GetChildren()) do
+            local zName = z.Name:lower()
+            if zName:find(islandName:lower()) then
+                if not (ignoreBossChest and (zName:find("huge") or zName:find("boss") or zName:find("giant") or zName:find("chest"))) then
+                    return z, z.Name
                 end
             end
         end
     end
-    return count
+
+    return nil, nil
 end
 
 function ProgAPI.GetBreakableZonePosition(islandName: string): Vector3?
-    local bz = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("_BreakableZones")
-    local zonePart = bz and (bz:FindFirstChild(islandName .. "/1") or bz:FindFirstChild(islandName))
-    if zonePart then
-        return zonePart:GetPivot().Position
+    local part = ProgAPI.GetIslandBreakableZone(islandName, true)
+    if part and part:IsA("BasePart") then
+        return part.Position
     end
-
     local fallbacks = {
         Volcano = Vector3.new(-228.66, 9667.0, 327.77),
         Heaven = Vector3.new(-153.86, 12668.5, 360.0),
@@ -1111,62 +1133,82 @@ function ProgAPI.GetBreakableZonePosition(islandName: string): Vector3?
     return fallbacks[islandName]
 end
 
-function ProgAPI.TeleportToBreakableZone(islandName: string): boolean
+-- Checks if the island has breakables
+function ProgAPI.HasBreakables(islandName: string?): boolean
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    if Directory and Directory.Islands and Directory.Islands[islandName] then
+        if Directory.Islands[islandName].Breakables ~= nil then
+            return true
+        end
+    end
+    local zonePart = ProgAPI.GetIslandBreakableZone(islandName, true)
+    return zonePart ~= nil
+end
+
+-- Stop attacking and cleanly detach from breakables zone so normal player clicking works seamlessly
+function ProgAPI.StopBreakables()
+    currentTargetModel = nil
+    currentTargetUID = nil
+    if BreakablesFrontend then
+        pcall(function()
+            BreakablesFrontend.SetExternalTarget(nil)
+            BreakablesFrontend.LeaveZone()
+        end)
+    end
+end
+
+-- Checks if a breakable model is considered a giant / boss chest
+function ProgAPI.IsBossChest(modelOrId: any): boolean
+    local str = ""
+    local maxHP = 0
+    if typeof(modelOrId) == "Instance" then
+        local bId = modelOrId:GetAttribute("BreakableId") or modelOrId.Name
+        str = tostring(bId):lower()
+        local zone = modelOrId:GetAttribute("BreakableZone")
+        if zone then str = str .. " " .. tostring(zone):lower() end
+        local mhp = modelOrId:GetAttribute("BreakableMaxHP") or modelOrId:GetAttribute("BreakableHP")
+        if type(mhp) == "number" then maxHP = mhp end
+    elseif type(modelOrId) == "string" then
+        str = modelOrId:lower()
+    end
+    return str:find("boss") ~= nil 
+        or str:find("giant") ~= nil 
+        or str:find("huge") ~= nil 
+        or str:find("grand") ~= nil
+        or maxHP > 40000000
+end
+
+-- Teleports character directly to the active breakable box itself or zone center
+function ProgAPI.TeleportToBreakableZone(islandName: string?, ignoreBossChest: boolean?): boolean
+    if ignoreBossChest == nil then ignoreBossChest = true end
+    local zonePart, zoneId = ProgAPI.GetIslandBreakableZone(islandName, ignoreBossChest)
+    if not zonePart then return false end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    local pos = ProgAPI.GetBreakableZonePosition(islandName)
-    if pos then
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3.5, 0))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        return true
+    if BreakablesFrontend and zoneId then
+        pcall(function()
+            BreakablesFrontend.EnterZone(zoneId)
+        end)
     end
-    return false
-end
 
--- Finds whatever breakable is closest to the player (skipping boss/giant chests)
-function ProgAPI.GetNearestBreakable(targetIsland: string?, maxDistance: number?, ignoreBossChest: boolean?)
-    if ignoreBossChest == nil then ignoreBossChest = true end
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, math.huge end
-
-    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return nil, math.huge end
-
-    local hrpPos = hrp.Position
-    local zonePos = targetIsland and ProgAPI.GetBreakableZonePosition(targetIsland)
+    -- Look for nearest active breakable model inside or near the standard zone
     local bestModel = nil
-    local bestDist = maxDistance or math.huge
-
-    for _, child in ipairs(bf:GetChildren()) do
-        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
-        if m and m:IsA("Model") then
-            local uid = m:GetAttribute("BreakableUID")
-            local hp = m:GetAttribute("BreakableHP") or 0
-            if uid and hp > 0 then
-                local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-                local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-                if not isBoss or not ignoreBossChest then
-                    local ok, pivot = pcall(function() return m:GetPivot() end)
-                    if ok and pivot then
-                        local mPos = pivot.Position
-                        local inIsland = true
-                        if targetIsland then
-                            local bZone = tostring(m:GetAttribute("BreakableZone") or "")
-                            inIsland = bZone:find(targetIsland) ~= nil
-                            if not inIsland and zonePos then
-                                inIsland = (mPos - zonePos).Magnitude < 160
-                            end
-                        end
-                        if inIsland then
-                            local dist = (mPos - hrpPos).Magnitude
-                            if dist < bestDist then
-                                bestDist = dist
-                                bestModel = m
-                            end
+    local bestDist = math.huge
+    local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+    if breakablesFolder then
+        for _, f in ipairs(breakablesFolder:GetChildren()) do
+            local m = f:FindFirstChildWhichIsA("Model") or (f:IsA("Model") and f)
+            if m and m:GetAttribute("BreakableUID") then
+                if not (ignoreBossChest and ProgAPI.IsBossChest(m)) then
+                    local hp = m:GetAttribute("BreakableHP") or 1
+                    if hp > 0 then
+                        local dist = (m:GetPivot().Position - zonePart.Position).Magnitude
+                        if dist < 100 and dist < bestDist then
+                            bestDist = dist
+                            bestModel = m
                         end
                     end
                 end
@@ -1174,200 +1216,218 @@ function ProgAPI.GetNearestBreakable(targetIsland: string?, maxDistance: number?
         end
     end
 
-    return bestModel, bestDist
+    if bestModel and bestModel.Parent then
+        local pivot = bestModel:GetPivot()
+        hrp.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 1.5, 3), pivot.Position)
+        return true
+    else
+        hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+        return true
+    end
 end
 
--- Instantly snaps character CFrame right next to target breakable and aims camera (0ms delay)
-function ProgAPI.SnapToBreakable(targetModel: Model): boolean
+-- Attacks active breakable in the zone with 100% reliability (Focus Fire + Direct Server Remotes + Frontend Visuals)
+function ProgAPI.AttackBreakable(ignoreBossChest: boolean?, islandName: string?): (boolean, string?, number?)
+    if ignoreBossChest == nil then ignoreBossChest = true end
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or not targetModel or not targetModel.Parent then return false end
+    if not hrp then return false, "No character", nil end
 
-    local ok, pivot = pcall(function() return targetModel:GetPivot() end)
-    if not ok or not pivot then return false end
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    local zonePart, zoneId = ProgAPI.GetIslandBreakableZone(islandName, ignoreBossChest)
+    if not zonePart then return false, "No breakables on island", nil end
 
-    local tPos = pivot.Position
-    local eyePos = tPos + Vector3.new(0, 1.2, 2.8)
-
-    hrp.CFrame = CFrame.lookAt(eyePos, tPos)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-    hrp.AssemblyAngularVelocity = Vector3.zero
-
-    local cam = workspace.CurrentCamera
-    if cam then
-        cam.CFrame = CFrame.lookAt(eyePos + Vector3.new(0, 1.8, 3.0), tPos)
-    end
-    return true
-end
-
--- Strikes breakable with player clicks and all equipped pets in non-blocking parallel tasks
-function ProgAPI.StrikeBreakable(targetModel: Model): boolean
-    if not targetModel or not targetModel.Parent then return false end
-    local uid = targetModel:GetAttribute("BreakableUID")
-    if not uid then return false end
-
-    local stats = Stats.Local() or {}
-    local equipped = stats.EquippedPets or {}
-    if next(equipped) == nil then
-        pcall(ProgAPI.EquipBest)
-        stats = Stats.Local() or {}
-        equipped = stats.EquippedPets or {}
+    if BreakablesFrontend and zoneId then
+        pcall(function() BreakablesFrontend.EnterZone(zoneId) end)
     end
 
-    -- 1. Parallel Non-Blocking Server RPCs
-    if Channels.Breakables then
-        task.spawn(function()
-            pcall(function() Channels.Breakables:InvokeServer("Click", uid) end)
-        end)
-        for guid in pairs(equipped) do
-            task.spawn(function()
-                pcall(function() Channels.Breakables:InvokeServer("Hit", uid, guid) end)
-            end)
+    -- Validate existing target lock (Focus Fire)
+    local targetModel = currentTargetModel
+    local targetUID = currentTargetUID
+
+    if targetModel and targetModel.Parent and targetUID then
+        local hp = targetModel:GetAttribute("BreakableHP")
+        local isBoss = ProgAPI.IsBossChest(targetModel)
+        if hp == nil or hp <= 0 or (ignoreBossChest and isBoss) then
+            targetModel = nil
+            targetUID = nil
+            currentTargetModel = nil
+            currentTargetUID = nil
+            if BreakablesFrontend then
+                pcall(function() BreakablesFrontend.SetExternalTarget(nil) end)
+            end
+        end
+    else
+        targetModel = nil
+        targetUID = nil
+        currentTargetModel = nil
+        currentTargetUID = nil
+    end
+
+    -- If no valid locked target, select the best candidate
+    if not targetModel then
+        local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+        local candidates = {}
+        local proximityOverride = nil
+
+        if breakablesFolder then
+            for _, f in ipairs(breakablesFolder:GetChildren()) do
+                local m = f:FindFirstChildWhichIsA("Model") or (f:IsA("Model") and f)
+                if m and m:GetAttribute("BreakableUID") then
+                    local hp = m:GetAttribute("BreakableHP") or 1
+                    if hp > 0 then
+                        local pos = m:GetPivot().Position
+                        local distToPlayer = (pos - hrp.Position).Magnitude
+                        local distToZone = (pos - zonePart.Position).Magnitude
+                        local isBoss = ProgAPI.IsBossChest(m)
+
+                        -- If ignoring boss chests, NEVER consider boss chests!
+                        if not (ignoreBossChest and isBoss) then
+                            if distToZone < 120 then
+                                if distToPlayer < 22 then
+                                    if not proximityOverride or distToPlayer < proximityOverride.dist then
+                                        proximityOverride = { model = m, dist = distToPlayer }
+                                    end
+                                end
+                                table.insert(candidates, { model = m, dist = distToPlayer, isBoss = isBoss })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if proximityOverride then
+            targetModel = proximityOverride.model
+        elseif #candidates > 0 then
+            table.sort(candidates, function(a, b) return a.dist < b.dist end)
+            targetModel = candidates[1].model
+        else
+            -- Server snapshot fallback if workspace models hadn't populated
+            if Channels.Breakables then
+                local serverSnaps = nil
+                pcall(function()
+                    serverSnaps = Channels.Breakables:InvokeServer("Get", islandName)
+                end)
+                if type(serverSnaps) == "table" and #serverSnaps > 0 then
+                    for _, s in ipairs(serverSnaps) do
+                        local isBoss = ProgAPI.IsBossChest(s.breakableId or "")
+                        if s.uid and s.hp and s.hp > 0 then
+                            if not (ignoreBossChest and isBoss) then
+                                local f = breakablesFolder and breakablesFolder:FindFirstChild(s.uid)
+                                local m = f and (f:FindFirstChildWhichIsA("Model") or (f:IsA("Model") and f))
+                                if m then
+                                    targetModel = m
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if targetModel then
+            currentTargetModel = targetModel
+            currentTargetUID = targetModel:GetAttribute("BreakableUID")
+            targetUID = currentTargetUID
         end
     end
 
-    -- 2. Client Frontend Reports
+    if not targetModel or not targetUID then
+        -- If ignoring boss chests and player is standing close to a boss chest, relocate to zone center!
+        if ignoreBossChest then
+            local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+            if breakablesFolder then
+                for _, f in ipairs(breakablesFolder:GetChildren()) do
+                    local m = f:FindFirstChildWhichIsA("Model") or (f:IsA("Model") and f)
+                    if m and ProgAPI.IsBossChest(m) then
+                        local d = (m:GetPivot().Position - hrp.Position).Magnitude
+                        if d < 35 then
+                            hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Keep player positioned at zone center while waiting for respawn wave
+        if zonePart and (hrp.Position - zonePart.Position).Magnitude > 30 then
+            hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+        end
+        return false, "Waiting for breakables respawn", nil
+    end
+
+    -- Face target and maintain close proximity
+    local pivot = targetModel:GetPivot()
+    local dist = (hrp.Position - pivot.Position).Magnitude
+    if dist > 8 then
+        hrp.CFrame = CFrame.new(pivot.Position + Vector3.new(0, 1.5, 3), pivot.Position)
+    end
+
+    -- Optimized Attack Execution (Prioritize BreakablesFrontend for damage numbers + audio + single server remote)
+    local dmg = nil
     if BreakablesFrontend then
         pcall(function()
-            BreakablesFrontend.ReportClick(targetModel)
-            for guid in pairs(equipped) do
+            local zone = targetModel:GetAttribute("BreakableZone")
+            if zone and BreakablesFrontend.GetCurrentZone and BreakablesFrontend.GetCurrentZone() ~= zone then
+                BreakablesFrontend.EnterZone(zone)
+            end
+            BreakablesFrontend.SetExternalTarget(targetModel)
+            dmg = BreakablesFrontend.ReportClick(targetModel)
+
+            local stats = Stats.Local(true) or {}
+            local equipped = stats.EquippedPets or {}
+            for guid, _ in pairs(equipped) do
                 BreakablesFrontend.ReportStrike(guid)
             end
         end)
-    end
-
-    -- 3. Screen click via VirtualInputManager & internal Click
-    local ok, pivot = pcall(function() return targetModel:GetPivot() end)
-    if ok and pivot then
-        local tPos = pivot.Position
-        local cam = workspace.CurrentCamera
-        local vim = game:GetService("VirtualInputManager")
-        if cam and vim then
-            local sPos, onScreen = cam:WorldToViewportPoint(tPos)
-            if onScreen and sPos.Z > 0 then
-                vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, true, game, 0)
-                task.wait(0.005)
-                vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, false, game, 0)
-            end
+    elseif Channels.Breakables then
+        -- Direct fallback only if BreakablesFrontend is unavailable
+        pcall(function()
+            Channels.Breakables:InvokeServer("Click", targetUID)
+        end)
+        local stats = Stats.Local(true) or {}
+        local equipped = stats.EquippedPets or {}
+        for guid, _ in pairs(equipped) do
+            pcall(function()
+                Channels.Breakables:InvokeServer("Hit", targetUID, guid)
+            end)
         end
     end
 
+    -- Fire player click alongside breakable attack for clicks multiplier
     ProgAPI.Click()
-    return true
+
+    return true, targetModel.Name, dmg
 end
 
--- Destroys everything near the player in the breakables arena simultaneously with zero delay
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
-    if ignoreBossChest == nil then ignoreBossChest = true end
-    local char = LocalPlayer.Character or (LocalPlayer.CharacterAdded and LocalPlayer.CharacterAdded:Wait())
-    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5))
-    if not hrp then return false, "No character" end
+    local ok, name = ProgAPI.AttackBreakable(ignoreBossChest, targetIsland)
+    return ok, name
+end
 
-    local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
-
-    -- If player is far outside the zone arena (> 220 studs), teleport to arena
-    if zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-        ProgAPI.TeleportToIsland(targetIsland)
-        task.wait(0.3)
-        ProgAPI.TeleportToBreakableZone(targetIsland)
-        task.wait(0.2)
-    end
-
-    if BreakablesFrontend then
-        pcall(function() BreakablesFrontend.EnterZone(targetIsland .. "/1") end)
-    end
-
+function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
     local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return false, "No breakables folder" end
-
-    -- 1. Scan for ALL breakables near the player (within 50 studs)
-    local nearby = {}
-    local anyInArena = {}
+    if not bf then return 0 end
+    local count = 0
     for _, child in ipairs(bf:GetChildren()) do
         local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
         if m and m:IsA("Model") then
             local uid = m:GetAttribute("BreakableUID")
             local hp = m:GetAttribute("BreakableHP") or 0
-            local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-            local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-            if uid and hp > 0 and (not isBoss or not ignoreBossChest) then
-                local ok, pivot = pcall(function() return m:GetPivot() end)
-                if ok and pivot then
-                    local mPos = pivot.Position
-                    local distToPlayer = (mPos - hrp.Position).Magnitude
-                    local distToZone = zonePos and (mPos - zonePos).Magnitude or distToPlayer
-
-                    if distToZone < 160 then
-                        table.insert(anyInArena, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
-                        if distToPlayer <= 50 then
-                            table.insert(nearby, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
-                        end
-                    end
+            if uid and hp > 0 and not ProgAPI.IsBossChest(m) then
+                local z = tostring(m:GetAttribute("BreakableZone") or "")
+                if z:find(islandName) then
+                    count = count + 1
                 end
             end
         end
     end
-
-    -- 2. If nothing is within 50 studs, but some exist in the arena: teleport right to the closest one!
-    if #nearby == 0 and #anyInArena > 0 then
-        table.sort(anyInArena, function(a, b) return a.dist < b.dist end)
-        local closest = anyInArena[1]
-        hrp.CFrame = CFrame.new(closest.pos + Vector3.new(0, 2.5, 0))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        table.insert(nearby, closest)
-    elseif #nearby == 0 and #anyInArena == 0 then
-        -- No breakables in arena right now: stand on the arena pad waiting for respawn wave
-        if zonePos and (hrp.Position - zonePos).Magnitude > 30 then
-            hrp.CFrame = CFrame.new(zonePos + Vector3.new(0, 2.5, 0))
-        end
-        return false, "Waiting for breakables respawn"
-    end
-
-    -- 3. DESTROY EVERYTHING NEAR HIM SIMULTANEOUSLY WITH ZERO DELAY!
-    table.sort(nearby, function(a, b) return a.dist < b.dist end)
-    local primaryTarget = nearby[1]
-
-    -- Face the closest breakable
-    hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(primaryTarget.pos.X, hrp.Position.Y, primaryTarget.pos.Z))
-
-    local stats = Stats.Local() or {}
-    local equipped = stats.EquippedPets or {}
-    if next(equipped) == nil then
-        pcall(ProgAPI.EquipBest)
-        stats = Stats.Local() or {}
-        equipped = stats.EquippedPets or {}
-    end
-
-    -- Strike ALL nearby breakables in parallel!
-    for _, item in ipairs(nearby) do
-        if Channels.Breakables then
-            task.spawn(function()
-                pcall(function() Channels.Breakables:InvokeServer("Click", item.uid) end)
-            end)
-            for guid in pairs(equipped) do
-                task.spawn(function()
-                    pcall(function() Channels.Breakables:InvokeServer("Hit", item.uid, guid) end)
-                end)
-            end
-        end
-        if BreakablesFrontend then
-            pcall(function()
-                BreakablesFrontend.ReportClick(item.model)
-                for guid in pairs(equipped) do
-                    BreakablesFrontend.ReportStrike(guid)
-                end
-            end)
-        end
-    end
-
-    ProgAPI.Click()
-
-    local names = {}
-    for i = 1, math.min(3, #nearby) do
-        table.insert(names, nearby[i].name)
-    end
-    return true, table.concat(names, ", ") .. string.format(" (%d nearby)", #nearby)
+    return count
 end
 
 -- Executes the Coins (Heaven ONLY) -> Tech World breakables pipeline
@@ -1380,58 +1440,52 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     end)
 
     -- 1. Coins Skill Tree NOT done: Farm ONLY Heaven breakables (NO VOLCANO)!
-    if not stProg.CoinsComplete then
-        local targetIsland = "Heaven"
-        local stats = Stats.Local() or {}
-        local curWorld = stats.CurrentWorld or "Overworld"
+    local targetIsland = "Heaven"
+    if stProg.CoinsComplete then
+        targetIsland = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
+    end
 
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+
+    if not stProg.CoinsComplete then
         if curWorld ~= "Overworld" then
             ProgAPI.TeleportToWorld("Overworld")
-            task.wait(0.4)
+            task.wait(0.35)
         end
-
-        local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
-        -- Only teleport if far away (> 220 studs)
-        if hrp and zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-            ProgAPI.TeleportToIsland(targetIsland)
-            task.wait(0.3)
-            ProgAPI.TeleportToBreakableZone(targetIsland)
-            task.wait(0.2)
-        end
-
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(targetIsland, true)
-        local activeRemaining = ProgAPI.GetActiveBreakablesCount(targetIsland, "1")
-        if attacked and targetName then
-            return "Attacking " .. tostring(targetName) .. " (" .. activeRemaining .. " left)", targetIsland
-        else
-            return "Waiting for Heaven breakables respawn", targetIsland
-        end
-
-    -- 2. Coins skill tree complete: Teleport to latest Tech World (Matrix) to farm Tech Coins!
     else
-        local stats = Stats.Local() or {}
-        local curWorld = stats.CurrentWorld or "Overworld"
-
         if curWorld ~= "Techworld" then
             ProgAPI.TeleportToWorld("Techworld")
-            task.wait(0.4)
+            task.wait(0.35)
         end
+    end
 
-        local techTarget = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
-        local zonePos = ProgAPI.GetBreakableZonePosition(techTarget)
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local pData = ProgAPI.GetPlayerData()
+    local zonePart, zoneId = ProgAPI.GetIslandBreakableZone(targetIsland, true)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
-        if hrp and zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-            ProgAPI.TeleportToIsland(techTarget)
-            task.wait(0.3)
-            ProgAPI.TeleportToBreakableZone(techTarget)
-            task.wait(0.2)
+    -- If player is not on the target breakables island, or far away (> 80 studs), teleport there
+    if targetIsland ~= pData.CurrentIsland or not zonePart or (hrp and (hrp.Position - zonePart.Position).Magnitude > 80) then
+        if targetIsland ~= pData.CurrentIsland or (hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 200) then
+            ProgAPI.TeleportToIsland(targetIsland)
+            task.wait(0.35)
         end
+        ProgAPI.TeleportToBreakableZone(targetIsland, true)
+        task.wait(0.15)
+        zonePart = ProgAPI.GetIslandBreakableZone(targetIsland, true)
+    end
 
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, true)
-        return "Attacking " .. tostring(targetName or "Tech Breakables"), techTarget
+    -- Keep character anchored inside breakables zone
+    if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
+        ProgAPI.TeleportToBreakableZone(targetIsland, true)
+    end
+
+    local attacked, targetName, dmg = ProgAPI.AttackBreakable(true, targetIsland)
+    if attacked and targetName then
+        return "Attacking " .. tostring(targetName), targetIsland
+    else
+        return tostring(targetName or "Waiting for breakables respawn"), targetIsland
     end
 end
 
