@@ -657,10 +657,21 @@ task.spawn(function()
     if State.OptimizeGameSettings ~= false then pcall(AutoProgAPI.SetDisableInGameSettings, true) end
 end)
 
--- Rejoin & Startup Teleport Guarantee: If in Phase 2 and Skill Tree is not maxed, teleport to active breakables arena!
+-- Rejoin & Startup Teleport Guarantee: Positions player according to current phase
 task.spawn(function()
     task.wait(1.8)
     pcall(function()
+        if AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3() then
+            local pData = AutoProgAPI.GetPlayerData()
+            local curWorld = pData.CurrentWorld or "Overworld"
+            if curWorld ~= "Techworld" and curWorld ~= "Space" then
+                AutoProgAPI.TeleportToWorld("Techworld")
+                task.wait(0.5)
+                AutoProgAPI.TeleportToEgg("MatrixEgg")
+            end
+            return
+        end
+
         local pData = AutoProgAPI.GetPlayerData()
         local lockedIsland = AutoProgAPI.GetNextLockedIsland()
         if lockedIsland == nil and State.AutoSkillTree then
@@ -670,7 +681,9 @@ task.spawn(function()
                 return
             end
             local stProg = AutoProgAPI.GetSkillTreeProgress()
-            if not stProg.CoinsComplete then
+            local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
+            local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
+            if not coinsDone then
                 if qProg and qProg.DoorUnlocked then
                     AutoProgAPI.TeleportToIsland("DominusArea")
                 else
@@ -679,7 +692,7 @@ task.spawn(function()
                     task.wait(0.4)
                     AutoProgAPI.TeleportToBreakableZone("Heaven")
                 end
-            elseif not stProg.TechComplete then
+            elseif not techDone then
                 AutoProgAPI.TeleportToWorld("Techworld")
                 AutoProgAPI.TeleportToIsland("Matrix")
                 task.wait(0.4)
@@ -708,45 +721,26 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 2: DEDICATED CONTINUOUS MAX REBIRTH (Non-blocking high-frequency execution)
+-- THREAD 2: DEDICATED CONTINUOUS REBIRTH ENGINE
+-- Phase 1 & 2: Rebirth as long as affordable (RebirthBestAffordable)
+-- Phase 3: Max Rebirth only (RebirthMaxTarget)
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
         task.wait(0.12)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
 
-        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
-        if isP3 then
-            -- Pause rebirth completely in Phase 3 so all clicks are preserved for Matrix Egg!
-            task.wait(0.5)
-            continue
-        end
-
-        -- Phase 1 smart pause: accumulating clicks for next island unlock
-        if AutoProgAPI.IsSmartRebirthPaused and AutoProgAPI.IsSmartRebirthPaused() then
-            task.wait(0.5)
-            continue
-        end
-
-        local allIslandsUnlocked = AutoProgAPI.AreAllIslandsUnlocked()
         local now = tick()
         if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
 
-            if not allIslandsUnlocked then
-                -- PHASE 1 RULE: As long as they can rebirth, immediately rebirth at the best affordable button!
-                -- Does NOT wait for Goal or button 57!
-                pcall(AutoProgAPI.RebirthBestAffordable)
+            local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
+            if isP3 then
+                -- Phase 3: Rebirth at MAX milestone only
+                pcall(AutoProgAPI.RebirthMaxTarget)
             else
-                -- PHASE 2: Rebirth until max button is reached
-                local maxInfo = AutoProgAPI.GetMaxRebirthInfo()
-                if maxInfo and maxInfo.CanAffordMax and maxInfo.BestAffordableIndex then
-                    if maxInfo.BestAffordableIndex >= maxInfo.MaxButtonIndex then
-                        pcall(AutoProgAPI.RebirthMaxTarget)
-                    else
-                        pcall(AutoProgAPI.RebirthBestAffordable)
-                    end
-                end
+                -- Phase 1 & Phase 2: Rebirth as long as they can afford it
+                pcall(AutoProgAPI.RebirthBestAffordable)
             end
         end
     end
@@ -863,13 +857,14 @@ table.insert(threads, task.spawn(function()
 end))
 
 -- THREAD 12: DEDICATED AUTO PRESTIGE THREAD (Strict Phase 2 requirement: All islands unlocked)
+-- THREAD 12: DEDICATED AUTO PRESTIGE THREAD (Strict Phase 2 requirement: All islands unlocked)
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(2)
         if isRunning and State.MasterEnabled and State.AutoPrestige then
-            if AutoProgAPI.AreAllIslandsUnlocked() then
-                local prestInfo = AutoProgAPI.GetPrestigeInfo()
-                if prestInfo and prestInfo.CanPrestige then
+            local prestInfo = AutoProgAPI.GetPrestigeInfo()
+            if prestInfo and not prestInfo.MaxPrestigeReached and prestInfo.CanPrestige then
+                if AutoProgAPI.AreAllIslandsUnlocked() then
                     currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
                     local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
                     if ok then
@@ -890,9 +885,17 @@ table.insert(threads, task.spawn(function()
         task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
 
+        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
+        if isP3 then
+            task.wait(0.5)
+            continue
+        end
+
         local allIslands = AutoProgAPI.AreAllIslandsUnlocked()
         local stProg = AutoProgAPI.GetSkillTreeProgress()
-        local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
+        local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
+        local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
+        local isSkillTreeMaxed = coinsDone and techDone
 
         -- Runs in Phase 2 until Skill Tree is fully maxed! (Farms Dominus Area for Coins -> Tech World for Tech Coins)
         if allIslands and (not isSkillTreeMaxed) and State.AutoSkillTree then
@@ -901,7 +904,7 @@ table.insert(threads, task.spawn(function()
                 lastBreakableTick = now
 
                 -- If Coins skill tree is done, make sure we are in Tech World!
-                if stProg.CoinsComplete and not stProg.TechComplete then
+                if coinsDone and not techDone then
                     local pData = AutoProgAPI.GetPlayerData()
                     local curWorld = pData.CurrentWorld or "Overworld"
                     if AutoProgAPI.IsInMinigame() or (curWorld ~= "Techworld" and curWorld ~= "Space") then
@@ -912,7 +915,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(false)
-                if stProg.CoinsComplete then
+                if coinsDone then
                     if action then
                         currentActivity = string.format("[Tech Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Matrix"))
                     else
@@ -999,7 +1002,8 @@ table.insert(threads, task.spawn(function()
                 end
 
                 -- 3. Auto buy egg for pets & auto gold pets
-                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick >= 0.1) then
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
+                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
@@ -1035,7 +1039,7 @@ table.insert(threads, task.spawn(function()
             -- Condition: All 17 islands unlocked AND Skill Tree 100% maxed (Coins 36/36 & Tech 13/13)!
             -- Strategy:
             -- 1. Auto Open Matrix Egg (highest endgame egg in Tech World)
-            -- 2. Pause Rebirth (preserves 100% of clicks for Matrix Egg)
+            -- 2. Max Rebirth Only (Thread 2 fires at Max milestone button)
             -- 3. Mythic Only Filter: Delete all non-mythic pets & old weak pets!
             -- 4. Auto Craft Golden Mythics & Rainbow Mythics
             -- 5. Gradually replaces equipped team until 100% Rainbow Mythics!
@@ -1043,10 +1047,20 @@ table.insert(threads, task.spawn(function()
             else
                 currentPhaseText = "🧬 PHASE 3: MATRIX MYTHIC PIPELINE"
 
+                local curWorld = pData.CurrentWorld or "Overworld"
+                if curWorld ~= "Techworld" and curWorld ~= "Space" then
+                    currentActivity = "[Phase 3: Matrix] Teleporting to Tech World..."
+                    AutoProgAPI.TeleportToWorld("Techworld")
+                    task.wait(0.5)
+                    AutoProgAPI.TeleportToEgg("MatrixEgg")
+                    task.wait(0.5)
+                end
+
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
 
                 -- 1. Auto Open Matrix Egg:
-                if State.AutoMatrixEgg and (now - lastEggHatchTick >= 0.1) then
+                if State.AutoMatrixEgg and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
                     local matrixCost = 2.5e25
                     local eggModel, targetPart = AutoProgAPI.FindEggModel("MatrixEgg")
