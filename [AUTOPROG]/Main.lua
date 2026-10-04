@@ -138,6 +138,10 @@ _G.ClickerSimulatorAutoProgCleanup = function()
         pcall(task.cancel, th)
     end
     table.clear(threads)
+    pcall(function()
+        if ProgAPI and ProgAPI.SetBlackScreen then ProgAPI.SetBlackScreen(false) end
+        if ProgAPI and ProgAPI.SetRemoveMaps then ProgAPI.SetRemoveMaps(false) end
+    end)
     if _G.ClickerSimulatorAutoProgWindow then
         pcall(function() _G.ClickerSimulatorAutoProgWindow:Destroy() end)
     end
@@ -385,6 +389,13 @@ Phase2Tab:AddToggle("AutoSkillTreeToggle_P2", {
     Callback = function(val) State.AutoSkillTree = val; Configs.Set("AutoSkillTree", val) end
 })
 
+Phase2Tab:AddToggle("AttackBigChestsToggle_P2", {
+    Title = "3rd: Attack Big Chests (Heaven Giant & Hell Chest)",
+    Description = "Prioritizes the Heaven Giant Chest in HugeHeavenChest and auto-claims Hell Chest",
+    Default = State.AttackBigChests,
+    Callback = function(val) State.AttackBigChests = val; Configs.Set("AttackBigChests", val) end
+})
+
 Phase2Tab:AddToggle("AutoMagmaSkinToggle_P2", {
     Title = "4th: 10 Qi Rebirth Goal & Magma Click Skin",
     Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
@@ -485,6 +496,54 @@ RewardsTab:AddButton({
     end
 })
 
+--==============================================================================
+-- 6. MISC TAB
+--==============================================================================
+local MiscTab = Window:AddTab({ Title = "Misc", Icon = "⚙️" })
+
+MiscTab:AddSection("PERFORMANCE & CPU SAVER")
+MiscTab:AddToggle("BlackScreenToggle", {
+    Title = "Black Screen / 3D Render Off (Save CPU & Memory)",
+    Description = "Disables 3D engine rendering and displays centered 'Premium Script !' AFK overlay",
+    Default = State.BlackScreen,
+    Callback = function(val)
+        State.BlackScreen = val
+        Configs.Set("BlackScreen", val)
+        AutoProgAPI.SetBlackScreen(val)
+    end
+})
+
+MiscTab:AddToggle("RemoveMapsToggle", {
+    Title = "Remove Maps (FPS & Memory Booster)",
+    Description = "Hides map decor, scenery, and non-critical props to maximize FPS and free RAM",
+    Default = State.RemoveMaps,
+    Callback = function(val)
+        State.RemoveMaps = val
+        Configs.Set("RemoveMaps", val)
+        AutoProgAPI.SetRemoveMaps(val)
+    end
+})
+
+MiscTab:AddSection("BIG CHESTS AUTOMATION")
+MiscTab:AddToggle("AttackBigChestsToggle_Misc", {
+    Title = "Attack Big Chests (Heaven Giant Chest & Hell Chest)",
+    Description = "Prioritizes the Heaven Giant Chest in HugeHeavenChest and auto-claims Hell Chest",
+    Default = State.AttackBigChests,
+    Callback = function(val)
+        State.AttackBigChests = val
+        Configs.Set("AttackBigChests", val)
+    end
+})
+
+MiscTab:AddButton({
+    Title = "Claim All Map Chests Now",
+    Description = "Directly touches and claims Hell Chest, Grand Chest, and Beach Chest hitboxes",
+    Callback = function()
+        local count = AutoProgAPI.ClaimAllChests()
+        Window:Notify({ Title = "Chests", Content = string.format("Claimed %d map chest(s)!", count), Duration = 3 })
+    end
+})
+
 -- Startup code & gifts claim
 task.spawn(function()
     task.wait(1.5)
@@ -493,7 +552,10 @@ task.spawn(function()
     pcall(AutoProgAPI.ClaimAllFreeGifts)
     pcall(AutoProgAPI.ClaimCompletedQuests)
     pcall(AutoProgAPI.ClaimDaily)
+    pcall(AutoProgAPI.ClaimAllChests)
     pcall(AutoProgAPI.EquipBest)
+    if State.BlackScreen then pcall(AutoProgAPI.SetBlackScreen, true) end
+    if State.RemoveMaps then pcall(AutoProgAPI.SetRemoveMaps, true) end
 end)
 
 -- Rejoin & Startup Teleport Guarantee: If in Phase 2 and Skill Tree is not maxed, teleport to active breakables arena!
@@ -709,7 +771,7 @@ table.insert(threads, task.spawn(function()
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
-                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline()
+                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(State.AttackBigChests)
                 if action then
                     currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Heaven"))
                 else
