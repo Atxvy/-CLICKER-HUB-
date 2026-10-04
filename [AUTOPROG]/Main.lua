@@ -355,18 +355,16 @@ Phase1Tab:AddToggle("AutoGoldToggle_P1", {
 })
 
 --==============================================================================
--- 3. PHASE 2: ENDGAME ROADMAP TAB
+-- 3. PHASE 2: ENDGAME PREPARATION TAB
 --==============================================================================
-local Phase2Tab = Window:AddTab({ Title = "Phase 2: Endgame", Icon = "👑" })
+local Phase2Tab = Window:AddTab({ Title = "Phase 2: Endgame Prep", Icon = "👑" })
 
-Phase2Tab:AddSection("PHASE 2 SETTINGS (RUNS WHEN ALL 17 ISLANDS UNLOCKED)")
+Phase2Tab:AddSection("PHASE 2 SETTINGS (ENDGAME PREPARATION)")
 Phase2Tab:AddParagraph({
-    Title = "Endgame Progression Order",
+    Title = "Endgame Preparation Order",
     Content = "1st: Desert Gem Machine & Rebirth Shop Maxing\n" ..
               "2nd: Skill Tree Coins First (??? Dominus Area) -> Tech Coins Tree (Matrix)\n" ..
-              "3rd: Auto Rainbow Team Building (Craft Golden -> Rainbow Pipeline once Skill Tree is maxed)\n" ..
-              "4th: 10 Qi Rebirth Goal & Magma Click Skin\n" ..
-              "5th: Auto ??? Secret Quest & Auto Prestige as soon as affordable"
+              "Once Skill Tree is 100% complete, Phase 3 (Matrix Mythic Pipeline) activates automatically!"
 })
 
 Phase2Tab:AddToggle("AutoDesertMachineToggle_P2", {
@@ -383,32 +381,76 @@ Phase2Tab:AddToggle("AutoSkillTreeToggle_P2", {
     Callback = function(val) State.AutoSkillTree = val; Configs.Set("AutoSkillTree", val) end
 })
 
-Phase2Tab:AddToggle("AutoRainbowClaimToggle_P2", {
-    Title = "3rd: Auto Claim Rainbow Pets",
-    Description = "Automatically collects finished pets from the Rainbow Machine",
-    Default = State.AutoRainbowClaim,
-    Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
-})
-
-Phase2Tab:AddToggle("AutoMagmaSkinToggle_P2", {
-    Title = "4th: 10 Qi Rebirth Goal & Magma Click Skin",
-    Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
-    Default = State.AutoMagmaSkin,
-    Callback = function(val) State.AutoMagmaSkin = val; Configs.Set("AutoMagmaSkin", val) end
-})
-
-Phase2Tab:AddToggle("AutoSecretQuestToggle_P2", {
-    Title = "5th: Auto ??? Secret Quest",
-    Description = "Solves Dominus questline: collects feathers, hatches at Spawn, and unlocks Dominus Area",
-    Default = State.AutoSecretQuest,
-    Callback = function(val) State.AutoSecretQuest = val; Configs.Set("AutoSecretQuest", val) end
-})
-
 Phase2Tab:AddToggle("AutoPrestigeToggle_P2", {
     Title = "Auto Prestige (When Available)",
     Description = "Automatically triggers Prestige when Rebirths requirement is met, adapting progression smoothly",
     Default = State.AutoPrestige,
     Callback = function(val) State.AutoPrestige = val; Configs.Set("AutoPrestige", val) end
+})
+
+--==============================================================================
+-- 4. PHASE 3: MATRIX MYTHICS TAB
+--==============================================================================
+local Phase3Tab = Window:AddTab({ Title = "Phase 3: Matrix Mythics", Icon = "🧬" })
+
+Phase3Tab:AddSection("PHASE 3 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase3Tab:AddParagraph({
+    Title = "Phase 3 Strategy",
+    Content = "Activates automatically after Phase 2 (Desert Machine & Skill Tree) is 100% complete!\n" ..
+              "• Auto Open Matrix Egg (highest endgame egg in Tech World)\n" ..
+              "• Pauses Auto Rebirth (preserves 100% of clicks for Matrix Egg)\n" ..
+              "• Mythic Pet Filter: Deletes all non-mythic pets (Common/Rare/Epic/Legendary) and weak pets\n" ..
+              "• Auto Crafts Golden Mythics & Rainbow Mythics\n" ..
+              "• Equips best pets as Rainbow Mythics are created, replacing old pets until team is 100% Rainbow Mythics!"
+})
+
+Phase3Tab:AddToggle("AutoMatrixEggToggle_P3", {
+    Title = "Auto Open Matrix Egg",
+    Description = "Continuously hatches Matrix Egg on Matrix Island in Tech World",
+    Default = State.AutoMatrixEgg,
+    Callback = function(val) State.AutoMatrixEgg = val; Configs.Set("AutoMatrixEgg", val) end
+})
+
+Phase3Tab:AddToggle("AutoMythicFilterToggle_P3", {
+    Title = "Mythic Only Filter (Delete Non-Mythic Pets)",
+    Description = "Keeps ONLY Mythic / Secret pets, deleting all non-mythics and weak unequipped pets",
+    Default = State.AutoMythicFilter,
+    Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
+})
+
+Phase3Tab:AddToggle("AutoCraftMythicsToggle_P3", {
+    Title = "Auto Craft Golden & Rainbow Mythics",
+    Description = "Automatically crafts Golden and Rainbow versions of Mythic pets",
+    Default = State.AutoCraftMythics,
+    Callback = function(val) State.AutoCraftMythics = val; Configs.Set("AutoCraftMythics", val) end
+})
+
+Phase3Tab:AddToggle("AutoReplaceTeamToggle_P3", {
+    Title = "Auto Replace Team with Rainbow Mythics",
+    Description = "Equips best pets as Rainbow Mythics are forged, replacing weaker old pets",
+    Default = State.AutoReplaceTeam,
+    Callback = function(val) State.AutoReplaceTeam = val; Configs.Set("AutoReplaceTeam", val) end
+})
+
+Phase3Tab:AddToggle("PauseRebirthToggle_P3", {
+    Title = "Pause Rebirth for Clicks",
+    Description = "Pauses rebirth during Phase 3 to preserve all clicks for Matrix Egg hatching",
+    Default = State.PauseRebirthPhase3,
+    Callback = function(val) State.PauseRebirthPhase3 = val; Configs.Set("PauseRebirthPhase3", val) end
+})
+
+Phase3Tab:AddToggle("AutoRainbowClaimToggle_P3", {
+    Title = "Auto Claim Rainbow Pets",
+    Description = "Automatically collects finished pets from the Rainbow Machine",
+    Default = State.AutoRainbowClaim,
+    Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
+})
+
+Phase3Tab:AddToggle("AutoMagmaSkinToggle_P3", {
+    Title = "10 Qi Rebirth Goal & Magma Click Skin",
+    Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
+    Default = State.AutoMagmaSkin,
+    Callback = function(val) State.AutoMagmaSkin = val; Configs.Set("AutoMagmaSkin", val) end
 })
 
 --==============================================================================
@@ -632,14 +674,15 @@ table.insert(threads, task.spawn(function()
         task.wait(0.1)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
 
-        -- RAINBOW MODE PROTECTION: Disable auto rebirth while building Rainbow Team so zero clicks are wasted!
-        if AutoProgAPI.IsRainbowMode and AutoProgAPI.IsRainbowMode() then
+        -- PHASE 3 & RAINBOW MODE PROTECTION: Pause auto rebirth so all possible clicks are kept for Matrix Egg!
+        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
+        if (State.PauseRebirthPhase3 and isP3) or (AutoProgAPI.IsRainbowMode and AutoProgAPI.IsRainbowMode()) then
             task.wait(0.5)
             continue
         end
 
         local now = tick()
-        if now - lastRebirthAttempt > 0.15 then
+        if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
             local maxInfo = ProgAPI.GetMaxRebirthInfo()
             if maxInfo and maxInfo.CanAffordMax then
@@ -916,84 +959,99 @@ table.insert(threads, task.spawn(function()
                 end
 
             -- =====================================================================
-            -- PHASE 2 (ENDGAME ROADMAP)
-            -- Condition: ALL 17 islands are owned and unlocked!
-            -- Progression Order:
+            -- PHASE 2: ENDGAME PREPARATION
+            -- Condition: All 17 islands unlocked, but Skill Tree is NOT yet maxed!
+            -- Order:
             -- 1. Desert Gem Machine & Rebirth Shop Maxing (Thread 8 & 9)
             -- 2. Max Skill Tree (Dominus Area for Coins -> Matrix for Tech Coins) (Thread 13)
-            -- 3. Auto Rainbow pets (Hatch best egg -> Gold -> Rainbow -> Claim) once Skill Tree is maxed
-            -- 4. 10 Qi Rebirth Goal & Magma Click Skin
-            -- 5. Auto ??? Secret Quest & Prestige as soon as affordable
+            -- =====================================================================
+            elseif not isSkillTreeMaxed then
+                currentPhaseText = "👑 PHASE 2: ENDGAME PREPARATION"
+                -- Thread 13 handles breakables and skill tree purchasing.
+
+            -- =====================================================================
+            -- PHASE 3: ENDGAME MATRIX MYTHIC PIPELINE
+            -- Condition: All 17 islands unlocked AND Skill Tree 100% maxed (Coins 36/36 & Tech 13/13)!
+            -- Strategy:
+            -- 1. Auto Open Matrix Egg (highest endgame egg in Tech World)
+            -- 2. Pause Rebirth (preserves 100% of clicks for Matrix Egg)
+            -- 3. Mythic Only Filter: Delete all non-mythic pets & old weak pets!
+            -- 4. Auto Craft Golden Mythics & Rainbow Mythics
+            -- 5. Gradually replaces equipped team until 100% Rainbow Mythics!
             -- =====================================================================
             else
-                currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
+                currentPhaseText = "🧬 PHASE 3: MATRIX MYTHIC PIPELINE"
 
-                local stProg = AutoProgAPI.GetSkillTreeProgress()
-                local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
+                local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
 
-                -- 3. Auto Rainbow Team Building: Initiates WHEN Skill Tree is MAXED!
-                if isSkillTreeMaxed and not isAllRainbow and (now - lastEggHatchTick > 0.35) then
+                -- 1. Auto Open Matrix Egg:
+                if State.AutoMatrixEgg and (now - lastEggHatchTick > 0.35) then
                     lastEggHatchTick = now
-                    local latestEgg = (AutoProgAPI.GetEndgameEgg and AutoProgAPI.GetEndgameEgg()) or AutoProgAPI.GetBestAffordableEgg()
-                    if latestEgg and latestEgg.name ~= "BasicEgg" and pData.Clicks >= latestEgg.cost then
-                        local eggModel, targetPart = AutoProgAPI.FindEggModel(latestEgg.name)
-                        local char = game:GetService("Players").LocalPlayer.Character
-                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                        local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 999
-                        if dist > 18 then
-                            currentActivity = string.format("[Phase 2: Rainbow] Teleporting to %s on %s...", latestEgg.name, latestEgg.island)
-                            AutoProgAPI.TeleportToEgg(latestEgg.name)
-                            task.wait(0.3)
+                    local matrixCost = 2.5e25
+                    local eggModel, targetPart = AutoProgAPI.FindEggModel("MatrixEgg")
+                    local char = game:GetService("Players").LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 999
+
+                    if dist > 18 then
+                        currentActivity = "[Phase 3: Matrix] Teleporting to Matrix Egg in Tech World..."
+                        AutoProgAPI.TeleportToEgg("MatrixEgg")
+                        task.wait(0.3)
+                    end
+
+                    if pData.Clicks >= matrixCost then
+                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
+                        currentActivity = string.format("[Phase 3: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
+                        AutoProgAPI.OpenEgg("MatrixEgg", hatchAmount)
+
+                        -- 2. Mythic Pet Filter & Cleaner: Delete non-mythics and old weak pets
+                        if State.AutoMythicFilter then
+                            pcall(AutoProgAPI.CleanNonMythicPets)
                         end
 
-                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(latestEgg.name)
-                        currentActivity = string.format("[Phase 2: Rainbow] Hatching %dx %s -> Golden -> Rainbow Pipeline", hatchAmount, latestEgg.name)
-                        AutoProgAPI.OpenEgg(latestEgg.name, hatchAmount)
-                        pcall(AutoProgAPI.CraftGoldenPets)
-                        pcall(AutoProgAPI.CraftRainbowPets)
-                        pcall(AutoProgAPI.ClaimRainbowPets)
-                        pcall(AutoProgAPI.EquipBest)
+                        -- 3. Auto Craft Golden & Rainbow Mythics
+                        if State.AutoCraftMythics then
+                            pcall(AutoProgAPI.CraftGoldenPets)
+                            pcall(AutoProgAPI.CraftRainbowPets)
+                            pcall(AutoProgAPI.ClaimRainbowPets)
+                        end
+
+                        -- 4. Auto Replace Team with Mythics
+                        if State.AutoReplaceTeam then
+                            pcall(AutoProgAPI.EquipBest)
+                        end
                     else
-                        -- Accumulate clicks on furthest island if endgame egg is unaffordable
-                        local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
-                        if pData.CurrentIsland ~= furthest and (now - lastTeleportTick > 3) then
+                        -- Not enough clicks yet for Matrix Egg: Accumulate clicks on Matrix Island!
+                        if pData.CurrentIsland ~= "Matrix" and (now - lastTeleportTick > 3) then
                             lastTeleportTick = now
-                            AutoProgAPI.TeleportToIsland(furthest)
+                            AutoProgAPI.TeleportToIsland("Matrix")
                         end
-                        currentActivity = string.format("[Phase 2: Rainbow] Farming Clicks at %s for Endgame Eggs...", furthest)
+                        currentActivity = string.format("[Phase 3: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
                 end
 
-                -- Furthest Map Teleport Check: when skill tree is fully complete AND team is all rainbow, stay at furthest island for click farming
-                if isSkillTreeMaxed and isAllRainbow and (now - lastFurthestTpTick > 30) then
+                -- Periodically clean non-mythics and old weak pets
+                if State.AutoMythicFilter and (now - lastFurthestTpTick > 5) then
                     lastFurthestTpTick = now
-                    local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
-                    if pData.CurrentIsland ~= furthest then
-                        AutoProgAPI.TeleportToIsland(furthest)
+                    pcall(AutoProgAPI.CleanNonMythicPets)
+                    if State.AutoCraftMythics then
+                        pcall(AutoProgAPI.ClaimRainbowPets)
+                    end
+                    if State.AutoReplaceTeam then
+                        pcall(AutoProgAPI.EquipBest)
                     end
                 end
-                if isSkillTreeMaxed and isAllRainbow then
-                    currentActivity = string.format("[Phase 2] Farming Clicks at %s (Preparing for Prestige)", AutoProgAPI.GetFurthestUnlockedIsland())
+
+                if isAllRainbowMythic then
+                    currentActivity = string.format("🌟 [Phase 3: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
                 end
 
-                -- 4. 10 Qi Rebirth Goal & Magma Click Skin
+                -- 10 Qi Rebirth Goal & Magma Click Skin
                 if State.AutoMagmaSkin and (now - lastSkinTick > 3) then
                     lastSkinTick = now
                     local okSkin, skinMsg = AutoProgAPI.CheckAndEquipMagmaSkin()
                     if okSkin and skinMsg and not skinMsg:find("Active") then
                         currentActivity = "[Magma Skin] " .. tostring(skinMsg)
-                    end
-                end
-
-                -- 5. Auto ??? Secret Quest (Step 5: Only runs when Skill Tree is maxed!)
-                if State.AutoSecretQuest and isSkillTreeMaxed and (now - lastQuestTick > 1.5) then
-                    lastQuestTick = now
-                    local qProg = AutoProgAPI.GetSecretQuestProgress()
-                    if not qProg.DoorUnlocked then
-                        local okQ, qMsg = AutoProgAPI.StepSecretQuest()
-                        if okQ and qMsg and not qMsg:find("Already") then
-                            currentActivity = "[Phase 2: ??? Quest] " .. tostring(qMsg)
-                        end
                     end
                 end
             end
