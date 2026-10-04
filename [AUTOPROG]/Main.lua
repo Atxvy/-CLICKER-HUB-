@@ -541,7 +541,7 @@ MiscTab:AddSection("PERFORMANCE & CPU SAVER")
 local blackScreenToggleObj
 blackScreenToggleObj = MiscTab:AddToggle("BlackScreenToggle", {
     Title = "Black Screen / 3D Render Off (Save CPU & Memory)",
-    Description = "Disables 3D engine rendering and displays centered 'Premium Script !' AFK overlay",
+    Description = "Disables 3D engine rendering and displays centered Zelqyn Hub live telemetry & session overlay",
     Default = State.BlackScreen,
     Callback = function(val)
         if State.BlackScreen == val then return end
@@ -581,6 +581,45 @@ MiscTab:AddToggle("OptimizeGameSettingsToggle", {
     end
 })
 
+MiscTab:AddSection("DISCORD WEBHOOK NOTIFICATIONS")
+MiscTab:AddToggle("WebhookEnabledToggle", {
+    Title = "Secret & Above Hatch Webhook",
+    Description = "Sends Discord webhook notifications when Secret, Mega, Divine, or Exclusive pets are hatched (Mythics ignored)",
+    Default = State.WebhookEnabled,
+    Callback = function(val)
+        State.WebhookEnabled = val
+        Configs.Set("WebhookEnabled", val)
+        AutoProgAPI.WebhookEnabled = val
+    end
+})
+
+MiscTab:AddInput("WebhookUrlInput", {
+    Title = "Discord Webhook URL",
+    Description = "Paste your Discord webhook URL to receive instant rare pet alerts",
+    Default = State.WebhookUrl or "",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(val)
+        State.WebhookUrl = val
+        Configs.Set("WebhookUrl", val)
+        AutoProgAPI.WebhookUrl = val
+    end
+})
+
+MiscTab:AddButton({
+    Title = "Send Test Webhook Notification",
+    Description = "Sends a sample Secret pet hatch notification to test your Discord webhook",
+    Callback = function()
+        AutoProgAPI.WebhookUrl = State.WebhookUrl
+        AutoProgAPI.WebhookEnabled = State.WebhookEnabled
+        local ok, msg = AutoProgAPI.SendTestWebhook()
+        if ok then
+            Window:Notify({ Title = "Webhook Success", Content = "Test webhook notification sent successfully! Check your Discord channel.", Duration = 4 })
+        else
+            Window:Notify({ Title = "Webhook Failed", Content = msg or "Failed to send test webhook", Duration = 5 })
+        end
+    end
+})
+
 MiscTab:AddSection("BIG CHESTS AUTOMATION")
 MiscTab:AddToggle("AttackBigChestsToggle_Misc", {
     Title = "Attack Big Chests (Heaven Giant Chest & Hell Chest)",
@@ -603,6 +642,8 @@ MiscTab:AddButton({
 
 -- Startup code & gifts claim
 task.spawn(function()
+    AutoProgAPI.WebhookUrl = State.WebhookUrl or ""
+    AutoProgAPI.WebhookEnabled = State.WebhookEnabled ~= false
     task.wait(1.5)
     pcall(AutoProgAPI.CheckAndSelectStarterPet)
     pcall(AutoProgAPI.RedeemAllCodes)
@@ -1098,6 +1139,9 @@ local function updateTelemetry()
         local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, ProgAPI.FormatNumber(pData.Rebirths))
 
         -- 1. Dedicated Currently Doing Display Card
+        AutoProgAPI.CurrentActivity = currentActivity or "Auto Progression Active"
+        AutoProgAPI.CurrentPhase = currentPhaseText or "Evaluating..."
+
         if CurrentlyDoingCard then
             local doingTitle = "Currently Doing:"
             local doingContent = string.format("⚡ <b>Activity:</b> %s\n🎯 <b>Phase:</b> %s",
