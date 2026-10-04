@@ -1593,15 +1593,22 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
+    if not targetPart then
+        ProgAPI.TeleportToEgg(eggName)
+        task.wait(0.3)
+        eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+        char = LocalPlayer.Character
+        hrp = char and char:FindFirstChild("HumanoidRootPart")
+    end
+
     if hrp and targetPart then
         local dist = (hrp.Position - targetPart.Position).Magnitude
         if dist > 16 then
             hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
             task.wait(0.08)
         end
-    elseif not skipTeleport then
-        ProgAPI.TeleportToEgg(eggName)
-        task.wait(0.25)
+    elseif not targetPart then
+        return false, "Cannot locate egg model in workspace"
     end
 
     -- Proactive Inventory Check & Cleaning BEFORE invoking the server!
