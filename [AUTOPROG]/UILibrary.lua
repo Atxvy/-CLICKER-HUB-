@@ -34,19 +34,31 @@ local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
     return t
 end
 
-function UILibrary.CreateWindow(config)
-    config = config or {}
-    local Title = config.Title or "CLICKER HUB"
-    local SubTitle = config.SubTitle or "Clicker Simulator Suite"
+function UILibrary.CreateWindow(...)
+    local args = {...}
+    local config = {}
+    for _, arg in ipairs(args) do
+        if type(arg) == "table" and arg ~= UILibrary then
+            config = arg
+            break
+        end
+    end
+
+    local Title = config.Title or "CLICKER SIMULATOR — AUTO PROGRESSION"
+    local SubTitle = config.SubTitle or config.Subtitle or "Zero-To-Hero Speedrun Engine [AUTOPROG]"
     local ToggleKey = config.ToggleKey or Enum.KeyCode.RightControl
     local camera = workspace.CurrentCamera
     local vp = camera and camera.ViewportSize or Vector2.new(1920, 1080)
-    local maxWidth = math.clamp(math.floor(vp.X - 24), 300, 620)
-    local maxHeight = math.clamp(math.floor(vp.Y - 36), 260, 440)
-    local Size = config.Size or UDim2.new(0, maxWidth, 0, maxHeight)
-    if vp.X < 660 or vp.Y < 480 then
-        Size = UDim2.new(0, maxWidth, 0, maxHeight)
+    
+    local targetWidth = 700
+    local targetHeight = 520
+    if config.Size and typeof(config.Size) == "UDim2" then
+        targetWidth = config.Size.X.Offset
+        targetHeight = config.Size.Y.Offset
     end
+    local maxWidth = math.clamp(math.floor(vp.X - 24), 300, targetWidth)
+    local maxHeight = math.clamp(math.floor(vp.Y - 36), 260, targetHeight)
+    local Size = UDim2.new(0, maxWidth, 0, maxHeight)
     local Connections = {}
 
     -- Clean up previous instances across all potential roots
@@ -77,8 +89,9 @@ function UILibrary.CreateWindow(config)
     ScreenGui.DisplayOrder = 999999
     ScreenGui:SetAttribute("Immune", true)
     ScreenGui:SetAttribute("NoScaling", true)
-    ScreenGui.Enabled = true
+    -- Parent to root FIRST, then set Enabled = true so game engine does not suppress it
     ScreenGui.Parent = root
+    ScreenGui.Enabled = true
 
     -- Notifications Overlay Frame
     local NotifContainer = Instance.new("Frame")
@@ -95,11 +108,12 @@ function UILibrary.CreateWindow(config)
     NotifLayout.Padding = UDim.new(0, 8)
     NotifLayout.Parent = NotifContainer
 
-    -- Main Frame (Electric Purple Dark Glass)
+    -- Main Frame (Electric Purple Dark Glass - perfectly centered)
     local MainFrame = Instance.new("Frame")
     MainFrame.Name = "MainFrame"
+    MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     MainFrame.Size = Size
-    MainFrame.Position = UDim2.new(0.5, -Size.X.Offset / 2, 0.5, -Size.Y.Offset / 2)
+    MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     MainFrame.BackgroundColor3 = Color3.fromRGB(18, 15, 25)
     MainFrame.BorderSizePixel = 0
     MainFrame.ClipsDescendants = false
@@ -115,33 +129,6 @@ function UILibrary.CreateWindow(config)
     MainStroke.Thickness = 1.2
     MainStroke.Transparency = 0.35
     MainStroke.Parent = MainFrame
-
-    -- Dragging Logic
-    local dragging = false
-    local dragInput, dragStart, startPos
-    MainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = MainFrame.Position
-        end
-    end)
-    MainFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end))
-    table.insert(Connections, UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end))
 
     -- Top Header Bar
     local Header = Instance.new("Frame")
@@ -301,11 +288,31 @@ function UILibrary.CreateWindow(config)
         setMinimized(not isMinimized)
     end)
 
+    -- Draggable Window (Only by clicking the Header bar)
+    local headerDragging = false
+    local headerDragStart, headerStartPos
     Header.InputBegan:Connect(function(input)
-        if isMinimized and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            setMinimized(false)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if isMinimized then
+                setMinimized(false)
+            end
+            headerDragging = true
+            headerDragStart = input.Position
+            headerStartPos = MainFrame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    headerDragging = false
+                end
+            end)
         end
     end)
+    table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
+        if headerDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - headerDragStart
+            MainFrame.Position = UDim2.new(headerStartPos.X.Scale, headerStartPos.X.Offset + delta.X, headerStartPos.Y.Scale, headerStartPos.Y.Offset + delta.Y)
+        end
+    end))
 
     -- Floating Mobile Toggle Button (Draggable & Accessible on all devices)
     local FloatingBtn = Instance.new("ImageButton")
@@ -342,6 +349,12 @@ function UILibrary.CreateWindow(config)
             floatDragging = true
             floatDragStart = input.Position
             floatStartPos = FloatingBtn.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    floatDragging = false
+                end
+            end)
         end
     end)
     table.insert(Connections, UserInputService.InputChanged:Connect(function(input)
@@ -350,16 +363,11 @@ function UILibrary.CreateWindow(config)
             FloatingBtn.Position = UDim2.new(floatStartPos.X.Scale, floatStartPos.X.Offset + delta.X, floatStartPos.Y.Scale, floatStartPos.Y.Offset + delta.Y)
         end
     end))
-    table.insert(Connections, UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            floatDragging = false
-        end
-    end))
 
     local function toggleUI()
         MainFrame.Visible = not MainFrame.Visible
+        ScreenGui.Enabled = true
         if MainFrame.Visible then
-            ScreenGui.Enabled = true
             if isMinimized then
                 setMinimized(false)
             end
@@ -374,9 +382,11 @@ function UILibrary.CreateWindow(config)
 
     CloseBtn.MouseButton1Click:Connect(function()
         MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
     end)
     CloseBtn.TouchTap:Connect(function()
         MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
     end)
 
     -- Toggle Hotkey
@@ -384,6 +394,17 @@ function UILibrary.CreateWindow(config)
         if processed then return end
         if input.KeyCode == ToggleKey then
             toggleUI()
+        end
+    end))
+
+    -- Anti-suppression listener: Ensure ScreenGui.Enabled stays true while MainFrame is visible
+    table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if MainFrame.Visible and not ScreenGui.Enabled then
+            task.defer(function()
+                if MainFrame.Visible and ScreenGui and ScreenGui.Parent then
+                    ScreenGui.Enabled = true
+                end
+            end)
         end
     end))
 
@@ -405,6 +426,20 @@ function UILibrary.CreateWindow(config)
 
     function Window:Toggle()
         toggleUI()
+    end
+
+    function Window:Show()
+        ScreenGui.Enabled = true
+        MainFrame.Visible = true
+        if isMinimized then
+            setMinimized(false)
+        end
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0.5})
+    end
+
+    function Window:Hide()
+        MainFrame.Visible = false
+        tween(FloatingBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0})
     end
 
     function Window:Notify(opts)
@@ -1123,9 +1158,43 @@ function UILibrary.CreateWindow(config)
 
     function Window:Destroy()
         pcall(function()
-            ScreenGui:Destroy()
+            for _, conn in ipairs(Connections) do
+                pcall(function() conn:Disconnect() end)
+            end
+            if ScreenGui and ScreenGui.Parent then
+                ScreenGui:Destroy()
+            end
         end)
     end
+
+    -- Explicit initial visibility guarantee
+    ScreenGui.Enabled = true
+    MainFrame.Visible = true
+    BodyFrame.Visible = true
+
+    task.defer(function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
+
+    task.delay(0.1, function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
+
+    task.delay(0.35, function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui.Enabled = true
+            MainFrame.Visible = true
+            BodyFrame.Visible = true
+        end
+    end)
 
     return Window
 end
