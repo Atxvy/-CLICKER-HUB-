@@ -88,18 +88,22 @@ local function loadModule(name: string)
         end
     end
 
-    -- 3. Fallback to GitHub raw
-    local url = GITHUB_REPO .. "/" .. name .. "?t=" .. tostring(os.time())
-    local ok, chunk = pcall(game.HttpGet, game, url)
-    if not ok or not chunk or #chunk == 0 then
-        ok, chunk = pcall(game.HttpGet, game, GITHUB_REPO .. "/" .. name)
-    end
-    if ok and chunk and #chunk > 0 then
-        local fn, err = loadstring(chunk)
-        if fn then
-            return fn()
-        else
-            error("[AutoProg] Remote compile error in " .. name .. ": " .. tostring(err))
+    -- 3. Fallback to GitHub raw (checks both [AUTOPROG] directory and repository root)
+    local urls = {
+        GITHUB_REPO .. "/%5BAUTOPROG%5D/" .. name .. "?t=" .. tostring(os.time()),
+        GITHUB_REPO .. "/[AUTOPROG]/" .. name,
+        GITHUB_REPO .. "/" .. name .. "?t=" .. tostring(os.time()),
+        GITHUB_REPO .. "/" .. name
+    }
+    for _, url in ipairs(urls) do
+        local ok, chunk = pcall(game.HttpGet, game, url)
+        if ok and chunk and #chunk > 0 and not chunk:find("404: Not Found") then
+            local fn, err = loadstring(chunk)
+            if fn then
+                return fn()
+            else
+                warn("[AutoProg] Remote compile error in " .. name .. " from " .. url .. ":", err)
+            end
         end
     end
 
@@ -508,74 +512,76 @@ table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(0.5)
         if not State.MasterEnabled or not isRunning then continue end
-        local now = tick()
+        pcall(function()
+            local now = tick()
 
-        -- A. Prestige check (Runs continuously whenever eligible)
-        if State.AutoPrestige and (now - lastPrestigeTick > 3) then
-            lastPrestigeTick = now
-            local prestInfo = AutoProgAPI.GetPrestigeInfo()
-            if prestInfo.CanPrestige then
-                currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
-                local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
-                if ok then
-                    Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
+            -- A. Prestige check (Runs continuously whenever eligible)
+            if State.AutoPrestige and (now - lastPrestigeTick > 3) then
+                lastPrestigeTick = now
+                local prestInfo = AutoProgAPI.GetPrestigeInfo()
+                if prestInfo.CanPrestige then
+                    currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
+                    local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
+                    if ok then
+                        Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
+                    end
                 end
             end
-        end
 
-        -- B. Consumables: Potions & Fruits
-        if (State.AutoPotions or State.AutoFruits) and (now - lastPotionTick > 15) then
-            lastPotionTick = now
-            if State.AutoPotions then pcall(AutoProgAPI.UseAllBestPotions) end
-            if State.AutoFruits then pcall(AutoProgAPI.UseAllFruits) end
-        end
-
-        -- C. Free Gifts, Chests, Daily, Achievements & Milestones
-        if State.AutoFreeGifts and (now - lastGiftTick > 8) then
-            lastGiftTick = now
-            pcall(function()
-                ProgAPI.ClaimAllFreeGifts()
-                ProgAPI.ClaimAllChests()
-                ProgAPI.ClaimDaily()
-                ProgAPI.ClaimAllMilestones()
-            end)
-        end
-
-        -- D. Auto Craft Golden Pets (100% Guaranteed Priority)
-        if State.AutoCraftGolden and (now - lastCraftTick > 2) then
-            lastCraftTick = now
-            local crafted = AutoProgAPI.CraftGoldenPets()
-            if crafted > 0 then
-                pcall(AutoProgAPI.EquipBest)
+            -- B. Consumables: Potions & Fruits
+            if (State.AutoPotions or State.AutoFruits) and (now - lastPotionTick > 15) then
+                lastPotionTick = now
+                if State.AutoPotions then pcall(AutoProgAPI.UseAllBestPotions) end
+                if State.AutoFruits then pcall(AutoProgAPI.UseAllFruits) end
             end
-        end
 
-        -- E. Auto Clean Weak Pets (World <= Best - 2)
-        if State.AutoCleanPets and (now - lastCleanTick > 5) then
-            lastCleanTick = now
-            AutoProgAPI.CleanWeakPets(State.ProtectCraftingPets)
-        end
+            -- C. Free Gifts, Chests, Daily, Achievements & Milestones
+            if State.AutoFreeGifts and (now - lastGiftTick > 8) then
+                lastGiftTick = now
+                pcall(function()
+                    ProgAPI.ClaimAllFreeGifts()
+                    ProgAPI.ClaimAllChests()
+                    ProgAPI.ClaimDaily()
+                    ProgAPI.ClaimAllMilestones()
+                end)
+            end
 
-        -- F. Auto Equip Best Pets
-        if State.AutoEquipBest and (now - lastEquipTick > 4) then
-            lastEquipTick = now
-            ProgAPI.EquipBest()
-        end
+            -- D. Auto Craft Golden Pets (100% Guaranteed Priority)
+            if State.AutoCraftGolden and (now - lastCraftTick > 2) then
+                lastCraftTick = now
+                local crafted = AutoProgAPI.CraftGoldenPets()
+                if crafted > 0 then
+                    pcall(AutoProgAPI.EquipBest)
+                end
+            end
 
-        -- G. Auto Skill Tree Upgrades (Continuously reinvests coins)
-        if State.AutoSkillTree and (now - lastSkillTreeTick > 2) then
-            lastSkillTreeTick = now
-            pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
-        end
+            -- E. Auto Clean Weak Pets (World <= Best - 2)
+            if State.AutoCleanPets and (now - lastCleanTick > 5) then
+                lastCleanTick = now
+                AutoProgAPI.CleanWeakPets(State.ProtectCraftingPets)
+            end
 
-        -- H. Auto Buy Rebirth Buttons & Double Jumps (Continuously purchases new buttons as gems allow)
-        if State.AutoRebirthButtons and (now - lastRebirthButtonsTick > 1.5) then
-            lastRebirthButtonsTick = now
-            pcall(function()
-                AutoProgAPI.BuyNextRebirthButton()
-                AutoProgAPI.BuyNextDoubleJump()
-            end)
-        end
+            -- F. Auto Equip Best Pets
+            if State.AutoEquipBest and (now - lastEquipTick > 4) then
+                lastEquipTick = now
+                ProgAPI.EquipBest()
+            end
+
+            -- G. Auto Skill Tree Upgrades (Continuously reinvests coins)
+            if State.AutoSkillTree and (now - lastSkillTreeTick > 2) then
+                lastSkillTreeTick = now
+                pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
+            end
+
+            -- H. Auto Buy Rebirth Buttons & Double Jumps (Continuously purchases new buttons as gems allow)
+            if State.AutoRebirthButtons and (now - lastRebirthButtonsTick > 1.5) then
+                lastRebirthButtonsTick = now
+                pcall(function()
+                    AutoProgAPI.BuyNextRebirthButton()
+                    AutoProgAPI.BuyNextDoubleJump()
+                end)
+            end
+        end)
     end
 end))
 
@@ -621,11 +627,12 @@ table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(0.1)
         if not State.MasterEnabled or not isRunning then continue end
-        local now = tick()
+        pcall(function()
+            local now = tick()
 
-        local pData = AutoProgAPI.GetPlayerData()
-        local lockedIsland = AutoProgAPI.GetNextLockedIsland()
-        local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
+            local pData = AutoProgAPI.GetPlayerData()
+            local lockedIsland = AutoProgAPI.GetNextLockedIsland()
+            local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
 
         -- =====================================================================
         -- PHASE 1: ISLAND SPEEDRUN (Locked islands remaining)
@@ -796,7 +803,8 @@ table.insert(threads, task.spawn(function()
                 end
             end
         end
-    end
+    end)
+end
 end))
 
 local function updateTelemetry()
