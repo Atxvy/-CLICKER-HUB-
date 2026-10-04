@@ -518,326 +518,309 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 2: GLOBAL AUTOMATIC MAINTENANCE (Consumables, Crafting, Cleaning, Prestige)
-table.insert(threads, task.spawn(function()
-    local lastPotionTick = 0
-    local lastGiftTick = 0
-    local lastCraftTick = 0
-    local lastCleanTick = 0
-    local lastEquipTick = 0
-    local lastPrestigeTick = 0
-    local lastSkillTreeTick = 0
-    local lastRebirthButtonsTick = 0
-
-    while isRunning do
-        task.wait(0.5)
-        if not State.MasterEnabled or not isRunning then continue end
-        pcall(function()
-            local now = tick()
-
-            -- A. Prestige check (Runs continuously whenever eligible)
-            if State.AutoPrestige and (now - lastPrestigeTick > 3) then
-                lastPrestigeTick = now
-                local prestInfo = AutoProgAPI.GetPrestigeInfo()
-                if prestInfo.CanPrestige then
-                    currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
-                    local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
-                    if ok then
-                        Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
-                    end
-                end
-            end
-
-            -- B. Consumables: Potions & Fruits
-            if (State.AutoPotions or State.AutoFruits) and (now - lastPotionTick > 15) then
-                lastPotionTick = now
-                if State.AutoPotions then pcall(AutoProgAPI.UseAllBestPotions) end
-                if State.AutoFruits then pcall(AutoProgAPI.UseAllFruits) end
-            end
-
-            -- C. Free Gifts, Chests, Daily, Achievements & Milestones
-            if State.AutoFreeGifts and (now - lastGiftTick > 8) then
-                lastGiftTick = now
-                pcall(function()
-                    ProgAPI.ClaimAllFreeGifts()
-                    ProgAPI.ClaimAllChests()
-                    ProgAPI.ClaimDaily()
-                    ProgAPI.ClaimAllMilestones()
-                end)
-            end
-
-            -- D. Auto Craft Golden Pets (100% Guaranteed Priority)
-            if State.AutoCraftGolden and (now - lastCraftTick > 2) then
-                lastCraftTick = now
-                local crafted = AutoProgAPI.CraftGoldenPets()
-                if crafted > 0 then
-                    pcall(AutoProgAPI.EquipBest)
-                end
-            end
-
-            -- E. Auto Clean Weak Pets (World <= Best - 2)
-            if State.AutoCleanPets and (now - lastCleanTick > 5) then
-                lastCleanTick = now
-                AutoProgAPI.CleanWeakPets(State.ProtectCraftingPets)
-            end
-
-            -- F. Auto Equip Best Pets
-            if State.AutoEquipBest and (now - lastEquipTick > 4) then
-                lastEquipTick = now
-                ProgAPI.EquipBest()
-            end
-
-            -- G. Auto Skill Tree Upgrades (Continuously reinvests coins)
-            if State.AutoSkillTree and (now - lastSkillTreeTick > 2) then
-                lastSkillTreeTick = now
-                pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
-            end
-
-            -- H. Auto Buy Rebirth Buttons & Double Jumps (Continuously purchases new buttons as gems allow)
-            if State.AutoRebirthButtons and (now - lastRebirthButtonsTick > 1.5) then
-                lastRebirthButtonsTick = now
-                pcall(function()
-                    AutoProgAPI.BuyNextRebirthButton()
-                    AutoProgAPI.BuyNextDoubleJump()
-                end)
-            end
-        end)
-    end
-end))
-
--- THREAD 3: DEDICATED CONTINUOUS MAX REBIRTH (Non-blocking high-frequency execution)
+-- THREAD 2: DEDICATED CONTINUOUS MAX REBIRTH (Non-blocking high-frequency execution)
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
         task.wait(0.1)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
         local now = tick()
-        if now - lastRebirthAttempt > 0.2 then
+        if now - lastRebirthAttempt > 0.15 then
             lastRebirthAttempt = now
-            local lockedIsland = ProgAPI.GetNextLockedIsland()
-            local pData = ProgAPI.GetPlayerData()
-
-            -- In Phase 1: if close to next island cost, hold clicks for unlock
-            local isSavingForIsland = false
-            if lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.85) then
-                isSavingForIsland = true
+            local maxInfo = ProgAPI.GetMaxRebirthInfo()
+            if maxInfo and maxInfo.CanAffordMax then
+                ProgAPI.RebirthMaxTarget()
             end
+        end
+    end
+end))
 
-            if not isSavingForIsland then
-                local maxInfo = ProgAPI.GetMaxRebirthInfo()
-                if maxInfo.CanAffordMax then
-                    ProgAPI.RebirthMaxTarget()
+-- THREAD 3: DEDICATED AUTO POTIONS CONSUMABLE THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(10)
+        if isRunning and State.MasterEnabled and State.AutoPotions then
+            pcall(AutoProgAPI.UseAllBestPotions)
+        end
+    end
+end))
+
+-- THREAD 4: DEDICATED AUTO FRUITS CONSUMABLE THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(10)
+        if isRunning and State.MasterEnabled and State.AutoFruits then
+            pcall(AutoProgAPI.UseAllFruits)
+        end
+    end
+end))
+
+-- THREAD 5: DEDICATED AUTO FREE GIFTS, CHESTS, DAILY & MILESTONES THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(6)
+        if isRunning and State.MasterEnabled and State.AutoFreeGifts then
+            pcall(function()
+                ProgAPI.ClaimAllFreeGifts()
+                ProgAPI.ClaimAllChests()
+                ProgAPI.ClaimDaily()
+                ProgAPI.ClaimAllMilestones()
+            end)
+        end
+    end
+end))
+
+-- THREAD 6: DEDICATED AUTO CRAFT GOLDEN PETS THREAD (100% Guaranteed Priority)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(2.5)
+        if isRunning and State.MasterEnabled and State.AutoCraftGolden then
+            local crafted = AutoProgAPI.CraftGoldenPets()
+            if crafted > 0 then
+                pcall(AutoProgAPI.EquipBest)
+            end
+        end
+    end
+end))
+
+-- THREAD 7: DEDICATED AUTO RAINBOW PETS CRAFT & CLAIM THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(3)
+        if isRunning and State.MasterEnabled and State.AutoRainbowClaim then
+            AutoProgAPI.CraftRainbowPets()
+            AutoProgAPI.ClaimRainbowPets()
+        end
+    end
+end))
+
+-- THREAD 8: DEDICATED AUTO CLEAN WEAK PETS THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(5)
+        if isRunning and State.MasterEnabled and State.AutoCleanPets then
+            AutoProgAPI.CleanWeakPets(State.ProtectCraftingPets)
+        end
+    end
+end))
+
+-- THREAD 9: DEDICATED AUTO EQUIP BEST PETS THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(4)
+        if isRunning and State.MasterEnabled and State.AutoEquipBest then
+            ProgAPI.EquipBest()
+        end
+    end
+end))
+
+-- THREAD 10: DEDICATED AUTO ISLAND UNLOCK / RE-PURCHASE THREAD (Recovers islands after prestige)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(1.5)
+        if isRunning and State.MasterEnabled and State.AutoUnlockIslands then
+            pcall(AutoProgAPI.CheckAndRebuyIslands)
+        end
+    end
+end))
+
+-- THREAD 11: DEDICATED PASSIVE UPGRADES THREAD (Mini Upgrades, Gems, Desert Machine, Rebirth Buttons)
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(2)
+        if isRunning and State.MasterEnabled then
+            if State.AutoMapUpgrades then pcall(AutoProgAPI.BuyAffordableMiniUpgrades) end
+            if State.AutoGemUpgrades or State.AutoDesertMachine then pcall(AutoProgAPI.BuyAffordableGemUpgrades) end
+            if State.AutoRebirthButtons then
+                pcall(function()
+                    AutoProgAPI.BuyNextRebirthButton()
+                    AutoProgAPI.BuyNextDoubleJump()
+                end)
+            end
+        end
+    end
+end))
+
+-- THREAD 12: DEDICATED AUTO PRESTIGE THREAD
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(2)
+        if isRunning and State.MasterEnabled and State.AutoPrestige then
+            local prestInfo = AutoProgAPI.GetPrestigeInfo()
+            if prestInfo and prestInfo.CanPrestige then
+                currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
+                local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
+                if ok then
+                    Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
+                    task.wait(1)
+                    pcall(AutoProgAPI.CheckAndRebuyIslands)
                 end
             end
         end
     end
 end))
 
--- THREAD 4: MAIN PROGRESSION STATE MACHINE (Phase 1 vs Phase 2)
+-- THREAD 13: DEDICATED BREAKABLES & SKILL TREE ENGINE (Active ONLY in Phase 2 when all islands owned and team is ready!)
 table.insert(threads, task.spawn(function()
-    local lastTeleportTick = 0
-    local lastEggHatchTick = 0
-    local lastMiniUpgradesTick = 0
-    local lastGemUpgradesTick = 0
-    local lastSkinTick = 0
-    local lastQuestTick = 0
-    local lastRainbowTick = 0
-    local lastFurthestTpTick = 0
-
+    local lastBreakableTick = 0
     while isRunning do
         task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
+
+        -- STRICT REQUIREMENT: Auto Skill Tree only runs if ALL islands are unlocked AND team is strong!
+        local allIslands = AutoProgAPI.AreAllIslandsUnlocked()
+        local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
+        local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
+        local teamReady = isAllRainbow or isAllGold
+
+        if allIslands and teamReady and State.AutoSkillTree then
+            local now = tick()
+            if now - lastBreakableTick >= 0.05 then
+                lastBreakableTick = now
+                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline()
+                if action then
+                    currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Heaven"))
+                end
+            end
+        end
+    end
+end))
+
+-- THREAD 14: MAIN PROGRESSION STATE MACHINE (Step 1 / Phase 1 vs Phase 2)
+table.insert(threads, task.spawn(function()
+    local lastTeleportTick = 0
+    local lastEggHatchTick = 0
+    local lastSkinTick = 0
+    local lastQuestTick = 0
+    local lastFurthestTpTick = 0
+
+    while isRunning do
+        task.wait(0.05)
+        if not State.MasterEnabled or not isRunning then continue end
         pcall(function()
             local now = tick()
-
             local pData = AutoProgAPI.GetPlayerData()
+            local allIslandsUnlocked = AutoProgAPI.AreAllIslandsUnlocked()
             local lockedIsland = AutoProgAPI.GetNextLockedIsland()
             local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
+            local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
 
-        -- =====================================================================
-        -- PHASE 1: ISLAND SPEEDRUN (Locked islands remaining)
-        -- =====================================================================
-        if lockedIsland ~= nil then
-            currentPhaseText = "🌟 PHASE 1: ISLAND SPEEDRUN"
+            -- =====================================================================
+            -- STEP 1 (PHASE 1: ISLAND SPEEDRUN)
+            -- Condition: Player does NOT own all islands yet!
+            -- Rule: Never start skill tree until all islands owned & team upgraded!
+            -- =====================================================================
+            if not allIslandsUnlocked and lockedIsland ~= nil then
+                currentPhaseText = string.format("🌟 PHASE 1: ISLAND SPEEDRUN (%s)", lockedIsland.name)
 
-            -- 1. Auto Teleport to Best Unlocked Island Every 5 Seconds
-            if now - lastTeleportTick > 5 then
-                lastTeleportTick = now
-                local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
-                if pData.CurrentIsland ~= furthest then
-                    AutoProgAPI.TeleportToIsland(furthest)
-                end
-            end
-
-            -- 2. Check Island Unlock Condition
-            if State.AutoUnlockIslands and lockedIsland then
-                if pData.Clicks >= lockedIsland.cost then
-                    currentActivity = "🌟 Unlocking next island: " .. lockedIsland.name .. "!"
-                    local count, lastIsl = AutoProgAPI.UnlockAllAffordableIslands()
-                    if count > 0 and lastIsl then
-                        Window:Notify({ Title = "Islands Unlocked!", Content = string.format("🚀 Reached %s!", lastIsl), Duration = 3 })
-                        pcall(AutoProgAPI.EquipBest)
-                        pData = AutoProgAPI.GetPlayerData()
-                        lockedIsland = AutoProgAPI.GetNextLockedIsland()
-                    end
-                end
-            end
-
-            -- 3. Smart Max Rebirth
-            -- If we are NOT within 85% of next island cost, rebirth aggressively to multiply clicks!
-            if State.AutoMaxRebirth and lockedIsland then
-                local isNearIsland = (pData.Clicks >= lockedIsland.cost * 0.85)
-                if not isNearIsland then
-                    local maxInfo = AutoProgAPI.GetMaxRebirthInfo()
-                    if maxInfo.CanAffordMax then
-                        currentActivity = string.format("Rebirthing Max Button #%d (+%s)", maxInfo.MaxButtonIndex, AutoProgAPI.FormatNumber(maxInfo.BestAffordableAmount))
-                        AutoProgAPI.RebirthMaxTarget()
-                    end
-                else
-                    currentActivity = string.format("Saving Clicks for %s (%s / %s)", lockedIsland.name, AutoProgAPI.FormatNumber(pData.Clicks), AutoProgAPI.FormatNumber(lockedIsland.cost))
-                end
-            end
-
-            -- 4. Map Mini Upgrades (+1 Pet Slot, Storage)
-            if State.AutoMapUpgrades and (now - lastMiniUpgradesTick > 2) then
-                lastMiniUpgradesTick = now
-                AutoProgAPI.BuyAffordableMiniUpgrades()
-            end
-
-            -- 5. Gem Upgrades & Rebirth Buttons
-            if (State.AutoGemUpgrades or State.AutoRebirthButtons) and (now - lastGemUpgradesTick > 1.5) then
-                lastGemUpgradesTick = now
-                if State.AutoGemUpgrades then AutoProgAPI.BuyAffordableGemUpgrades() end
-                if State.AutoRebirthButtons then
-                    AutoProgAPI.BuyNextRebirthButton()
-                    AutoProgAPI.BuyNextDoubleJump()
-                end
-            end
-
-            -- 6. Auto Open Best Egg & Auto Gold
-            if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick > 0.35) then
-                lastEggHatchTick = now
-                local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.70)
-
-                -- If AutoGold is active and team is not all gold: KEEP OPENING BEST EGG!
-                if State.AutoGold and not isAllGold then
-                    local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                    if bestEgg and pData.Clicks >= bestEgg.cost then
-                        currentActivity = string.format("[Auto Gold] Hatching %s for 100%% Golden Team", bestEgg.name)
-                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
-                        pcall(AutoProgAPI.CraftGoldenPets)
-                        pcall(AutoProgAPI.EquipBest)
-                    end
-                elseif not isNearUnlock and State.AutoBestEggs then
-                    local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                    if bestEgg and pData.Clicks >= bestEgg.cost then
-                        currentActivity = "Hatching " .. bestEgg.name
-                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
-                    end
-                end
-            end
-
-        -- =====================================================================
-        -- PHASE 2: ENDGAME ROADMAP (All 17 Islands Unlocked!)
-        -- =====================================================================
-        else
-            currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
-
-            -- 1. Periodic Map Teleport Check Every 30 Seconds
-            if (now - lastFurthestTpTick > 30) then
-                lastFurthestTpTick = now
-                local stProg = AutoProgAPI.GetSkillTreeProgress()
-                -- If skill tree coins is done, keep player on furthest map (Matrix in Tech World)
-                if stProg.CoinsComplete then
+                -- 1. Auto Teleport to furthest unlocked island every 5 seconds
+                if now - lastTeleportTick > 5 then
+                    lastTeleportTick = now
                     local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                     if pData.CurrentIsland ~= furthest then
                         AutoProgAPI.TeleportToIsland(furthest)
                     end
-                elseif State.AutoSkillTree then
-                    -- If Coins skill tree is NOT done, enforce that player is in Heaven breakables arena!
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    local hPos = AutoProgAPI.GetBreakableZonePosition("Heaven")
-                    if hrp and hPos and (hrp.Position - hPos).Magnitude > 220 then
-                        AutoProgAPI.TeleportToWorld("Overworld")
-                        task.wait(0.3)
-                        AutoProgAPI.TeleportToIsland("Heaven")
-                        task.wait(0.3)
-                        AutoProgAPI.TeleportToBreakableZone("Heaven")
+                end
+
+                -- 2. Auto buy island as soon as clicks requirement is met
+                if State.AutoUnlockIslands and lockedIsland then
+                    if pData.Clicks >= lockedIsland.cost then
+                        currentActivity = "🌟 Unlocking next island: " .. lockedIsland.name .. "!"
+                        local count, lastIsl = AutoProgAPI.UnlockAllAffordableIslands()
+                        if count > 0 and lastIsl then
+                            Window:Notify({ Title = "Islands Unlocked!", Content = string.format("🚀 Reached %s!", lastIsl), Duration = 3 })
+                            pcall(AutoProgAPI.EquipBest)
+                            pData = AutoProgAPI.GetPlayerData()
+                            lockedIsland = AutoProgAPI.GetNextLockedIsland()
+                        end
+                    end
+                end
+
+                -- 3. Auto buy egg for pets & auto gold pets
+                if (State.AutoBestEggs or State.AutoGold) and (now - lastEggHatchTick > 0.35) then
+                    lastEggHatchTick = now
+                    local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
+
+                    -- If team is not yet all gold, hatch best egg on current furthest map!
+                    if not isAllGold then
+                        local bestEgg = AutoProgAPI.GetBestAffordableEgg()
+                        if bestEgg and pData.Clicks >= bestEgg.cost then
+                            currentActivity = string.format("[Phase 1] Hatching %s on %s for Golden Team", bestEgg.name, bestEgg.island)
+                            AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                            pcall(AutoProgAPI.CraftGoldenPets)
+                            pcall(AutoProgAPI.EquipBest)
+                        end
+                    elseif not isNearUnlock and State.AutoBestEggs then
+                        local bestEgg = AutoProgAPI.GetBestAffordableEgg()
+                        if bestEgg and pData.Clicks >= bestEgg.cost then
+                            currentActivity = string.format("[Phase 1] Hatching %s", bestEgg.name)
+                            AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                        end
+                    end
+                end
+
+            -- =====================================================================
+            -- PHASE 2 (ENDGAME ROADMAP)
+            -- Condition: ALL 17 islands are owned and unlocked!
+            -- Progression Order:
+            -- 1. Prestige if possible
+            -- 2. Auto Rainbow pets (hatch latest world egg -> gold -> rainbow -> claim)
+            -- 3. Check team: once all rainbow/gold -> start Skill Tree (Coins first, then Tech)
+            -- 4. ??? Quest
+            -- 5. 10Qi Quest / Magma Click Skin
+            -- =====================================================================
+            else
+                currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
+
+                -- 1. Auto Rainbow Team Building: If not all rainbow, hatch latest world egg (Matrix) & craft
+                if not isAllRainbow and (now - lastEggHatchTick > 0.35) then
+                    lastEggHatchTick = now
+                    local latestEgg = AutoProgAPI.GetBestAffordableEgg("Matrix")
+                    if not latestEgg or latestEgg.cost > pData.Clicks then
+                        latestEgg = AutoProgAPI.GetBestAffordableEgg()
+                    end
+                    if latestEgg and pData.Clicks >= latestEgg.cost then
+                        currentActivity = string.format("[Phase 2] Hatching %s -> Golden -> Rainbow Pipeline", latestEgg.name)
+                        AutoProgAPI.OpenEgg(latestEgg.name, 1)
+                        pcall(AutoProgAPI.CraftGoldenPets)
+                        pcall(AutoProgAPI.CraftRainbowPets)
+                        pcall(AutoProgAPI.ClaimRainbowPets)
+                        pcall(AutoProgAPI.EquipBest)
+                    end
+                end
+
+                -- 2. Furthest Map Teleport Check every 30 seconds (When skill tree coins is done)
+                if (now - lastFurthestTpTick > 30) then
+                    lastFurthestTpTick = now
+                    local stProg = AutoProgAPI.GetSkillTreeProgress()
+                    if stProg.CoinsComplete then
+                        local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
+                        if pData.CurrentIsland ~= furthest then
+                            AutoProgAPI.TeleportToIsland(furthest)
+                        end
+                    end
+                end
+
+                -- 3. 10 Qi Rebirth Goal & Magma Click Skin
+                if State.AutoMagmaSkin and (now - lastSkinTick > 3) then
+                    lastSkinTick = now
+                    local okSkin, skinMsg = AutoProgAPI.CheckAndEquipMagmaSkin()
+                    if okSkin and skinMsg and not skinMsg:find("Active") then
+                        currentActivity = "[Magma Skin] " .. tostring(skinMsg)
+                    end
+                end
+
+                -- 4. Auto ??? Secret Quest
+                if State.AutoSecretQuest and (now - lastQuestTick > 0.5) then
+                    lastQuestTick = now
+                    local okQ, qMsg = AutoProgAPI.StepSecretQuest()
+                    if okQ and qMsg and not qMsg:find("Already") then
+                        currentActivity = "[??? Quest] " .. tostring(qMsg)
                     end
                 end
             end
-
-            -- 2. Max Rebirth Continuously (Milestone button 47+)
-            if State.AutoMaxRebirth then
-                local maxInfo = AutoProgAPI.GetMaxRebirthInfo()
-                if maxInfo.CanAffordMax then
-                    if not State.AutoSkillTree then
-                        currentActivity = string.format("[Endgame] Max Rebirth (+%s)", AutoProgAPI.FormatNumber(maxInfo.BestAffordableAmount))
-                    end
-                    AutoProgAPI.RebirthMaxTarget()
-                end
-            end
-
-            -- 3. Keep Hatching Best Egg Until Full Golden Team!
-            if State.AutoGold and not isAllGold and (now - lastEggHatchTick > 0.35) then
-                lastEggHatchTick = now
-                local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                if bestEgg and pData.Clicks >= bestEgg.cost then
-                    currentActivity = "[Auto Gold] Hatching " .. bestEgg.name .. " for Full Golden Team"
-                    AutoProgAPI.OpenEgg(bestEgg.name, 1)
-                    pcall(AutoProgAPI.CraftGoldenPets)
-                    pcall(AutoProgAPI.EquipBest)
-                end
-            end
-
-            -- 4. PRIORITY 1: Desert Machine, Gem Upgrades & Rebirth Buttons Maxing
-            if (State.AutoDesertMachine or State.AutoGemUpgrades or State.AutoRebirthButtons) and (now - lastGemUpgradesTick > 1.5) then
-                lastGemUpgradesTick = now
-                if State.AutoDesertMachine or State.AutoGemUpgrades then
-                    AutoProgAPI.BuyAffordableGemUpgrades()
-                    AutoProgAPI.BuyAffordableMiniUpgrades()
-                end
-                if State.AutoRebirthButtons then
-                    AutoProgAPI.BuyNextRebirthButton()
-                    AutoProgAPI.BuyNextDoubleJump()
-                end
-            end
-
-            -- 5. PRIORITY 2: Skill Tree Coins First -> Tech Coins Pipeline
-            if State.AutoSkillTree then
-                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline()
-                currentActivity = string.format("[Skill Tree] %s in %s", tostring(action or "Farming"), tostring(targetIsl or "Heaven"))
-            end
-
-            -- 6. 10 Qi Rebirth Goal & Magma Click Skin
-            if State.AutoMagmaSkin and (now - lastSkinTick > 3) then
-                lastSkinTick = now
-                local okSkin, skinMsg = AutoProgAPI.CheckAndEquipMagmaSkin()
-                if okSkin and skinMsg and not skinMsg:find("Active") then
-                    currentActivity = "[Magma Skin] " .. tostring(skinMsg)
-                end
-            end
-
-            -- 7. Auto ??? Secret Quest
-            if State.AutoSecretQuest and (now - lastQuestTick > 0.5) then
-                lastQuestTick = now
-                local okQ, qMsg = AutoProgAPI.StepSecretQuest()
-                if okQ and qMsg and not qMsg:find("Already") then
-                    currentActivity = "[??? Quest] " .. tostring(qMsg)
-                end
-            end
-
-            -- 8. Auto Claim Rainbow Pets
-            if State.AutoRainbowClaim and (now - lastRainbowTick > 5) then
-                lastRainbowTick = now
-                local claimed = AutoProgAPI.ClaimRainbowPets()
-                if claimed > 0 then
-                    currentActivity = string.format("Claimed %d Rainbow Pet(s)!", claimed)
-                end
-            end
-        end
-    end)
-end
+        end)
+    end
 end))
 
 local function updateTelemetry()
