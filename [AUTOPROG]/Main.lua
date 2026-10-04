@@ -1085,6 +1085,15 @@ table.insert(threads, task.spawn(function()
                     task.wait(0.5)
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
                     task.wait(0.5)
+                    return
+                end
+
+                local curIsland = pData.CurrentIsland or ""
+                if curIsland ~= "Matrix" then
+                    currentActivity = "[Phase 3: Matrix] Teleporting to Matrix Island..."
+                    AutoProgAPI.TeleportToEgg("MatrixEgg")
+                    task.wait(0.5)
+                    return
                 end
 
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
