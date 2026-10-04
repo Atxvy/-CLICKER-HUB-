@@ -1273,6 +1273,10 @@ local function updateTelemetry()
                 pcall(function() LiveStatusCard.BodyLabel.Text = cardContent end)
             end
         end
+
+        if State.BlackScreen and AutoProgAPI and AutoProgAPI.UpdateBlackScreenTelemetry then
+            pcall(AutoProgAPI.UpdateBlackScreenTelemetry)
+        end
     end)
     if not ok then
         pcall(function()
