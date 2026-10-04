@@ -1483,21 +1483,27 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
 end
 
 -- Calculates dynamic egg hatching animation & cooldown speed matching game engine profile (4.2 / multiplier)
-function ProgAPI.GetPlayerHatchSpeed(): number
+function ProgAPI.GetPlayerHatchSpeed(eggName: string?): number
+    eggName = eggName or ProgAPI.SelectedEgg or "MatrixEgg"
     local mult = 1
     if EggsFrontend and EggsFrontend.GetHatchSpeedMultiplier then
-        local ok, m = pcall(EggsFrontend.GetHatchSpeedMultiplier)
+        local ok, m = pcall(function() return EggsFrontend.GetHatchSpeedMultiplier(eggName) end)
         if ok and type(m) == "number" and m > 0 then
             mult = m
         end
     end
     local rawSpeed = 4.2 / mult
-    -- Add 0.15s buffer to prevent server rate-limiter tripping from network ping jitter
-    return math.clamp(rawSpeed + 0.15, 0.2, 10.0)
+    -- Use dynamic network ping buffer (~40ms / 2 server ticks) for maximum throughput without tripping cooldown
+    local pingBuffer = 0.04
+    pcall(function()
+        local p = game:GetService("Stats").Network:GetPing()
+        if p and p > 0 then pingBuffer = math.clamp(p / 1000 * 0.8, 0.02, 0.08) end
+    end)
+    return math.clamp(rawSpeed + pingBuffer, 0.15, 10.0)
 end
 
-function ProgAPI.FormatHatchSpeed(): string
-    local speed = ProgAPI.GetPlayerHatchSpeed()
+function ProgAPI.FormatHatchSpeed(eggName: string?): string
+    local speed = ProgAPI.GetPlayerHatchSpeed(eggName)
     return string.format("%.1fs", speed)
 end
 
@@ -1668,12 +1674,12 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         end
     end
 
-    -- If server rate-limited or player on cooldown, back off to let server cooldown expire
+    -- If server rate-limited or player on cooldown, back off minimally to let server cooldown expire
     if tostring(reason):lower():find("too fast") or tostring(res):lower():find("too fast") then
-        ProgAPI.HatchBackoffUntil = tick() + 1.2
+        ProgAPI.HatchBackoffUntil = tick() + 0.35
     end
     if tostring(reason):lower():find("cooldown") or tostring(res):lower():find("cooldown") or tostring(reason):lower():find("ratelimit") or tostring(res):lower():find("ratelimit") then
-        ProgAPI.HatchBackoffUntil = tick() + 3.5
+        ProgAPI.HatchBackoffUntil = tick() + 1.2
     end
 
     -- If server rejected due to distance, re-snap character
