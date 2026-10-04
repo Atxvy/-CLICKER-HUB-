@@ -272,15 +272,18 @@ function ProgAPI.GetMaxRebirthInfo()
     }
 end
 
--- Executes highest affordable rebirth milestone button directly
+-- Executes highest affordable rebirth milestone button directly (as shown on Quick Rebirth button)
 function ProgAPI.RebirthMaxTarget(): (boolean, any)
     if ProgAPI.IsRainbowMode and ProgAPI.IsRainbowMode() then
         return false, "Auto Rebirth disabled during Rainbow Mode to preserve clicks for egg hatching"
     end
+    if ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
+        return false, "Auto Rebirth paused during Phase 3 to accumulate all clicks for Matrix Egg"
+    end
 
     local info = ProgAPI.GetMaxRebirthInfo()
     if info.CanAffordMax and info.BestAffordableIndex then
-        -- 1. Direct channel fire to active button index
+        -- 1. Direct channel fire to active max affordable button index
         if Channels.Rebirths then
             Channels.Rebirths:FireServer("Rebirth", info.BestAffordableIndex)
         end
@@ -1394,6 +1397,9 @@ end
 
 -- Weak pet deletion: If highest unlocked island is N, delete all normal pets from world (N - 2) and below
 function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
+    if ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
+        return ProgAPI.CleanNonMythicPets()
+    end
     if protectCrafting == nil then protectCrafting = true end
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
@@ -2751,126 +2757,89 @@ function ProgAPI.CheckAndEquipMagmaSkin(): (boolean, string)
 end
 
 --==============================================================================
--- SECRET ??? QUESTLINE
+-- PHASE 3: ENDGAME MATRIX MYTHIC PIPELINE
+-- Activates once Phase 2 (Desert Machine & Skill Tree) is 100% complete!
 --==============================================================================
--- SECRET ??? QUESTLINE (Overworld Gate / Dominus Area)
---==============================================================================
-function ProgAPI.GetSecretQuestProgress()
+function ProgAPI.IsPhase3(): boolean
+    local allIslands = ProgAPI.AreAllIslandsUnlocked()
+    if not allIslands then return false end
+    local stProg = ProgAPI.GetSkillTreeProgress()
+    local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
+    return isSkillTreeMaxed == true
+end
+
+-- Phase 3 Dedicated Mythic Filter: Keeps ONLY Mythic / Secret / Divine pets!
+-- Deletes all non-mythic pets (Common, Rare, Epic, Legendary) and old weak unequipped pets
+function ProgAPI.CleanNonMythicPets(): number
     local stats = Stats.Local(true) or {}
-    local collected = stats.SecretAreaCollectedFeathers or {}
-    local count = 0
-    for _ in pairs(collected) do count = count + 1 end
-    return {
-        FeathersCollected = count,
-        DoorUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true,
-        QuestClaimed = stats.DominusAreaUnlocked == true,
-    }
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+
+    local toDelete = {}
+    for guid, p in pairs(pets) do
+        -- Never delete currently equipped pets or locked pets
+        if not equipped[guid] and not p.Locked and not p.l then
+            local pId = p.id or p.Name or p.Id
+            local meta = Directory.Pets and Directory.Pets[pId]
+            local r = (meta and meta.Rarity) or p.rarity or "Common"
+            local isMythicOrBetter = (r == "Mythic" or r == "Mythical" or r == "Secret" or r == "Divine" or r == "Mega" or r == "Exclusive")
+
+            -- If it is NOT a Mythic (or better), delete it!
+            if not isMythicOrBetter then
+                table.insert(toDelete, guid)
+            end
+        end
+    end
+
+    local deletedCount = 0
+    if #toDelete > 0 and Channels.Pets then
+        for i = 1, #toDelete, 50 do
+            local batch = {}
+            for j = i, math.min(i + 49, #toDelete) do
+                table.insert(batch, toDelete[j])
+            end
+            pcall(function()
+                Channels.Pets:FireServer("DeletePetsBulk", batch)
+            end)
+            deletedCount = deletedCount + #batch
+            task.wait(0.08)
+        end
+    end
+    return deletedCount
+end
+
+-- Checks if entire equipped team is 100% Rainbow Mythics
+function ProgAPI.IsEquippedTeamAllRainbowMythic(): (boolean, number, number)
+    local stats = Stats.Local(true) or {}
+    local equipped = stats.EquippedPets or {}
+    local total = 0
+    local mythicCount = 0
+
+    for guid, _ in pairs(equipped) do
+        total = total + 1
+        local pInfo = (stats.Pets and stats.Pets[guid]) or (stats.EquippedPets and stats.EquippedPets[guid])
+        if pInfo then
+            local pId = pInfo.id or pInfo.Name or pInfo.Id
+            local meta = Directory.Pets and Directory.Pets[pId]
+            local r = (meta and meta.Rarity) or pInfo.rarity or ""
+            local isMythic = (r == "Mythic" or r == "Mythical" or r == "Secret" or r == "Divine")
+            local isRainbow = (pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow" or pInfo.Rainbow == true)
+            if isMythic and isRainbow then
+                mythicCount = mythicCount + 1
+            end
+        end
+    end
+
+    return (total > 0 and mythicCount == total), mythicCount, total
+end
+
+-- Backward compatibility stub
+function ProgAPI.GetSecretQuestProgress()
+    return { DoorUnlocked = true, QuestClaimed = true }
 end
 
 function ProgAPI.StepSecretQuest(): (boolean, string)
-    local stats = Stats.Local(true) or {}
-    local doorUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true
-    if doorUnlocked then
-        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
-        if MF and MF.Enter and MF.Active and MF.Active() ~= "DominusArea" then
-            pcall(function() MF.Enter("DominusArea") end)
-        end
-        return true, "??? Secret Door Unlocked!"
-    end
-
-    if not ProgAPI.IsIslandUnlocked("Mystical") then
-        return false, "Unlock Mystical Island first!"
-    end
-
-    local questCh = Channels.Quest
-    if not questCh then return false, "No Quest channel" end
-
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-    -- Check if any completed secret sub-quests need claiming
-    local quests = stats.Quests or {}
-    for qId, qData in pairs(quests) do
-        if type(qData) == "table" and qId:find("secret_") then
-            if qData.Amount and qData.Progress and qData.Progress >= qData.Amount and qData.Completed ~= true then
-                pcall(function()
-                    questCh:InvokeServer("Claim", qId, qData.Tier or 1)
-                end)
-                task.wait(0.15)
-            end
-        end
-    end
-
-    -- 1. Secret Feathers: If secret_feathers is active and progress < amount
-    local feathersQuest = quests.secret_feathers
-    if feathersQuest and feathersQuest.Progress < feathersQuest.Amount and hrp then
-        local collected = stats.SecretAreaCollectedFeathers or {}
-        local CollectionService = game:GetService("CollectionService")
-        local taggedFeathers = CollectionService:GetTagged("FindFeathers")
-        for _, featherObj in ipairs(taggedFeathers) do
-            if not collected[featherObj.Name] then
-                local pivot = featherObj:GetPivot()
-                hrp.CFrame = pivot + Vector3.new(0, 1, 0)
-                task.wait(0.25)
-                return false, string.format("Collecting Feathers (%d/%d)...", feathersQuest.Progress, feathersQuest.Amount)
-            end
-        end
-    end
-
-    -- 2. Secret Hatch Eggs: If secret_hatch_eggs is active and progress < amount
-    local hatchQuest = quests.secret_hatch_eggs
-    if hatchQuest and hatchQuest.Progress < hatchQuest.Amount then
-        -- DO NOT teleport to World 1 or open BasicEgg!
-        -- Any eggs opened during gameplay (or Endgame eggs in Tech World) advance this quest passively.
-        return false, string.format("??? Quest: Hatching Eggs in progress (%d/%d)...", hatchQuest.Progress, hatchQuest.Amount)
-    end
-
-    -- 3. Secret Craft Golden: If secret_craft_golden is active and progress < amount
-    local craftQuest = quests.secret_craft_golden
-    if craftQuest and craftQuest.Progress < craftQuest.Amount then
-        ProgAPI.CraftGoldenPets()
-        return false, string.format("Crafting Golden Pets for ??? Quest (%d/%d)...", craftQuest.Progress, craftQuest.Amount)
-    end
-
-    -- 4. Secret Clicks: If secret_click_* is active and progress < amount
-    for _, clickKey in ipairs({"secret_click_1", "secret_click_2", "secret_click_3"}) do
-        local clickQ = quests[clickKey]
-        if clickQ and clickQ.Progress < clickQ.Amount then
-            ProgAPI.Click()
-            return false, string.format("Clicking for ??? Quest (%d/%d)...", clickQ.Progress, clickQ.Amount)
-        end
-    end
-
-    -- 5. Interacting with Door at Spawn to unlock
-    local door = workspace:FindFirstChild("_MAP")
-        and workspace._MAP:FindFirstChild("Islands")
-        and workspace._MAP.Islands:FindFirstChild("Spawn")
-        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
-        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
-    local interact = door and door:FindFirstChild("Interact")
-
-    if hrp and interact and (hrp.Position - interact.Position).Magnitude > 15 then
-        if stats.CurrentIsland ~= "Spawn" then
-            ProgAPI.TeleportToIsland("Spawn")
-            task.wait(0.3)
-        end
-        hrp.CFrame = interact.CFrame + Vector3.new(0, 2, 0)
-        task.wait(0.2)
-    end
-
-    local ok, res1, res2 = pcall(function()
-        return questCh:InvokeServer("ClaimSecretAreaQuestline")
-    end)
-
-    if ok and res1 == true and (res2 == "Unlocked" or res2 == "Claimed") then
-        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
-        if MF and MF.Enter then
-            pcall(function() MF.Enter("DominusArea") end)
-        end
-        return true, "??? Door Unlocked! Entered Dominus Area."
-    end
-
-    return false, tostring(res2 or "In progress")
+    return true, "??? Quest completed and bypassed for Phase 3"
 end
 
 --==============================================================================
