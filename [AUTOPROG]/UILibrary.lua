@@ -16,15 +16,15 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and h then
-            return h
-        end
-    end
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
     if ok and cg then
         return cg
+    end
+    if gethui then
+        local okH, h = pcall(gethui)
+        if okH and h then
+            return h
+        end
     end
     local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
     local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
