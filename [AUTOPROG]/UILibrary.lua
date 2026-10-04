@@ -131,6 +131,13 @@ function UILibrary.CreateWindow(config)
 
     table.insert(Connections, ScreenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
         if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
+            task.defer(function()
+                ScreenGui.Enabled = true
+            end)
+        end
+    end))
+    table.insert(Connections, RunService.Heartbeat:Connect(function()
+        if not ScreenGui.Enabled and MainFrame and MainFrame.Visible then
             ScreenGui.Enabled = true
         end
     end))
