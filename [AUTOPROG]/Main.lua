@@ -958,6 +958,11 @@ table.insert(threads, task.spawn(function()
                 isEggHatching = false
             end
 
+            -- Respect server rate-limiter backoff
+            if now < (AutoProgAPI.HatchBackoffUntil or 0) then
+                return
+            end
+
             local pData = AutoProgAPI.GetPlayerData()
             local allIslandsUnlocked = AutoProgAPI.AreAllIslandsUnlocked()
             local lockedIsland = AutoProgAPI.GetNextLockedIsland()
