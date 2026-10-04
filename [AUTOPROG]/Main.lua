@@ -149,6 +149,7 @@ end
 
 -- Load state from Configs
 local State = Configs.Load()
+if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
 
 --==============================================================================
 -- UI INITIALIZATION
@@ -362,17 +363,10 @@ Phase2Tab:AddSection("PHASE 2 SETTINGS (RUNS WHEN ALL 17 ISLANDS UNLOCKED)")
 Phase2Tab:AddParagraph({
     Title = "Endgame Progression Order",
     Content = "1st: Desert Gem Machine & Rebirth Shop Maxing\n" ..
-              "2nd: Skill Tree Coins First (Volcano <-> Heaven Alternation) -> Tech Coins Tree\n" ..
-              "3rd: Auto Prestige as soon as affordable\n" ..
+              "2nd: Skill Tree Coins First (??? Dominus Area) -> Tech Coins Tree (Matrix)\n" ..
+              "3rd: Auto Rainbow Team Building (Craft Golden -> Rainbow Pipeline once Skill Tree is maxed)\n" ..
               "4th: 10 Qi Rebirth Goal & Magma Click Skin\n" ..
-              "5th: Auto ??? Secret Quest & Claim Rainbow Pets"
-})
-
-Phase2Tab:AddToggle("AutoPrestigeToggle_P2", {
-    Title = "Auto Prestige (When Available)",
-    Description = "Automatically triggers Prestige when Rebirths requirement is met, adapting progression smoothly",
-    Default = State.AutoPrestige,
-    Callback = function(val) State.AutoPrestige = val; Configs.Set("AutoPrestige", val) end
+              "5th: Auto ??? Secret Quest & Auto Prestige as soon as affordable"
 })
 
 Phase2Tab:AddToggle("AutoDesertMachineToggle_P2", {
@@ -383,17 +377,17 @@ Phase2Tab:AddToggle("AutoDesertMachineToggle_P2", {
 })
 
 Phase2Tab:AddToggle("AutoSkillTreeToggle_P2", {
-    Title = "2nd: Skill Tree (Coins First -> Tech Coins)",
-    Description = "Farms Volcano & Heaven breakables for Coins perks, then advances to Matrix for Tech Coins",
+    Title = "2nd: Skill Tree (??? Dominus Area -> Tech Matrix)",
+    Description = "Grinds ??? Dominus Area for Coins perks, then advances to Matrix for Tech Coins",
     Default = State.AutoSkillTree,
     Callback = function(val) State.AutoSkillTree = val; Configs.Set("AutoSkillTree", val) end
 })
 
-Phase2Tab:AddToggle("AttackBigChestsToggle_P2", {
-    Title = "3rd: Attack Big Chests (Heaven Giant & Hell Chest)",
-    Description = "Prioritizes the Heaven Giant Chest in HugeHeavenChest and auto-claims Hell Chest",
-    Default = State.AttackBigChests,
-    Callback = function(val) State.AttackBigChests = val; Configs.Set("AttackBigChests", val) end
+Phase2Tab:AddToggle("AutoRainbowClaimToggle_P2", {
+    Title = "3rd: Auto Claim Rainbow Pets",
+    Description = "Automatically collects finished pets from the Rainbow Machine",
+    Default = State.AutoRainbowClaim,
+    Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
 })
 
 Phase2Tab:AddToggle("AutoMagmaSkinToggle_P2", {
@@ -405,16 +399,16 @@ Phase2Tab:AddToggle("AutoMagmaSkinToggle_P2", {
 
 Phase2Tab:AddToggle("AutoSecretQuestToggle_P2", {
     Title = "5th: Auto ??? Secret Quest",
-    Description = "Solves Dominus questline: collects feathers, hatches, and claims door",
+    Description = "Solves Dominus questline: collects feathers, hatches at Spawn, and unlocks Dominus Area",
     Default = State.AutoSecretQuest,
     Callback = function(val) State.AutoSecretQuest = val; Configs.Set("AutoSecretQuest", val) end
 })
 
-Phase2Tab:AddToggle("AutoRainbowClaimToggle_P2", {
-    Title = "Auto Claim Rainbow Pets",
-    Description = "Automatically collects finished pets from the Rainbow Machine",
-    Default = State.AutoRainbowClaim,
-    Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
+Phase2Tab:AddToggle("AutoPrestigeToggle_P2", {
+    Title = "Auto Prestige (When Available)",
+    Description = "Automatically triggers Prestige when Rebirths requirement is met, adapting progression smoothly",
+    Default = State.AutoPrestige,
+    Callback = function(val) State.AutoPrestige = val; Configs.Set("AutoPrestige", val) end
 })
 
 --==============================================================================
@@ -534,6 +528,17 @@ MiscTab:AddToggle("RemoveMapsToggle", {
     end
 })
 
+MiscTab:AddToggle("OptimizeGameSettingsToggle", {
+    Title = "Disable In-Game Visuals & Performance Settings",
+    Description = "Turns on Potato Mode, hides other/own pets, hides crits, hides popups, transparent pets, and disables server messages",
+    Default = State.OptimizeGameSettings,
+    Callback = function(val)
+        State.OptimizeGameSettings = val
+        Configs.Set("OptimizeGameSettings", val)
+        AutoProgAPI.SetDisableInGameSettings(val)
+    end
+})
+
 MiscTab:AddSection("BIG CHESTS AUTOMATION")
 MiscTab:AddToggle("AttackBigChestsToggle_Misc", {
     Title = "Attack Big Chests (Heaven Giant Chest & Hell Chest)",
@@ -566,6 +571,7 @@ task.spawn(function()
     pcall(AutoProgAPI.EquipBest)
     if State.BlackScreen then pcall(AutoProgAPI.SetBlackScreen, true) end
     if State.RemoveMaps then pcall(AutoProgAPI.SetRemoveMaps, true) end
+    if State.OptimizeGameSettings ~= false then pcall(AutoProgAPI.SetDisableInGameSettings, true) end
 end)
 
 -- Rejoin & Startup Teleport Guarantee: If in Phase 2 and Skill Tree is not maxed, teleport to active breakables arena!
@@ -575,12 +581,21 @@ task.spawn(function()
         local pData = AutoProgAPI.GetPlayerData()
         local lockedIsland = AutoProgAPI.GetNextLockedIsland()
         if lockedIsland == nil and State.AutoSkillTree then
+            local qProg = AutoProgAPI.GetSecretQuestProgress()
+            if State.AutoSecretQuest and not qProg.DoorUnlocked then
+                -- Door not unlocked yet, let StepSecretQuest handle positioning
+                return
+            end
             local stProg = AutoProgAPI.GetSkillTreeProgress()
             if not stProg.CoinsComplete then
-                AutoProgAPI.TeleportToWorld("Overworld")
-                AutoProgAPI.TeleportToIsland("Heaven")
-                task.wait(0.4)
-                AutoProgAPI.TeleportToBreakableZone("Heaven")
+                if qProg and qProg.DoorUnlocked then
+                    AutoProgAPI.TeleportToIsland("DominusArea")
+                else
+                    AutoProgAPI.TeleportToWorld("Overworld")
+                    AutoProgAPI.TeleportToIsland("Heaven")
+                    task.wait(0.4)
+                    AutoProgAPI.TeleportToBreakableZone("Heaven")
+                end
             elseif not stProg.TechComplete then
                 AutoProgAPI.TeleportToWorld("Techworld")
                 AutoProgAPI.TeleportToIsland("Matrix")
@@ -776,17 +791,16 @@ table.insert(threads, task.spawn(function()
         local stProg = AutoProgAPI.GetSkillTreeProgress()
         local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
 
-        -- Runs in Phase 2 until Skill Tree is fully maxed!
+        -- Runs in Phase 2 until Skill Tree is fully maxed! (Farms Dominus Area exclusively for coins)
         if allIslands and (not isSkillTreeMaxed) and State.AutoSkillTree then
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
-                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(State.AttackBigChests)
+                local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(false)
                 if action then
-                    currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Heaven"))
+                    currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "DominusArea"))
                 else
-                    local zone = (stProg and not stProg.CoinsComplete) and "Heaven" or "Matrix"
-                    currentActivity = string.format("[Skill Tree] Farming Breakables in %s", zone)
+                    currentActivity = "[Skill Tree] Farming Breakables in Dominus Area"
                 end
             end
         end
@@ -884,10 +898,11 @@ table.insert(threads, task.spawn(function()
             -- PHASE 2 (ENDGAME ROADMAP)
             -- Condition: ALL 17 islands are owned and unlocked!
             -- Progression Order:
-            -- 1. Accept ??? Quest EARLY at start of Phase 2
-            -- 2. Max Skill Tree (Coins first via Heaven/Volcano, then Tech via Matrix)
+            -- 1. Desert Gem Machine & Rebirth Shop Maxing (Thread 8 & 9)
+            -- 2. Max Skill Tree (Dominus Area for Coins -> Matrix for Tech Coins) (Thread 13)
             -- 3. Auto Rainbow pets (Hatch best egg -> Gold -> Rainbow -> Claim) once Skill Tree is maxed
-            -- 4. Prestige if possible (Resets islands & restarts Phase 1 with huge multiplier)
+            -- 4. 10 Qi Rebirth Goal & Magma Click Skin
+            -- 5. Auto ??? Secret Quest & Prestige as soon as affordable
             -- =====================================================================
             else
                 currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
@@ -895,19 +910,7 @@ table.insert(threads, task.spawn(function()
                 local stProg = AutoProgAPI.GetSkillTreeProgress()
                 local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
 
-                -- 1. Accept / Advance ??? Secret Quest EARLY when Phase 2 starts!
-                if State.AutoSecretQuest and (now - lastQuestTick > 1.5) then
-                    lastQuestTick = now
-                    local qProg = AutoProgAPI.GetSecretQuestProgress()
-                    if not qProg.DoorUnlocked then
-                        local okQ, qMsg = AutoProgAPI.StepSecretQuest()
-                        if okQ and qMsg and not qMsg:find("Already") then
-                            currentActivity = "[??? Quest] " .. tostring(qMsg)
-                        end
-                    end
-                end
-
-                -- 2. Auto Rainbow Team Building: Initiates WHEN Skill Tree is MAXED!
+                -- 3. Auto Rainbow Team Building: Initiates WHEN Skill Tree is MAXED!
                 if isSkillTreeMaxed and not isAllRainbow and (now - lastEggHatchTick > 0.35) then
                     lastEggHatchTick = now
                     local latestEgg = AutoProgAPI.GetBestAffordableEgg()
@@ -929,7 +932,7 @@ table.insert(threads, task.spawn(function()
                     end
                 end
 
-                -- 3. Furthest Map Teleport Check: when skill tree is fully complete AND team is all rainbow, stay at furthest island for click farming
+                -- Furthest Map Teleport Check: when skill tree is fully complete AND team is all rainbow, stay at furthest island for click farming
                 if isSkillTreeMaxed and isAllRainbow and (now - lastFurthestTpTick > 30) then
                     lastFurthestTpTick = now
                     local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
@@ -947,6 +950,18 @@ table.insert(threads, task.spawn(function()
                     local okSkin, skinMsg = AutoProgAPI.CheckAndEquipMagmaSkin()
                     if okSkin and skinMsg and not skinMsg:find("Active") then
                         currentActivity = "[Magma Skin] " .. tostring(skinMsg)
+                    end
+                end
+
+                -- 5. Auto ??? Secret Quest (Step 5)
+                if State.AutoSecretQuest and (now - lastQuestTick > 1.5) then
+                    lastQuestTick = now
+                    local qProg = AutoProgAPI.GetSecretQuestProgress()
+                    if not qProg.DoorUnlocked then
+                        local okQ, qMsg = AutoProgAPI.StepSecretQuest()
+                        if okQ and qMsg and not qMsg:find("Already") then
+                            currentActivity = "[Phase 2: ??? Quest] " .. tostring(qMsg)
+                        end
                     end
                 end
             end
