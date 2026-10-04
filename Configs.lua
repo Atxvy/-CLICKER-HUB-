@@ -1,91 +1,42 @@
 --!strict
 --==============================================================================
--- [CLICKER HUB] Configs.lua
--- Settings persistence manager (JSON based)
+-- [AUTOPROG] Configs.lua
+-- Settings persistence manager for Auto Progression
 --==============================================================================
 
 local Configs = {}
 
 local HttpService = game:GetService("HttpService")
-local CONFIG_PATH = "[CLICKER HUB]/config.json"
+local CONFIG_PATH = "[AUTOPROG]/config.json"
 
 Configs.Default = {
-    AutoProg = {
-        MasterEnabled = true,
-    },
-    AutoClick = {
-        Enabled = true,
-        Speed = 0.001,
-    },
-    AutoRebirth = {
-        Enabled = true,
-        Mode = "Max Rebirth", -- "Max Rebirth", "Best Affordable", "Button 1", "Button 2", "Button 3"
-        Index = 1,
-        Delay = 0.25,
-    },
-    AutoFarm = {
-        AutoUnlockNextIsland = true,
-    },
-    AutoPets = {
-        EquipBest = true,
-        Interval = 5,
-        AutoGoldPets = false,
-        AutoRainbowPets = false,
-        AutoClaimRainbow = true,
-    },
-    AutoHatch = {
-        Enabled = false,
-        Egg = "Best Affordable Egg",
-        AutoTeleportToEgg = true,
-        Amount = 1,
-        Delay = 0.05,
-    },
-    SkillTree = {
-        AutoBreakables = true,
-        BestWorld = true,
-        TargetWorld = "Auto (Dynamic Smart)",
-        IgnoreBossChest = true,
-        Delay = 0.05,
-        AutoSkillTree = true,
-    },
-    AutoQuest = {
-        AutoClaim = true,
-        AutoSecretQuests = true,
-        Interval = 5,
-    },
-    Upgrades = {
-        GemUpgrades = true,
-        RebirthButtons = true,
-        DoubleJump = false,
-        MiniUpgrades = true,
-        RNGUpgrades = false,
-    },
-    AutoRewards = {
-        FreeGifts = true,
-        Achievements = true,
-        Chests = true,
-        Daily = true,
-        SpinWheel = true,
-        Quests = true,
-        FinishedCrafts = true,
-        Interval = 10,
-    },
-    AutoItems = {
-        AutoPotions = true,
-        AutoFruits = true,
-        AutoCraftPowerups = false,
-        ClicksPotion = true,
-        HatchSpeedPotion = true,
-        LuckPotion = true,
-        GemsPotion = true,
-        ClicksSpeedPotion = true,
-    },
-    Misc = {
-        WalkSpeed = 16,
-        JumpPower = 50,
-        InfiniteJump = false,
-        AntiAFK = true,
-    }
+    MasterEnabled = true,
+    AutoClick = true,
+    AutoMaxRebirth = true,
+    AutoPrestige = true,
+    AutoUnlockIslands = true,
+    AutoBestEggs = true,
+    AutoGold = true,
+    AutoCraftGolden = true,
+    ProtectCraftingPets = true,
+    AutoCleanPets = true,
+    AutoEquipBest = true,
+    AutoMapUpgrades = true,
+    AutoGemUpgrades = true,
+    AutoRebirthButtons = true,
+    AutoDesertMachine = true,
+    AutoSkillTree = true,
+    AutoSecretQuest = true,
+    AutoMagmaSkin = true,
+    AutoRainbowClaim = true,
+    AutoPotions = true,
+    AutoFruits = true,
+    AutoFreeGifts = true,
+    AttackBigChests = true,
+    BlackScreen = false,
+    RemoveMaps = false,
+    WalkSpeed = 16,
+    JumpPower = 50,
 }
 
 Configs.Current = table.clone(Configs.Default)
@@ -96,12 +47,8 @@ function Configs.Load()
             local raw = readfile(CONFIG_PATH)
             local decoded = HttpService:JSONDecode(raw)
             if type(decoded) == "table" then
-                for category, tbl in pairs(decoded) do
-                    if type(tbl) == "table" and Configs.Current[category] then
-                        for k, v in pairs(tbl) do
-                            Configs.Current[category][k] = v
-                        end
-                    end
+                for k, v in pairs(decoded) do
+                    Configs.Current[k] = v
                 end
             end
         end
@@ -116,6 +63,18 @@ function Configs.Save()
             writefile(CONFIG_PATH, encoded)
         end
     end)
+end
+
+function Configs.Get(key: string, defaultVal: any): any
+    if Configs.Current[key] ~= nil then
+        return Configs.Current[key]
+    end
+    return defaultVal
+end
+
+function Configs.Set(key: string, val: any)
+    Configs.Current[key] = val
+    Configs.Save()
 end
 
 return Configs
