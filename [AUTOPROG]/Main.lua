@@ -647,19 +647,21 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 12: DEDICATED AUTO PRESTIGE THREAD
+-- THREAD 12: DEDICATED AUTO PRESTIGE THREAD (Strict Phase 2 requirement: All islands unlocked)
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(2)
         if isRunning and State.MasterEnabled and State.AutoPrestige then
-            local prestInfo = AutoProgAPI.GetPrestigeInfo()
-            if prestInfo and prestInfo.CanPrestige then
-                currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
-                local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
-                if ok then
-                    Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
-                    task.wait(1)
-                    pcall(AutoProgAPI.CheckAndRebuyIslands)
+            if AutoProgAPI.AreAllIslandsUnlocked() then
+                local prestInfo = AutoProgAPI.GetPrestigeInfo()
+                if prestInfo and prestInfo.CanPrestige then
+                    currentActivity = "🚀 Triggering Prestige to Tier " .. tostring(prestInfo.CurrentPrestige + 1) .. "!"
+                    local ok, pMsg = AutoProgAPI.CheckAndTriggerPrestige()
+                    if ok then
+                        Window:Notify({ Title = "PRESTIGE!", Content = pMsg, Duration = 5 })
+                        task.wait(1)
+                        pcall(AutoProgAPI.CheckAndRebuyIslands)
+                    end
                 end
             end
         end
@@ -800,14 +802,21 @@ table.insert(threads, task.spawn(function()
                         pcall(AutoProgAPI.CraftRainbowPets)
                         pcall(AutoProgAPI.ClaimRainbowPets)
                         pcall(AutoProgAPI.EquipBest)
+                    else
+                        -- Accumulate clicks on furthest island if egg is unaffordable
+                        local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
+                        if pData.CurrentIsland ~= furthest and (now - lastTeleportTick > 3) then
+                            lastTeleportTick = now
+                            AutoProgAPI.TeleportToIsland(furthest)
+                        end
                     end
                 end
 
-                -- 2. Furthest Map Teleport Check every 30 seconds (When skill tree coins is done)
+                -- 2. Furthest Map Teleport Check: when skill tree is fully complete or disabled, stay at furthest island for click farming
                 if (now - lastFurthestTpTick > 30) then
                     lastFurthestTpTick = now
                     local stProg = AutoProgAPI.GetSkillTreeProgress()
-                    if stProg.CoinsComplete then
+                    if (not State.AutoSkillTree) or (stProg.CoinsComplete and stProg.TechComplete) then
                         local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                         if pData.CurrentIsland ~= furthest then
                             AutoProgAPI.TeleportToIsland(furthest)
