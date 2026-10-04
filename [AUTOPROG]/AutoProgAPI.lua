@@ -272,17 +272,49 @@ function ProgAPI.GetMaxRebirthInfo()
     }
 end
 
--- Executes highest affordable rebirth milestone button directly (as shown on Quick Rebirth button)
-function ProgAPI.RebirthMaxTarget(): (boolean, any)
-    if ProgAPI.IsRainbowMode and ProgAPI.IsRainbowMode() then
-        return false, "Auto Rebirth disabled during Rainbow Mode to preserve clicks for egg hatching"
+-- Helper function to check if player has a Next Rebirth milestone button pending
+-- (Matches game UI: "Goal" frame is visible in QuickRebirth, showing next milestone button and progress bar)
+function ProgAPI.HasNextRebirthGoal(): boolean
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and lp:FindFirstChild("PlayerGui")
+    local qr = pg and pg:FindFirstChild("Main", true) and pg.Main:FindFirstChild("Left") and pg.Main.Left:FindFirstChild("QuickRebirth")
+    local goal = qr and qr:FindFirstChild("Goal")
+    if goal and goal.Visible == true then
+        return true
     end
-    if ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
-        return false, "Auto Rebirth paused during Phase 3 to accumulate all clicks for Matrix Egg"
+
+    -- Mathematical verification: If current best affordable button is less than the highest owned button
+    local info = ProgAPI.GetMaxRebirthInfo()
+    if info and info.BestAffordableIndex and info.MaxButtonIndex then
+        if info.BestAffordableIndex < info.MaxButtonIndex then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Executes highest affordable rebirth milestone button directly
+-- Strictly follows user rule: ONLY rebirths when player has reached the MAX milestone (no more Next Rebirth button)
+-- If there is a Next Rebirth button pending (Image 2), it waits until that milestone is reached!
+function ProgAPI.RebirthMaxTarget(): (boolean, any)
+    -- Check if player is close to unlocking next island in Phase 1
+    if ProgAPI.IsSmartRebirthPaused and ProgAPI.IsSmartRebirthPaused() then
+        return false, "Auto Rebirth paused: accumulating clicks for next island unlock"
+    end
+
+    -- User rule: Wait until no more next rebirth milestone (Goal visible = false)
+    if ProgAPI.HasNextRebirthGoal() then
+        return false, "Waiting for Next Rebirth milestone button to be reached..."
     end
 
     local info = ProgAPI.GetMaxRebirthInfo()
     if info.CanAffordMax and info.BestAffordableIndex then
+        -- Must be at the absolute max milestone button owned
+        if info.BestAffordableIndex < info.MaxButtonIndex then
+            return false, "Waiting to reach maximum milestone button index..."
+        end
+
         -- 1. Direct channel fire to active max affordable button index
         if Channels.Rebirths then
             Channels.Rebirths:FireServer("Rebirth", info.BestAffordableIndex)
