@@ -369,99 +369,101 @@ Phase1Tab:AddToggle("AutoGoldToggle_P1", {
 })
 
 --==============================================================================
--- 3. PHASE 2: ENDGAME PREPARATION TAB
+-- 3. PHASE 2: ??? SECRET QUEST TAB
 --==============================================================================
-local Phase2Tab = Window:AddTab({ Title = "Phase 2: Endgame Prep", Icon = "👑" })
+local Phase2Tab = Window:AddTab({ Title = "Phase 2: ??? Secret Quest", Icon = "🗝️" })
 
-Phase2Tab:AddSection("PHASE 2 SETTINGS (ENDGAME PREPARATION)")
+Phase2Tab:AddSection("PHASE 2 SETTINGS (??? SECRET AREA QUEST)")
 Phase2Tab:AddParagraph({
-    Title = "Endgame Preparation Order",
-    Content = "1st: Desert Gem Machine & Rebirth Shop Maxing\n" ..
-              "2nd: Skill Tree Coins First (??? Dominus Area) -> Tech Coins Tree (Matrix)\n" ..
-              "Once Skill Tree is 100% complete, Phase 3 (Matrix Mythic Pipeline) activates automatically!"
-})
-
-Phase2Tab:AddToggle("AutoDesertMachineToggle_P2", {
-    Title = "1st: Desert Machine & Gem Upgrades Maxing",
-    Description = "Maxes out Desert machine perks and rebirth milestone buttons",
-    Default = State.AutoDesertMachine,
-    Callback = function(val) State.AutoDesertMachine = val; Configs.Set("AutoDesertMachine", val) end
-})
-
-Phase2Tab:AddToggle("AutoSkillTreeToggle_P2", {
-    Title = "2nd: Skill Tree (??? Dominus Area -> Tech Matrix)",
-    Description = "Grinds ??? Dominus Area for Coins perks, then advances to Matrix for Tech Coins",
-    Default = State.AutoSkillTree,
-    Callback = function(val) State.AutoSkillTree = val; Configs.Set("AutoSkillTree", val) end
-})
-
-Phase2Tab:AddToggle("AutoPrestigeToggle_P2", {
-    Title = "Auto Prestige (When Available)",
-    Description = "Automatically triggers Prestige when Rebirths requirement is met, adapting progression smoothly",
-    Default = State.AutoPrestige,
-    Callback = function(val) State.AutoPrestige = val; Configs.Set("AutoPrestige", val) end
-})
-
---==============================================================================
--- 4. PHASE 3: ??? SECRET QUEST & DOMINUS FORTUNE TAB
---==============================================================================
-local Phase3Tab = Window:AddTab({ Title = "Phase 3: ??? & Dominus", Icon = "🗝️" })
-
-Phase3Tab:AddSection("PHASE 3 SETTINGS (??? QUEST & DOMINUS FORTUNE)")
-Phase3Tab:AddParagraph({
-    Title = "Phase 3 Strategy",
-    Content = "Activates automatically after Phase 2 (Skill Tree 100% complete)!\n" ..
+    Title = "Phase 2 Strategy",
+    Content = "Activates automatically after Phase 1 (All 17 Islands Unlocked)!\n" ..
               "• Automatically accepts the ??? Quest at Spawn Door\n" ..
               "• Step 1: Click 3,500 Times (high speed auto-clicks)\n" ..
               "• Step 2: Collect 10 Feathers across maps (instant touch interest)\n" ..
               "• Step 3: Hatches BasicEgg from World 1 Spawn to craft 15 Golden Pets\n" ..
               "• Step 4: Hatches 2,500 Eggs using BasicEgg from World 1 Spawn\n" ..
               "• Step 5: Teleports to Spawn Door, unlocks & enters Dominus Area\n" ..
-              "• Step 6: Farms Dominus breakables & completes all 3 Dominus Fortune upgrades (80B + 200B + 400B Coins)\n" ..
-              "• Step 7: Transitions to Phase 4 (Matrix Mythics) once Dominus Fortune is complete (3/3)!"
+              "• Once Door is unlocked -> Transitions to Phase 3 (Endgame Skill Tree 39/39)!"
 })
 
-local Phase3ProgressCard = Phase3Tab:AddParagraph({
-    Title = "??? Quest & Dominus Fortune Status",
+local Phase2ProgressCard = Phase2Tab:AddParagraph({
+    Title = "??? Secret Quest Status",
     Content = "Evaluating...",
     TitleSize = 16,
     BodySize = 13,
 })
-_G.ClickerSimulatorPhase3ProgressCard = Phase3ProgressCard
+_G.ClickerSimulatorPhase2ProgressCard = Phase2ProgressCard
 
-Phase3Tab:AddToggle("AutoSecretQuestToggle", {
-    Title = "Enable Phase 3 Automation",
-    Description = "Automatically completes ??? quests, unlocks door, and farms Dominus Fortune",
+Phase2Tab:AddToggle("AutoSecretQuestToggle", {
+    Title = "Enable Phase 2 Automation",
+    Description = "Automatically completes ??? quests, crafts 15 golden pets, hatches 2,500 eggs, and unlocks door",
     Default = State.AutoSecretQuest ~= false,
     Callback = function(val) State.AutoSecretQuest = val; Configs.Set("AutoSecretQuest", val) end
 })
 
-Phase3Tab:AddToggle("AutoCollectFeathersToggle", {
+Phase2Tab:AddToggle("AutoCollectFeathersToggle", {
     Title = "Auto Collect Feathers",
     Description = "Automatically gathers all 10 feathers required for the secret quest",
     Default = State.AutoCollectFeathers ~= false,
     Callback = function(val) State.AutoCollectFeathers = val; Configs.Set("AutoCollectFeathers", val) end
 })
 
-Phase3Tab:AddToggle("AutoSecretCraftGoldenToggle", {
+Phase2Tab:AddToggle("AutoSecretCraftGoldenToggle", {
     Title = "Auto Craft Golden Pets (BasicEgg)",
     Description = "Hatches BasicEgg from Spawn and crafts 15 Golden pets to complete quest requirement",
     Default = State.AutoSecretCraftGolden ~= false,
     Callback = function(val) State.AutoSecretCraftGolden = val; Configs.Set("AutoSecretCraftGolden", val) end
 })
 
-Phase3Tab:AddToggle("AutoUnlockSecretDoorToggle", {
+Phase2Tab:AddToggle("AutoUnlockSecretDoorToggle", {
     Title = "Auto Unlock & Enter Dominus Door",
     Description = "Teleports to Spawn Door, unlocks secret door, and enters Dominus Area",
     Default = State.AutoUnlockSecretDoor ~= false,
     Callback = function(val) State.AutoUnlockSecretDoor = val; Configs.Set("AutoUnlockSecretDoor", val) end
 })
 
-Phase3Tab:AddToggle("AutoDominusFortuneToggle", {
-    Title = "Auto Farm Dominus Fortune (3 Upgrades)",
-    Description = "Grinds breakables in Dominus Area and purchases Dominus Hatch, Dominus Luck, and Secret Seeker",
-    Default = State.AutoDominusFortune ~= false,
-    Callback = function(val) State.AutoDominusFortune = val; Configs.Set("AutoDominusFortune", val) end
+--==============================================================================
+-- 4. PHASE 3: ENDGAME SKILL TREE (39/39) TAB
+--==============================================================================
+local Phase3Tab = Window:AddTab({ Title = "Phase 3: Skill Tree (39/39)", Icon = "👑" })
+
+Phase3Tab:AddSection("PHASE 3 SETTINGS (ENDGAME SKILL TREE & PREPARATION)")
+Phase3Tab:AddParagraph({
+    Title = "Phase 3 Strategy",
+    Content = "Activates automatically after Phase 2 (??? Secret Door Unlocked)!\n" ..
+              "• 1st: Max Skill Tree Coins (39/39) farming breakables in ??? Dominus Area (includes all 3 Dominus Fortune perks: Dominus Hatch, Dominus Luck, Secret Seeker!)\n" ..
+              "• 2nd: Max Skill Tree Tech (13/13) farming breakables in Tech World (Matrix Island)\n" ..
+              "• 3rd: Desert Gem Machine & Rebirth Shop Maxing\n" ..
+              "• Once Skill Tree is 100% complete (39/39 Coins & 13/13 Tech), Phase 4 (Matrix Mythics) activates automatically!"
+})
+
+local Phase3ProgressCard = Phase3Tab:AddParagraph({
+    Title = "Skill Tree Progress (39/39 Coins & 13/13 Tech)",
+    Content = "Evaluating...",
+    TitleSize = 16,
+    BodySize = 13,
+})
+_G.ClickerSimulatorPhase3ProgressCard = Phase3ProgressCard
+
+Phase3Tab:AddToggle("AutoSkillTreeToggle_P3", {
+    Title = "Auto Skill Tree (Dominus Area 39/39 -> Matrix 13/13)",
+    Description = "Grinds ??? Dominus Area for Coins 39/39, then advances to Matrix for Tech Coins 13/13",
+    Default = State.AutoSkillTree,
+    Callback = function(val) State.AutoSkillTree = val; Configs.Set("AutoSkillTree", val) end
+})
+
+Phase3Tab:AddToggle("AutoDesertMachineToggle_P3", {
+    Title = "Desert Machine & Gem Upgrades Maxing",
+    Description = "Maxes out Desert machine perks and rebirth milestone buttons",
+    Default = State.AutoDesertMachine,
+    Callback = function(val) State.AutoDesertMachine = val; Configs.Set("AutoDesertMachine", val) end
+})
+
+Phase3Tab:AddToggle("AutoPrestigeToggle_P3", {
+    Title = "Auto Prestige (When Available)",
+    Description = "Automatically triggers Prestige when Rebirths requirement is met, adapting progression smoothly",
+    Default = State.AutoPrestige,
+    Callback = function(val) State.AutoPrestige = val; Configs.Set("AutoPrestige", val) end
 })
 
 --==============================================================================
@@ -472,7 +474,7 @@ local Phase4Tab = Window:AddTab({ Title = "Phase 4: Matrix Mythics", Icon = "�
 Phase4Tab:AddSection("PHASE 4 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
 Phase4Tab:AddParagraph({
     Title = "Phase 4 Strategy",
-    Content = "Activates automatically after Phase 3 (??? Secret Quest) is 100% complete!\n" ..
+    Content = "Activates automatically after Phase 3 (Skill Tree 39/39 & 13/13) is 100% complete!\n" ..
               "• Auto Open Matrix Egg (highest endgame egg in Tech World)\n" ..
               "• Rebirth at Max Milestone Only (preserves clicks for Matrix Egg)\n" ..
               "• Mythic Pet Filter: Deletes all non-mythic pets (Common/Rare/Epic/Legendary) and weak pets\n" ..
@@ -749,10 +751,17 @@ task.spawn(function()
         end
 
         if AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3() then
-            local qInfo = AutoProgAPI.GetSecretQuestInfo and AutoProgAPI.GetSecretQuestInfo()
-            if qInfo and qInfo.IsDoorUnlocked then
-                -- Door is unlocked: enter Dominus Area to farm Dominus Fortune!
+            local stProg = AutoProgAPI.GetSkillTreeProgress()
+            local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 39)
+            local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
+            if not coinsDone then
                 AutoProgAPI.EnterDominusArea()
+            elseif not techDone then
+                AutoProgAPI.TeleportToWorld("Techworld")
+                task.wait(0.4)
+                AutoProgAPI.TeleportToIsland("Matrix")
+                task.wait(0.4)
+                AutoProgAPI.TeleportToBreakableZone("Matrix")
             end
             return
         end
@@ -761,22 +770,15 @@ task.spawn(function()
         local lockedIsland = AutoProgAPI.GetNextLockedIsland()
         if lockedIsland == nil and State.AutoSkillTree then
             local qProg = AutoProgAPI.GetSecretQuestProgress()
-            if State.AutoSecretQuest and not qProg.DoorUnlocked then
+            if State.AutoSecretQuest and not (qProg and qProg.DoorUnlocked) then
                 -- Door not unlocked yet, let StepSecretQuest handle positioning
                 return
             end
             local stProg = AutoProgAPI.GetSkillTreeProgress()
-            local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
+            local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 39)
             local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
             if not coinsDone then
-                if qProg and qProg.DoorUnlocked then
-                    AutoProgAPI.TeleportToIsland("DominusArea")
-                else
-                    AutoProgAPI.TeleportToWorld("Overworld")
-                    AutoProgAPI.TeleportToIsland("Heaven")
-                    task.wait(0.4)
-                    AutoProgAPI.TeleportToBreakableZone("Heaven")
-                end
+                AutoProgAPI.EnterDominusArea()
             elseif not techDone then
                 AutoProgAPI.TeleportToWorld("Techworld")
                 AutoProgAPI.TeleportToIsland("Matrix")
@@ -963,27 +965,28 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 13: DEDICATED BREAKABLES & SKILL TREE ENGINE (Active in Phase 2 until Skill Tree is MAXED!)
+-- THREAD 13: DEDICATED BREAKABLES & SKILL TREE ENGINE (Active in Phase 3 until Skill Tree is MAXED 39/39 & 13/13!)
 table.insert(threads, task.spawn(function()
     local lastBreakableTick = 0
     while isRunning do
         task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
 
-        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
-        if isP3 then
+        local isP2 = AutoProgAPI.IsPhase2 and AutoProgAPI.IsPhase2()
+        if isP2 then
             task.wait(0.5)
             continue
         end
 
         local allIslands = AutoProgAPI.AreAllIslandsUnlocked()
+        local isSecretQuestDone = AutoProgAPI.IsSecretQuestComplete and AutoProgAPI.IsSecretQuestComplete()
         local stProg = AutoProgAPI.GetSkillTreeProgress()
-        local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
+        local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 39)
         local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
         local isSkillTreeMaxed = coinsDone and techDone
 
-        -- Runs in Phase 2 until Skill Tree is fully maxed! (Farms Dominus Area for Coins -> Tech World for Tech Coins)
-        if allIslands and (not isSkillTreeMaxed) and State.AutoSkillTree then
+        -- Runs in Phase 3 until Skill Tree is fully maxed! (Farms Dominus Area for Coins 39/39 -> Tech World Matrix for Tech Coins 13/13)
+        if allIslands and isSecretQuestDone and (not isSkillTreeMaxed) and State.AutoSkillTree then
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
@@ -1002,15 +1005,15 @@ table.insert(threads, task.spawn(function()
                 local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(false)
                 if coinsDone then
                     if action then
-                        currentActivity = string.format("[Tech Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Matrix"))
+                        currentActivity = string.format("[Tech Skill Tree (13/13)] %s in %s", tostring(action), tostring(targetIsl or "Matrix"))
                     else
-                        currentActivity = string.format("[Tech Skill Tree] Farming Breakables in %s", tostring(targetIsl or "Matrix"))
+                        currentActivity = string.format("[Tech Skill Tree (13/13)] Farming Breakables in %s", tostring(targetIsl or "Matrix"))
                     end
                 else
                     if action then
-                        currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "DominusArea"))
+                        currentActivity = string.format("[Skill Tree (39/39)] %s in %s", tostring(action), tostring(targetIsl or "DominusArea"))
                     else
-                        currentActivity = "[Skill Tree] Farming Breakables in Dominus Area"
+                        currentActivity = "[Skill Tree (39/39)] Farming Breakables in Dominus Area"
                     end
                 end
             end
@@ -1140,19 +1143,8 @@ table.insert(threads, task.spawn(function()
                 end
 
             -- =====================================================================
-            -- PHASE 2: ENDGAME PREPARATION
-            -- Condition: All 17 islands unlocked, but Skill Tree is NOT yet maxed!
-            -- Order:
-            -- 1. Desert Gem Machine & Rebirth Shop Maxing (Thread 8 & 9)
-            -- 2. Max Skill Tree (Dominus Area for Coins -> Matrix for Tech Coins) (Thread 13)
-            -- =====================================================================
-            elseif not isSkillTreeDone then
-                currentPhaseText = "👑 PHASE 2: ENDGAME PREPARATION"
-                -- Thread 13 handles breakables and skill tree purchasing.
-
-            -- =====================================================================
-            -- PHASE 3: ??? SECRET AREA QUEST & DOMINUS FORTUNE GRIND
-            -- Condition: All 17 islands unlocked, Base Skill Tree 100% maxed, but Dominus Fortune not complete!
+            -- PHASE 2: ??? SECRET AREA QUEST
+            -- Condition: All 17 islands unlocked, but Secret Quest is NOT complete!
             -- Flow:
             -- 1. Accept Quest at Spawn Door
             -- 2. Click 3,500 Times
@@ -1160,52 +1152,45 @@ table.insert(threads, task.spawn(function()
             -- 4. Hatches BasicEgg from World 1 Spawn to craft 15 Golden Pets
             -- 5. Hatches 2,500 Eggs using BasicEgg from World 1 Spawn
             -- 6. Teleports to Spawn Door, unlocks & enters Dominus Area
-            -- 7. Farms Dominus breakables & buys 3 Dominus Fortune upgrades:
-            --    - DominusEggHatch (80B Coins)
-            --    - DominusEggLuck (200B Coins)
-            --    - DominusSecretSeeker (400B Coins)
-            -- Once 3/3 complete -> Transitions to Phase 4!
+            -- Once Door is unlocked -> Transitions to Phase 3 (Skill Tree 39/39)!
             -- =====================================================================
-            elseif not isDominusFortuneDone then
-                currentPhaseText = "🗝️ PHASE 3: ??? & DOMINUS FORTUNE"
+            elseif not isSecretQuestDone then
+                currentPhaseText = "🗝️ PHASE 2: ??? SECRET QUEST"
                 local qInfo = AutoProgAPI.GetSecretQuestInfo and AutoProgAPI.GetSecretQuestInfo()
-                local isQuestComplete = (qInfo and qInfo.IsDoorUnlocked and qInfo.AllQuestsDone) or (isSecretQuestDone)
 
-                if not isQuestComplete then
-                    -- Quest in progress: hatch BasicEgg paced at player hatch speed
-                    local p3Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("BasicEgg")) or 0.5
-                    if State.AutoSecretQuest ~= false and not isEggHatching and (now - lastEggHatchTick >= p3Delay) then
-                        lastEggHatchTick = now
-                        isEggHatching = true
-                        lastEggHatchStartTick = now
-                        task.spawn(function()
-                            local pcallOk, stepSuccess, stepMsg = pcall(AutoProgAPI.StepSecretQuest)
-                            if pcallOk and stepMsg and type(stepMsg) == "string" then
-                                currentActivity = tostring(stepMsg)
-                            elseif pcallOk and type(stepSuccess) == "string" then
-                                currentActivity = tostring(stepSuccess)
-                            end
-                            isEggHatching = false
-                        end)
-                    end
-                else
-                    -- Quest & Door complete: fast-paced breakables farming in Dominus Area for Dominus Fortune!
-                    if State.AutoSecretQuest ~= false and (now - lastEggHatchTick >= 0.05) then
-                        lastEggHatchTick = now
-                        task.spawn(function()
-                            local pcallOk, stepSuccess, stepMsg = pcall(AutoProgAPI.StepSecretQuest)
-                            if pcallOk and stepMsg and type(stepMsg) == "string" then
-                                currentActivity = tostring(stepMsg)
-                            elseif pcallOk and type(stepSuccess) == "string" then
-                                currentActivity = tostring(stepSuccess)
-                            end
-                        end)
-                    end
+                -- Quest in progress: hatch BasicEgg paced at player hatch speed
+                local p2Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("BasicEgg")) or 0.5
+                if State.AutoSecretQuest ~= false and not isEggHatching and (now - lastEggHatchTick >= p2Delay) then
+                    lastEggHatchTick = now
+                    isEggHatching = true
+                    lastEggHatchStartTick = now
+                    task.spawn(function()
+                        local pcallOk, stepSuccess, stepMsg = pcall(AutoProgAPI.StepSecretQuest)
+                        if pcallOk and stepMsg and type(stepMsg) == "string" then
+                            currentActivity = tostring(stepMsg)
+                        elseif pcallOk and type(stepSuccess) == "string" then
+                            currentActivity = tostring(stepSuccess)
+                        end
+                        isEggHatching = false
+                    end)
                 end
 
             -- =====================================================================
+            -- PHASE 3: ENDGAME SKILL TREE & PREPARATION (39/39 COINS & 13/13 TECH)
+            -- Condition: All 17 islands unlocked, Secret Quest done, but Skill Tree NOT maxed!
+            -- Order:
+            -- 1. Thread 13 farms Dominus Area for Coins (39/39 perks including 3 Dominus Fortune perks)
+            -- 2. Thread 13 farms Matrix in Tech World for Tech Coins (13/13 perks)
+            -- 3. Thread 8 & 9 max Desert Gem Machine & Rebirth Shop
+            -- Once 39/39 Coins & 13/13 Tech complete -> Transitions to Phase 4!
+            -- =====================================================================
+            elseif not isSkillTreeDone then
+                currentPhaseText = "👑 PHASE 3: ENDGAME SKILL TREE (39/39)"
+                -- Thread 13 handles breakables and skill tree purchasing.
+
+            -- =====================================================================
             -- PHASE 4: ENDGAME MATRIX MYTHIC PIPELINE
-            -- Condition: All 17 islands unlocked, Base Skill Tree maxed, ??? Quest done, AND Dominus Fortune maxed!
+            -- Condition: All 17 islands unlocked, Secret Quest done, AND Skill Tree 100% maxed (39/39 Coins & 13/13 Tech)!
             -- Strategy:
             -- 1. Auto Open Matrix Egg (highest endgame egg in Tech World)
             -- 2. Max Rebirth Only (Thread 2 fires at Max milestone button)
@@ -1419,61 +1404,76 @@ local function updateTelemetry()
             end
         end
 
-        if Phase3ProgressCard then
-            local domProg = AutoProgAPI.GetDominusFortuneProgress and AutoProgAPI.GetDominusFortuneProgress()
-            local curStats = (AutoProgAPI.GetPlayerData and AutoProgAPI.GetPlayerData()) or {}
-            local coinAmt = (curStats.Currency and curStats.Currency.Coins) or curStats.Coins or 0
-
+        if Phase2ProgressCard then
             local qContent = ""
             if qInfo then
-                qContent = qContent .. string.format(
-                    "🎯 <b>Quest Status:</b> %s\n" ..
+                qContent = string.format(
+                    "🎯 <b>Quest Step:</b> %s\n" ..
                     "🖱️ <b>Clicks:</b> %s / %s (%s)\n" ..
                     "🪶 <b>Feathers:</b> %d / %d (%s)\n" ..
                     "⭐ <b>Golden Crafts (BasicEgg):</b> %d / %d (%s)\n" ..
                     "🥚 <b>Hatch Eggs (BasicEgg):</b> %s / %s (%s)\n" ..
-                    "🚪 <b>Dominus Door:</b> %s\n",
+                    "🚪 <b>Dominus Door:</b> %s",
                     tostring(qInfo.CurrentStep),
                     AutoProgAPI.FormatNumber(qInfo.Clicks.Progress), AutoProgAPI.FormatNumber(qInfo.Clicks.Amount), qInfo.Clicks.Done and "✅" or "⏳",
                     qInfo.Feathers.Progress, qInfo.Feathers.Amount, qInfo.Feathers.Done and "✅" or "⏳",
                     qInfo.Golden.Progress, qInfo.Golden.Amount, qInfo.Golden.Done and "✅" or "⏳",
                     AutoProgAPI.FormatNumber(qInfo.Hatch.Progress), AutoProgAPI.FormatNumber(qInfo.Hatch.Amount), qInfo.Hatch.Done and "✅" or "⏳",
-                    qInfo.IsDoorUnlocked and "🔓 UNLOCKED" or (qInfo.AllQuestsDone and "READY TO UNLOCK" or "LOCKED")
+                    qInfo.IsDoorUnlocked and "🔓 UNLOCKED (Phase 2 Done)" or (qInfo.AllQuestsDone and "READY TO UNLOCK" or "LOCKED")
                 )
-            end
-            if domProg then
-                local nextPerkText = "Maxed (3/3)!"
-                if not domProg.HatchOwned then
-                    nextPerkText = "Dominus Hatch (80B)"
-                elseif not domProg.LuckOwned then
-                    nextPerkText = "Dominus Luck (200B)"
-                elseif not domProg.SeekerOwned then
-                    nextPerkText = "Secret Seeker (400B)"
-                end
-                qContent = qContent .. string.format(
-                    "👑 <b>Dominus Fortune:</b> %d / 3 (%s)\n" ..
-                    "  • Dominus Hatch (+1 Pet): %s\n" ..
-                    "  • Dominus Luck (+15%%): %s\n" ..
-                    "  • Secret Seeker (+10%%): %s\n" ..
-                    "💰 <b>Coins:</b> %s (Next: %s)",
-                    domProg.BoughtCount, domProg.IsComplete and "✅ COMPLETE" or "FARMING",
-                    domProg.HatchOwned and "✅" or "80B",
-                    domProg.LuckOwned and "✅" or "200B",
-                    domProg.SeekerOwned and "✅" or "400B",
-                    AutoProgAPI.FormatNumber(coinAmt),
-                    nextPerkText
-                )
+            else
+                qContent = "Secret Quest initializing..."
             end
 
-            Phase3ProgressCard:Set({
-                Title = "??? Quest & Dominus Fortune Status",
+            Phase2ProgressCard:Set({
+                Title = "??? Secret Quest Status",
                 Content = qContent
             })
+            if Phase2ProgressCard.TitleLabel then
+                pcall(function() Phase2ProgressCard.TitleLabel.Text = "??? Secret Quest Status" end)
+            end
+            if Phase2ProgressCard.BodyLabel then
+                pcall(function() Phase2ProgressCard.BodyLabel.Text = qContent end)
+            end
+        end
+
+        if Phase3ProgressCard then
+            local domProg = AutoProgAPI.GetDominusFortuneProgress and AutoProgAPI.GetDominusFortuneProgress()
+            local curStats = (AutoProgAPI.GetPlayerData and AutoProgAPI.GetPlayerData()) or {}
+            local coinAmt = (curStats.Currency and curStats.Currency.Coins) or curStats.Coins or 0
+            local spaceAmt = (curStats.Currency and curStats.Currency.SpaceCoins) or curStats.SpaceCoins or 0
+            local stProg = AutoProgAPI.GetSkillTreeProgress and AutoProgAPI.GetSkillTreeProgress()
+            local coinsBought = stProg and stProg.CoinsBought or 0
+            local coinsTotal = stProg and stProg.CoinsTotal or 39
+            local techBought = stProg and stProg.TechBought or 0
+            local techTotal = stProg and stProg.TechTotal or 13
+
+            local stContent = string.format(
+                "👑 <b>Coins Skill Tree:</b> %d / %d (%s)\n" ..
+                "💰 <b>Coins:</b> %s\n" ..
+                "  • Dominus Hatch (+1 Pet): %s (80B)\n" ..
+                "  • Dominus Luck (+15%%): %s (200B)\n" ..
+                "  • Secret Seeker (+10%%): %s (400B)\n\n" ..
+                "⚡ <b>Tech Skill Tree:</b> %d / %d (%s)\n" ..
+                "🌌 <b>Tech Coins:</b> %s",
+                coinsBought, coinsTotal, (coinsBought >= 39) and "✅ COMPLETE" or "FARMING",
+                AutoProgAPI.FormatNumber(coinAmt),
+                (domProg and domProg.HatchOwned) and "✅ OWNED" or "⏳",
+                (domProg and domProg.LuckOwned) and "✅ OWNED" or "⏳",
+                (domProg and domProg.SeekerOwned) and "✅ OWNED" or "⏳",
+                techBought, techTotal, (techBought >= 13) and "✅ COMPLETE" or "FARMING",
+                AutoProgAPI.FormatNumber(spaceAmt)
+            )
+
+            Phase3ProgressCard:Set({
+                Title = "Skill Tree Progress (39/39 Coins & 13/13 Tech)",
+                Content = stContent
+            })
             if Phase3ProgressCard.TitleLabel then
-                pcall(function() Phase3ProgressCard.TitleLabel.Text = "??? Quest & Dominus Fortune Status" end)
+                pcall(function() Phase3ProgressCard.TitleLabel.Text = "Skill Tree Progress (39/39 Coins & 13/13 Tech)" end)
             end
             if Phase3ProgressCard.BodyLabel then
-                pcall(function() Phase3ProgressCard.BodyLabel.Text = qContent end)
+                pcall(function() Phase3ProgressCard.BodyLabel.Text = stContent end)
             end
         end
 
