@@ -640,16 +640,6 @@ end
 -- Strictly follows user rule: ONLY rebirths when player has reached the MAX milestone (no more Next Rebirth button)
 -- If there is a Next Rebirth button pending (Image 2), it waits until that milestone is reached!
 function ProgAPI.RebirthMaxTarget(): (boolean, any)
-    -- Check if player is close to unlocking next island in Phase 1
-    if ProgAPI.IsSmartRebirthPaused and ProgAPI.IsSmartRebirthPaused() then
-        return false, "Auto Rebirth paused: accumulating clicks for next island unlock"
-    end
-
-    -- User rule: Wait until no more next rebirth milestone (Goal visible = false)
-    if ProgAPI.HasNextRebirthGoal() then
-        return false, "Waiting for Next Rebirth milestone button to be reached..."
-    end
-
     local info = ProgAPI.GetMaxRebirthInfo()
     if info.CanAffordMax and info.BestAffordableIndex then
         -- Must be at the absolute max milestone button owned
@@ -686,13 +676,9 @@ function ProgAPI.RebirthMaxTarget(): (boolean, any)
     return false, info
 end
 
--- Phase 1 Dedicated Rebirth: Rebirths at the highest affordable button as soon as affordable!
--- Strictly follows user rule: Does NOT wait for Goal or button 57, rebirths immediately to speedrun clicks & islands!
+-- Phase 1 & 2 Dedicated Rebirth: Rebirths at the highest affordable button as soon as affordable!
+-- Strictly follows user rule: Does NOT wait for Goal or button 57, rebirths immediately as long as affordable!
 function ProgAPI.RebirthBestAffordable(): (boolean, any)
-    if ProgAPI.IsSmartRebirthPaused and ProgAPI.IsSmartRebirthPaused() then
-        return false, "Auto Rebirth paused: accumulating clicks for next island unlock"
-    end
-
     local info = ProgAPI.GetMaxRebirthInfo()
     if info.CanAffordMax and info.BestAffordableIndex then
         local btnIdx = info.BestAffordableIndex
@@ -1487,6 +1473,23 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     return false
 end
 
+-- Calculates dynamic egg hatching animation & cooldown speed matching game engine profile (4.2 / multiplier)
+function ProgAPI.GetPlayerHatchSpeed(): number
+    local mult = 1
+    if EggsFrontend and EggsFrontend.GetHatchSpeedMultiplier then
+        local ok, m = pcall(EggsFrontend.GetHatchSpeedMultiplier)
+        if ok and type(m) == "number" and m > 0 then
+            mult = m
+        end
+    end
+    return math.clamp(4.2 / mult, 0.05, 10.0)
+end
+
+function ProgAPI.FormatHatchSpeed(): string
+    local speed = ProgAPI.GetPlayerHatchSpeed()
+    return string.format("%.1fs", speed)
+end
+
 -- Calculates dynamic max multi-open hatch amount (1x, 3x, 8x, or higher) based on gamepasses, boosts, inventory space, and clicks
 function ProgAPI.GetMaxEggOpenAmount(eggName: string?): number
     eggName = eggName or "BasicEgg"
@@ -2137,17 +2140,17 @@ function ProgAPI.GetSkillTreeProgress()
         end
     end
 
-    local techDone = (techTotal > 0 and techBought >= techTotal)
-    local coinsDone = (coinsTotal > 0 and coinsBought >= coinsTotal)
+    local techDone = (techBought >= 13) or (techTotal > 0 and techBought >= techTotal)
+    local coinsDone = (coinsBought >= 36) or (coinsTotal > 0 and coinsBought >= coinsTotal)
 
     return {
         TechTotal = techTotal,
         TechBought = techBought,
-        TechRemaining = math.max(0, techTotal - techBought),
+        TechRemaining = math.max(0, techDone and 0 or (techTotal - techBought)),
         TechComplete = techDone,
         CoinsTotal = coinsTotal,
         CoinsBought = coinsBought,
-        CoinsRemaining = math.max(0, coinsTotal - coinsBought),
+        CoinsRemaining = math.max(0, coinsDone and 0 or (coinsTotal - coinsBought)),
         CoinsComplete = coinsDone,
         AllComplete = techDone and coinsDone,
         UserSkills = stats.SkillTree or {}
@@ -3232,11 +3235,10 @@ end
 function ProgAPI.IsPhase3(): boolean
     local allIslands = ProgAPI.AreAllIslandsUnlocked()
     if not allIslands then return false end
-    local pData = ProgAPI.GetPlayerData()
-    if pData.Rebirths < 1e15 then return false end
     local stProg = ProgAPI.GetSkillTreeProgress()
-    local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
-    return isSkillTreeMaxed == true
+    local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
+    local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
+    return (coinsDone and techDone) == true
 end
 
 -- Phase 3 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
@@ -3360,7 +3362,10 @@ local function updateBlackScreenTelemetry()
         if blackScreenRowLabels.SelectedEgg then
             blackScreenRowLabels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
         end
-        if blackScreenRowLabels.EggLuck then blackScreenRowLabels.EggLuck.Text = ProgAPI.FormatLuck(luckMult) end
+        if blackScreenRowLabels.EggLuck then
+            local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "2.7s"
+            blackScreenRowLabels.EggLuck.Text = string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(luckMult), speedText)
+        end
         if blackScreenRowLabels.Activity then blackScreenRowLabels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
         if blackScreenRowLabels.Chances then blackScreenRowLabels.Chances.Text = ProgAPI.GetEggDropChancesSummary(eggName) end
 
@@ -3572,7 +3577,8 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             blackScreenRowLabels.Island = addRow("Island", tostring(pData.CurrentIsland or "Spawn"), 80, "Island")
             blackScreenRowLabels.PetInv = addRow("Pet Inventory", string.format("%d / %d", initPets, initMaxPets), 100, "PetInv")
             blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", string.format("%s (%s %s)", initEggDisp, ProgAPI.FormatNumber(initEggCost), initEggCurr), 120, "SelectedEgg")
-            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", ProgAPI.FormatLuck(initLuck), 140, "EggLuck")
+            local initSpeed = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "2.7s"
+            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(initLuck), initSpeed), 140, "EggLuck")
 
             blackScreenRowLabels.Activity = addRow("Current Activity", tostring(ProgAPI.CurrentActivity or "Auto Farm Active"), 168, "Activity")
             blackScreenRowLabels.Chances = addRow("Top Drop Chances", initChances, 188, "Chances")
