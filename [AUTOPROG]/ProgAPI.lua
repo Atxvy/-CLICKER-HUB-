@@ -1532,9 +1532,36 @@ function ProgAPI.GetMaxEggOpenAmount(eggName: string?): number
     return math.max(1, math.floor(maxCount))
 end
 
+-- Disables client egg animations and camera locks to enable instantaneous egg opening
+function ProgAPI.DisableEggAnimation()
+    pcall(function()
+        local Client = game:GetService("ReplicatedStorage"):WaitForChild("Library", 999):WaitForChild("Client")
+        local OpenEgg = require(Client:WaitForChild("OpenEgg"))
+        if OpenEgg then
+            OpenEgg.Play = function(eggId, pets, onComplete, isCancelled)
+                if onComplete then
+                    task.spawn(onComplete)
+                end
+            end
+        end
+        local OpenEggFolder = Client:WaitForChild("OpenEgg")
+        if OpenEggFolder and OpenEggFolder:FindFirstChild("Animation") then
+            local Animation = require(OpenEggFolder.Animation)
+            if Animation then
+                Animation.Play = function(params)
+                    if params and params.onComplete then
+                        task.spawn(params.onComplete)
+                    end
+                end
+            end
+        end
+    end)
+end
+
 function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean?): (boolean, string)
     if not eggName or eggName == "" then return false, "No egg specified" end
     ProgAPI.SelectedEgg = eggName
+    ProgAPI.DisableEggAnimation()
 
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
@@ -1574,7 +1601,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     local maxInv = stats.MaxInventoryPets or 150
     if curInv >= maxInv - 5 then
         ProgAPI.CleanWeakPets(true)
-        task.wait(0.2)
+        task.wait(0.1)
     end
 
     local guid = HttpService:GenerateGUID(false)
@@ -1588,15 +1615,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         end)
     end
 
-    if not ok or res == false then
-        pcall(function()
-            Channels.Egg:FireServer("Open", eggName, amount)
-        end)
-    end
-
     if ok and (res == true or type(res) == "table") then
-        pcall(ProgAPI.CraftGoldenPets)
-        pcall(ProgAPI.EquipBest)
         return true, "Successfully opened " .. eggName
     end
 
@@ -3851,5 +3870,8 @@ function ProgAPI.SetDisableInGameSettings(enabled: boolean)
 
     return true
 end
+
+-- Automatically disable egg animations upon initialization
+pcall(ProgAPI.DisableEggAnimation)
 
 return ProgAPI
