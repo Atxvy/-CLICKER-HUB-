@@ -538,7 +538,7 @@ end))
 -- THREAD 3: DEDICATED AUTO POTIONS CONSUMABLE THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(10)
+        task.wait(4)
         if isRunning and State.MasterEnabled and State.AutoPotions then
             pcall(AutoProgAPI.UseAllBestPotions)
         end
@@ -548,7 +548,7 @@ end))
 -- THREAD 4: DEDICATED AUTO FRUITS CONSUMABLE THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(10)
+        task.wait(4)
         if isRunning and State.MasterEnabled and State.AutoFruits then
             pcall(AutoProgAPI.UseAllFruits)
         end
@@ -558,7 +558,7 @@ end))
 -- THREAD 5: DEDICATED AUTO FREE GIFTS, CHESTS, DAILY & MILESTONES THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(6)
+        task.wait(4)
         if isRunning and State.MasterEnabled and State.AutoFreeGifts then
             pcall(function()
                 ProgAPI.ClaimAllFreeGifts()
@@ -573,7 +573,7 @@ end))
 -- THREAD 6: DEDICATED AUTO CRAFT GOLDEN PETS THREAD (100% Guaranteed Priority)
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(2.5)
+        task.wait(2)
         if isRunning and State.MasterEnabled and State.AutoCraftGolden then
             local crafted = AutoProgAPI.CraftGoldenPets()
             if crafted > 0 then
@@ -586,7 +586,7 @@ end))
 -- THREAD 7: DEDICATED AUTO RAINBOW PETS CRAFT & CLAIM THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(3)
+        task.wait(2.5)
         if isRunning and State.MasterEnabled and State.AutoRainbowClaim then
             AutoProgAPI.CraftRainbowPets()
             AutoProgAPI.ClaimRainbowPets()
@@ -607,19 +607,22 @@ end))
 -- THREAD 9: DEDICATED AUTO EQUIP BEST PETS THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
-        task.wait(4)
+        task.wait(2.5)
         if isRunning and State.MasterEnabled and State.AutoEquipBest then
             ProgAPI.EquipBest()
         end
     end
 end))
 
--- THREAD 10: DEDICATED AUTO ISLAND UNLOCK / RE-PURCHASE THREAD (Recovers islands after prestige)
+-- THREAD 10: DEDICATED AUTO ISLAND UNLOCK / RE-PURCHASE THREAD (Recovers islands after prestige & enters Tech World)
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(1.5)
         if isRunning and State.MasterEnabled and State.AutoUnlockIslands then
             pcall(AutoProgAPI.CheckAndRebuyIslands)
+            if AutoProgAPI.IsIslandUnlocked("Hell") and not AutoProgAPI.IsIslandUnlocked("Base") then
+                pcall(AutoProgAPI.CheckAndEnterTechWorld)
+            end
         end
     end
 end))
@@ -713,8 +716,10 @@ table.insert(threads, task.spawn(function()
             if not allIslandsUnlocked and lockedIsland ~= nil then
                 currentPhaseText = string.format("🌟 PHASE 1: ISLAND SPEEDRUN (%s)", lockedIsland.name)
 
-                -- 1. Auto Teleport to furthest unlocked island every 5 seconds
-                if now - lastTeleportTick > 5 then
+                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and not isAllGold
+
+                -- 1. Auto Teleport to furthest unlocked island (Only when not actively hatching an egg!)
+                if not shouldHatch and (now - lastTeleportTick > 6) then
                     lastTeleportTick = now
                     local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                     if pData.CurrentIsland ~= furthest then
@@ -724,6 +729,11 @@ table.insert(threads, task.spawn(function()
 
                 -- 2. Auto buy island as soon as clicks requirement is met
                 if State.AutoUnlockIslands and lockedIsland then
+                    -- If next locked island is in Tech World and Hell is unlocked, enter Tech World!
+                    if AutoProgAPI.IsIslandUnlocked("Hell") and not AutoProgAPI.IsIslandUnlocked("Base") then
+                        pcall(AutoProgAPI.CheckAndEnterTechWorld)
+                    end
+
                     if pData.Clicks >= lockedIsland.cost then
                         currentActivity = "🌟 Unlocking next island: " .. lockedIsland.name .. "!"
                         local count, lastIsl = AutoProgAPI.UnlockAllAffordableIslands()
@@ -753,8 +763,10 @@ table.insert(threads, task.spawn(function()
                     elseif not isNearUnlock and State.AutoBestEggs then
                         local bestEgg = AutoProgAPI.GetBestAffordableEgg()
                         if bestEgg and pData.Clicks >= bestEgg.cost then
-                            currentActivity = string.format("[Phase 1] Hatching %s", bestEgg.name)
+                            currentActivity = string.format("[Phase 1] Hatching %s on %s", bestEgg.name, bestEgg.island)
                             AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                            pcall(AutoProgAPI.CraftGoldenPets)
+                            pcall(AutoProgAPI.EquipBest)
                         end
                     end
                 end
