@@ -94,19 +94,11 @@ ProgAPI.AutoRebirthFrontend = AutoRebirthFrontend
 ProgAPI.SkillTreeFrontend = SkillTreeFrontend
 ProgAPI.BreakablesFrontend = BreakablesFrontend
 
--- Suppress game black shade permanently
+-- Safe no-op to avoid interfering with game native UI modals and tabs
 function ProgAPI.SuppressBlackShade()
-    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
-    if not pg then return end
-    for _, gui in ipairs(pg:GetChildren()) do
-        if gui:IsA("ScreenGui") and (gui.Name:find("Overlay") or gui.Name:find("Black") or gui.Name:find("Transition")) then
-            local fr = gui:FindFirstChildWhichIsA("Frame")
-            if fr and fr.BackgroundColor3 == Color3.new(0, 0, 0) and fr.BackgroundTransparency < 1 then
-                fr.BackgroundTransparency = 1
-            end
-        end
-    end
+    return true
 end
+
 
 --==============================================================================
 -- NUMBER FORMATTING & PLAYER DATA
@@ -457,81 +449,130 @@ function ProgAPI.TeleportToIsland(islandName: string): boolean
 end
 
 function ProgAPI.UnlockIsland(islandName: string): boolean
-    local meta = islandMetaLookup[islandName]
-    if not meta then return false end
-
     local stats = Stats.Local(true) or {}
     local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
-    if clicks < meta.cost then return false end
+    
+    local def = Directory and Directory.Islands and Directory.Islands[islandName]
+    local cost = (def and def.Cost) or (islandMetaLookup[islandName] and islandMetaLookup[islandName].cost) or 0
+    if clicks < cost then return false end
 
-    -- Try BuyIsland remote
-    if Channels.Islands then
-        local ok, res = pcall(function()
-            return Channels.Islands:InvokeServer("BuyIsland", islandName)
-        end)
-        if ok and res == true then return true end
-    end
-
+    -- The official Clicker Simulator remote is Channels.Portals:InvokeServer("PurchaseIsland", islandName)
     if Channels.Portals then
         local ok, res = pcall(function()
-            return Channels.Portals:InvokeServer("UnlockIsland", islandName)
+            return Channels.Portals:InvokeServer("PurchaseIsland", islandName)
         end)
-        if ok and res == true then return true end
+        if ok and res == true then
+            return true
+        end
+    end
+
+    if Channels.Islands then
+        local ok, res = pcall(function()
+            return Channels.Islands:InvokeServer("PurchaseIsland", islandName)
+        end)
+        if ok and res == true then
+            return true
+        end
     end
 
     return false
 end
 
-function ProgAPI.UnlockAllAffordableIslands(): (number, string?)
+-- Checks all locked islands and automatically re-purchases any affordable islands in order (especially after Prestige)
+function ProgAPI.CheckAndRebuyIslands(): (number, string?)
     local unlockedCount = 0
     local lastUnlocked = nil
+    local stats = Stats.Local(true) or {}
+    local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
 
-    while true do
-        local nextIsl = ProgAPI.GetNextLockedIsland()
-        if not nextIsl then break end
+    local ordered = {
+        "Winter", "Forest", "Desert", "Candy", "Beach", "Sakura",
+        "Volcano", "Rave", "Heaven", "Castle", "Mystical", "Hell",
+        "Base", "Spaceship", "Fragment", "Matrix"
+    }
 
-        local stats = Stats.Local(true) or {}
-        local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
-        if clicks < nextIsl.cost then break end
-
-        local ok = ProgAPI.UnlockIsland(nextIsl.name)
-        if ok then
-            unlockedCount = unlockedCount + 1
-            lastUnlocked = nextIsl.name
-            task.wait(0.3)
-            ProgAPI.TeleportToIsland(nextIsl.name)
-            task.wait(0.2)
-        else
-            break
+    for _, islandId in ipairs(ordered) do
+        if not ProgAPI.IsIslandUnlocked(islandId) then
+            local def = Directory and Directory.Islands and Directory.Islands[islandId]
+            local cost = (def and def.Cost) or (islandMetaLookup[islandId] and islandMetaLookup[islandId].cost) or 0
+            if clicks >= cost then
+                local ok = ProgAPI.UnlockIsland(islandId)
+                if ok then
+                    unlockedCount = unlockedCount + 1
+                    lastUnlocked = islandId
+                    task.wait(0.1)
+                else
+                    break
+                end
+            else
+                break
+            end
         end
     end
 
     return unlockedCount, lastUnlocked
 end
 
+function ProgAPI.UnlockAllAffordableIslands(): (number, string?)
+    return ProgAPI.CheckAndRebuyIslands()
+end
+
 --==============================================================================
 -- PETS, EGG HATCHING & GOLDEN CRAFTING
 --==============================================================================
-local eggData = {
-    BasicEgg = { cost = 10, island = "Spawn" },
-    WinterEgg = { cost = 1000, island = "Winter" },
-    ForestEgg = { cost = 25000, island = "Forest" },
-    DesertEgg = { cost = 400000, island = "Desert" },
-    CandyEgg = { cost = 6000000, island = "Candy" },
-    BeachEgg = { cost = 100000000, island = "Beach" },
-    SakuraEgg = { cost = 1.5e9, island = "Sakura" },
-    BaseEgg = { cost = 2.5e10, island = "Base" },
-    SpaceshipEgg = { cost = 4e11, island = "Spaceship" },
-    VolcanoEgg = { cost = 6e12, island = "Volcano" },
-    RaveEgg = { cost = 8e13, island = "Rave" },
-    HeavenEgg = { cost = 1.2e15, island = "Heaven" },
-    CastleEgg = { cost = 1.8e16, island = "Castle" },
-    MysticalEgg = { cost = 2.5e17, island = "Mystical" },
-    HellEgg = { cost = 4e18, island = "Hell" },
-    FragmentedEgg = { cost = 6e19, island = "Fragment" },
-    MatrixEgg = { cost = 1e21, island = "Matrix" },
-    EventEgg = { cost = 10000000, island = "Spawn" },
+local REAL_PROGRESSION_EGGS = {
+    { name = "BasicEgg",       cost = 250,         island = "Spawn" },
+    { name = "FlowerEgg",      cost = 2750,        island = "Spawn" },
+    { name = "AcornEgg",       cost = 175000,      island = "Spawn" },
+    { name = "SnowmanEgg",     cost = 1500000,     island = "Winter" },
+    { name = "WoodEgg",        cost = 40000000,    island = "Forest" },
+    { name = "CactusEgg",      cost = 300000000,   island = "Desert" },
+    { name = "CottonCandyEgg", cost = 20000000000, island = "Candy" },
+    { name = "ChocolateEgg",   cost = 70000000000, island = "Candy" },
+    { name = "PalmTreeEgg",    cost = 450000000000, island = "Beach" },
+    { name = "BeachBallEgg",   cost = 900000000000, island = "Beach" },
+    { name = "BlossomEgg",     cost = 1e14,        island = "Sakura" },
+    { name = "TechEgg",        cost = 5e14,        island = "Base" },
+    { name = "CosmicEgg",      cost = 1e15,        island = "Spaceship" },
+    { name = "VolcanoEgg",     cost = 1e16,        island = "Volcano" },
+    { name = "DiscoEgg",       cost = 2e17,        island = "Rave" },
+    { name = "AngelEgg",       cost = 4e18,        island = "Heaven" },
+    { name = "CastleEgg",      cost = 5e19,        island = "Castle" },
+    { name = "CursedEgg",      cost = 1.5e20,      island = "Mystical" },
+    { name = "DemonicEgg",     cost = 1.5e22,      island = "Hell" },
+    { name = "FragmentedEgg",  cost = 5e23,        island = "Fragment" },
+    { name = "MatrixEgg",      cost = 2.5e25,      island = "Matrix" },
+    { name = "CandyCornEgg",   cost = 10000000,    island = "Spawn" },
 }
+
+local eggData = {}
+for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+    eggData[e.name] = { cost = e.cost, island = e.island, name = e.name }
+end
+
+-- Dynamically incorporate any live eggs from Directory.Eggs
+pcall(function()
+    if Directory and Directory.Eggs then
+        for name, data in pairs(Directory.Eggs) do
+            local isRobux = (data.Currency == "Robux" or (data.Price and data.Price.Id == "Robux") or name:find("Robux"))
+            if not isRobux then
+                local cost = data.Cost or (data.Price and data.Price.Amount)
+                local isl = data.RequiredIsland or data.Island
+                if cost and isl then
+                    eggData[name] = { cost = cost, island = isl, name = name }
+                end
+            end
+        end
+    end
+end)
+
+ProgAPI.EggData = eggData
+
+-- Checker: Verifies if ALL 17 islands are unlocked (Strict requirement for Phase 2)
+function ProgAPI.AreAllIslandsUnlocked(): boolean
+    local locked = ProgAPI.GetNextLockedIsland()
+    return (locked == nil)
+end
 
 -- Checks if entire equipped team is 100% Golden (or Rainbow)
 function ProgAPI.IsEquippedTeamAllGold(): boolean
@@ -543,9 +584,27 @@ function ProgAPI.IsEquippedTeamAllGold(): boolean
         hasAny = true
         local pInfo = stats.Pets and stats.Pets[guid]
         if not pInfo then return false end
-        -- In Clicker Simulator, pet variant is stored in pInfo.v
         local isGold = (pInfo.v == "Golden" or pInfo.Variant == "Golden" or pInfo.Gold == true or pInfo.Type == "Golden" or pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow")
         if not isGold then
+            return false
+        end
+    end
+
+    return hasAny
+end
+
+-- Checks if entire equipped team is 100% Rainbow
+function ProgAPI.IsEquippedTeamAllRainbow(): boolean
+    local stats = Stats.Local(true) or {}
+    local equipped = stats.EquippedPets or {}
+    local hasAny = false
+
+    for guid, _ in pairs(equipped) do
+        hasAny = true
+        local pInfo = stats.Pets and stats.Pets[guid]
+        if not pInfo then return false end
+        local isRainbow = (pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow")
+        if not isRainbow then
             return false
         end
     end
@@ -569,16 +628,18 @@ function ProgAPI.HasFullGoldEventTeam(): boolean
     return (count >= maxSlots)
 end
 
-function ProgAPI.GetBestAffordableEgg()
-    local furthest = ProgAPI.GetFurthestUnlockedIsland()
+-- Retrieves best affordable egg for the current furthest island or specified target island
+function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
+    local island = targetIsland or ProgAPI.GetFurthestUnlockedIsland()
     local stats = Stats.Local(true) or {}
     local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
 
     local bestEggName = nil
     local bestCost = 0
 
+    -- 1. Try to match the best egg on the requested island
     for eggName, meta in pairs(eggData) do
-        if meta.cost <= clicks and ProgAPI.IsIslandUnlocked(meta.island) then
+        if meta.island == island and meta.cost <= clicks then
             if meta.cost >= bestCost then
                 bestCost = meta.cost
                 bestEggName = eggName
@@ -586,9 +647,21 @@ function ProgAPI.GetBestAffordableEgg()
         end
     end
 
+    -- 2. Fallback to the highest affordable egg across any unlocked island
+    if not bestEggName then
+        for eggName, meta in pairs(eggData) do
+            if ProgAPI.IsIslandUnlocked(meta.island) and meta.cost <= clicks then
+                if meta.cost >= bestCost then
+                    bestCost = meta.cost
+                    bestEggName = eggName
+                end
+            end
+        end
+    end
+
     if not bestEggName then
         bestEggName = "BasicEgg"
-        bestCost = 10
+        bestCost = 250
     end
 
     return { name = bestEggName, cost = bestCost, island = eggData[bestEggName] and eggData[bestEggName].island or "Spawn" }
@@ -607,6 +680,10 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
 
     local mapFolder = workspace:FindFirstChild("_MAP")
     local eggObj = mapFolder and mapFolder:FindFirstChild("Eggs") and mapFolder.Eggs:FindFirstChild(eggName)
+    if not eggObj and workspace:FindFirstChild("Eggs") then
+        eggObj = workspace.Eggs:FindFirstChild(eggName)
+    end
+
     if eggObj then
         local targetPart = eggObj:FindFirstChildWhichIsA("BasePart") or eggObj.PrimaryPart
         if targetPart then
@@ -628,7 +705,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
             local stats = Stats.Local(true) or {}
             if stats.CurrentIsland ~= eggMeta.island then
                 ProgAPI.TeleportToEgg(eggName)
-                task.wait(0.4)
+                task.wait(0.35)
             end
         end
     end
@@ -642,9 +719,16 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         task.wait(0.2)
     end
 
+    local guid = HttpService:GenerateGUID(false)
     local ok, res = pcall(function()
-        return Channels.Egg:InvokeServer("Open", eggName, amount)
+        return Channels.Egg:InvokeServer("Open", eggName, amount, guid)
     end)
+
+    if not ok or res == false then
+        pcall(function()
+            ok, res = pcall(function() return Channels.Egg:InvokeServer("Open", eggName, amount) end)
+        end)
+    end
 
     if ok and (res == true or type(res) == "table") then
         return true, "Successfully opened " .. eggName
@@ -723,22 +807,89 @@ function ProgAPI.CraftGoldenPets(): number
     return craftedCount
 end
 
-function ProgAPI.ClaimRainbowPets(): number
-    if not Channels.Crafting then return 0 end
+-- Converts batches of duplicate Golden pets into Rainbow pets
+function ProgAPI.CraftRainbowPets(): number
+    if not Channels.Pets and not Channels.Crafting then return 0 end
     local stats = Stats.Local(true) or {}
-    local claimed = 0
-    local rawQueue = stats.RainbowCraftQueue or stats.RainbowCrafts or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
 
-    for queueId, slotData in pairs(rawQueue) do
-        if type(slotData) == "table" and slotData.Ready == true then
-            local ok = pcall(function()
-                return Channels.Crafting:InvokeServer("ClaimRainbow", queueId)
-            end)
-            if ok then claimed = claimed + 1 end
+    local groups = {}
+    for guid, p in pairs(pets) do
+        local isEquipped = equipped[guid] ~= nil
+        local isLocked = p.Locked == true or p.l == true
+        local isGolden = (p.v == "Golden" or p.Variant == "Golden" or p.Gold == true or p.Type == "Golden")
+        local isExclusive = Directory.Pets and Directory.Pets[p.id] and Directory.Pets[p.id].Rarity == "Exclusive"
+
+        if not isEquipped and not isLocked and isGolden and not isExclusive then
+            local key = tostring(p.id) .. "_" .. tostring(p.Shiny or p.s or false)
+            groups[key] = groups[key] or { id = p.id, guids = {} }
+            table.insert(groups[key].guids, guid)
         end
     end
-    return claimed
+
+    local craftedCount = 0
+    for _, g in pairs(groups) do
+        while #g.guids >= 5 do
+            local batch = {}
+            for i = 1, math.min(6, #g.guids) do
+                table.insert(batch, table.remove(g.guids, 1))
+            end
+            local ok, res = pcall(function()
+                if Channels.Pets then
+                    return Channels.Pets:InvokeServer("StartRainbowCraft", batch)
+                elseif Channels.Crafting then
+                    return Channels.Crafting:InvokeServer("CraftRainbow", batch)
+                end
+            end)
+            if ok and (res == true or type(res) == "table") then
+                craftedCount = craftedCount + 1
+                task.wait(0.2)
+            else
+                break
+            end
+        end
+    end
+    return craftedCount
 end
+
+function ProgAPI.ClaimRainbowPets(): number
+    local claimedCount = 0
+    local stats = Stats.Local(true) or {}
+    local rainbowCrafts = stats.RainbowCrafts or stats.RainbowCraftQueue or {}
+
+    if Channels.Pets then
+        for slotIndex = 1, math.min(5, #rainbowCrafts) do
+            local craft = rainbowCrafts[slotIndex]
+            if craft and craft.EndTimestamp then
+                local now = workspace:GetServerTimeNow()
+                if (craft.EndTimestamp - now) <= 0 then
+                    local ok, res = pcall(function()
+                        return Channels.Pets:InvokeServer("ClaimRainbowCraft", slotIndex)
+                    end)
+                    if ok and res == true then
+                        claimedCount = claimedCount + 1
+                        task.wait(0.2)
+                    end
+                end
+            end
+        end
+    end
+
+    if Channels.Crafting and claimedCount == 0 then
+        for queueId, slotData in pairs(rainbowCrafts) do
+            if type(slotData) == "table" and slotData.Ready == true then
+                local ok = pcall(function()
+                    return Channels.Crafting:InvokeServer("ClaimRainbow", queueId)
+                end)
+                if ok then claimedCount = claimedCount + 1 end
+            end
+        end
+    end
+
+    return claimedCount
+end
+
 
 local petIslandIndexMap = nil
 local function buildPetIslandMap()
@@ -952,157 +1103,212 @@ function ProgAPI.BuyAffordableMiniUpgrades(): number
 end
 
 --==============================================================================
--- SKILL TREE AUTOMATION (Coins First -> Tech Coins)
+-- SKILL TREE & BREAKABLES PIPELINE (Transferred from [CLICKER HUB])
+-- Dynamic Priority: Coins First (Volcano <-> Heaven Switching) -> Tech World (Matrix)
 --==============================================================================
+
+-- Calculates completion progress for Tech World (SpaceCoins) vs Overworld (Coins) skill tree perks
 function ProgAPI.GetSkillTreeProgress()
-    if not Directory.SkillTree then
-        return { CoinsBought = 0, CoinsTotal = 0, CoinsComplete = false, TechBought = 0, TechTotal = 0, TechComplete = false }
-    end
-
+    local stFrontend = nil
+    pcall(function()
+        stFrontend = require(Client:WaitForChild("SkillTreeFrontend"))
+    end)
     local stats = Stats.Local(true) or {}
-    local userSkills = stats.SkillTree or {}
+    local d = Directory.SkillTree and Directory.SkillTree.Default or {}
 
-    local coinsBought, coinsTotal = 0, 0
-    local techBought, techTotal = 0, 0
+    local techTotal = 0
+    local techBought = 0
+    local coinsTotal = 0
+    local coinsBought = 0
 
-    local skillTreeDefault = Directory.SkillTree.Default or {}
-    for _, nodeData in pairs(skillTreeDefault) do
-        if type(nodeData) == "table" and nodeData.Upgrades then
-            for upgId, upgData in pairs(nodeData.Upgrades) do
-                local price = upgData.Price
-                if price and price.Id == "Coins" then
-                    coinsTotal = coinsTotal + 1
-                    if userSkills[upgId] == true then coinsBought = coinsBought + 1 end
-                elseif price and (price.Id == "SpaceCoins" or price.Id == "TechCoins") then
+    local SkillTreeUtil = nil
+    pcall(function()
+        SkillTreeUtil = require(Library:WaitForChild("Utils"):WaitForChild("SkillTreeUtil"))
+    end)
+
+    for catName, catData in pairs(d) do
+        if type(catData) == "table" and catData.Upgrades then
+            for upgName, upgData in pairs(catData.Upgrades) do
+                local p = upgData.Price
+                local curr = p and p.Id or "Coins"
+                local isTech = (curr == "SpaceCoins")
+                    or (upgData.Requires and upgData.Requires.World == "Techworld")
+                    or (catData.Requires and catData.Requires.World == "Techworld")
+
+                local saveKey = upgName
+                if SkillTreeUtil and SkillTreeUtil.GetSaveKey then
+                    saveKey = SkillTreeUtil.GetSaveKey(upgName, "Default")
+                end
+
+                local owned = stats.SkillTree and (stats.SkillTree[saveKey] == true or stats.SkillTree[upgName] == true)
+                if not owned and stFrontend and stFrontend.OwnsUpgrade then
+                    owned = stFrontend.OwnsUpgrade(upgName, "Default")
+                end
+
+                if isTech then
                     techTotal = techTotal + 1
-                    if userSkills[upgId] == true then techBought = techBought + 1 end
+                    if owned then techBought = techBought + 1 end
+                else
+                    coinsTotal = coinsTotal + 1
+                    if owned then coinsBought = coinsBought + 1 end
                 end
             end
         end
     end
 
+    local techDone = (techTotal > 0 and techBought >= techTotal)
+    local coinsDone = (coinsTotal > 0 and coinsBought >= coinsTotal)
+
     return {
-        CoinsBought = coinsBought,
-        CoinsTotal = coinsTotal,
-        CoinsComplete = (coinsTotal > 0 and coinsBought >= coinsTotal),
-        TechBought = techBought,
         TechTotal = techTotal,
-        TechComplete = (techTotal > 0 and techBought >= techTotal),
-        UserSkills = userSkills
+        TechBought = techBought,
+        TechRemaining = math.max(0, techTotal - techBought),
+        TechComplete = techDone,
+        CoinsTotal = coinsTotal,
+        CoinsBought = coinsBought,
+        CoinsRemaining = math.max(0, coinsTotal - coinsBought),
+        CoinsComplete = coinsDone,
+        AllComplete = techDone and coinsDone,
+        UserSkills = stats.SkillTree or {}
     }
 end
 
--- Purchases affordable perks using verified RPC: Channels.SkillTree:InvokeServer("Purchase", id, "Default")
--- Chained multi-tier loop continuously buys newly unlocked perks as long as currency is available
-function ProgAPI.BuyAffordableSkillTree(preferCoins: boolean?): number
-    if not Directory.SkillTree or not Channels.SkillTree then return 0 end
-    local skillTreeDefault = Directory.SkillTree.Default
-    if not skillTreeDefault then return 0 end
+local coinsSwitchTick = 0
+local currentCoinsIsland = "Volcano"
 
-    local totalBought = 0
-    local pData = ProgAPI.GetPlayerData()
-    local coins = pData.Coins
-    local spaceCoins = pData.SpaceCoins
-
-    local stats = Stats.Local(true) or {}
-    local userSkills = {}
-    for k, v in pairs(stats.SkillTree or {}) do
-        userSkills[k] = v
-    end
-
-    local keepSearching = true
-    while keepSearching do
-        keepSearching = false
-        local candidates = {}
-
-        for nodeName, nodeData in pairs(skillTreeDefault) do
-            if type(nodeData) == "table" and nodeData.Upgrades then
-                for upgId, upgData in pairs(nodeData.Upgrades) do
-                    if not userSkills[upgId] then
-                        local req = upgData.Requires or {}
-                        local parentBought = (req.Upgrade == nil or userSkills[req.Upgrade] == true)
-                        local curr = upgData.Price and upgData.Price.Id
-                        local cost = upgData.Price and upgData.Price.Amount or 0
-
-                        if parentBought and curr and cost > 0 then
-                            if curr == "Coins" and coins >= cost then
-                                table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = 1 })
-                            elseif (curr == "SpaceCoins" or curr == "TechCoins") and spaceCoins >= cost then
-                                table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = preferCoins and 2 or 1 })
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        table.sort(candidates, function(a, b)
-            if a.prio ~= b.prio then return a.prio < b.prio end
-            return a.cost < b.cost
-        end)
-
-        for _, c in ipairs(candidates) do
-            if (c.curr == "Coins" and coins >= c.cost) or ((c.curr == "SpaceCoins" or c.curr == "TechCoins") and spaceCoins >= c.cost) then
-                local ok, res = pcall(function()
-                    return Channels.SkillTree:InvokeServer("Purchase", c.id, "Default")
-                end)
-                if ok and (res == true or type(res) == "table") then
-                    totalBought = totalBought + 1
-                    userSkills[c.id] = true
-                    if c.curr == "Coins" then coins = coins - c.cost end
-                    if c.curr == "SpaceCoins" or c.curr == "TechCoins" then spaceCoins = spaceCoins - c.cost end
-                    keepSearching = true
-                    task.wait(0.08)
-                end
-            end
-        end
-    end
-
-    return totalBought
+function ProgAPI.ForceSwitchCoinsIsland(): string
+    coinsSwitchTick = tick()
+    currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+    return currentCoinsIsland
 end
 
---==============================================================================
--- BREAKABLES PIPELINE (Heaven Exclusive for Coins -> Tech World for Tech Coins)
---==============================================================================
-function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
-    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return 0 end
-    local zonePos = ProgAPI.GetBreakableZonePosition(islandName)
-    local count = 0
-    for _, child in ipairs(bf:GetChildren()) do
-        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
-        if m and m:IsA("Model") then
-            local uid = m:GetAttribute("BreakableUID")
-            local hp = m:GetAttribute("BreakableHP") or 0
-            if uid and hp > 0 then
-                local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-                local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-                if not isBoss then
-                    local z = tostring(m:GetAttribute("BreakableZone") or "")
-                    local inZone = z:find(islandName) ~= nil
-                    if not inZone and zonePos then
-                        local ok, pivot = pcall(function() return m:GetPivot() end)
-                        if ok and pivot then
-                            inZone = (pivot.Position - zonePos).Magnitude < 160
-                        end
-                    end
-                    if inZone then
-                        count = count + 1
-                    end
+function ProgAPI.GetBestBreakableIsland(mode: string?): string?
+    local pData = ProgAPI.GetPlayerData()
+    local unlocked = pData.UnlockedIslands or { "Spawn" }
+    local unlockedSet = {}
+    for _, isl in ipairs(unlocked) do unlockedSet[isl] = true end
+
+    -- Latest tech islands in descending order of progression (Matrix is the newest 17th world)
+    local techIslands = { "Matrix", "Fragment", "Spaceship", "Base" }
+
+    mode = mode or "Auto (Dynamic Smart)"
+
+    if mode == "Coins World (Volcano/Heaven)" or mode == "Coins Only" then
+        local now = tick()
+        if now - coinsSwitchTick > 10 then
+            coinsSwitchTick = now
+            currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+        end
+        if unlockedSet[currentCoinsIsland] and ProgAPI.HasBreakables(currentCoinsIsland) then
+            return currentCoinsIsland
+        end
+        return unlockedSet["Heaven"] and "Heaven" or "Volcano"
+    elseif mode == "Tech World (Matrix/Fragment)" or mode == "Tech Only" then
+        for _, isl in ipairs(techIslands) do
+            if unlockedSet[isl] and ProgAPI.HasBreakables(isl) then
+                return isl
+            end
+        end
+        return "Matrix"
+    elseif mode == "Auto (Dynamic Smart)" or mode == "Best Unlocked" or mode == "" then
+        local progress = ProgAPI.GetSkillTreeProgress()
+
+        -- 1. PRIORITIZE COINS SKILL TREE FIRST!
+        -- Alternate between Volcano and Heaven to break all breakables!
+        if not progress.CoinsComplete then
+            local now = tick()
+            if now - coinsSwitchTick > 10 then
+                coinsSwitchTick = now
+                currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
+            end
+            if unlockedSet[currentCoinsIsland] and ProgAPI.HasBreakables(currentCoinsIsland) then
+                return currentCoinsIsland
+            end
+            if unlockedSet["Heaven"] and ProgAPI.HasBreakables("Heaven") then return "Heaven" end
+            if unlockedSet["Volcano"] and ProgAPI.HasBreakables("Volcano") then return "Volcano" end
+        else
+            -- 2. AFTER ALL COINS UPGRADES ARE DONE:
+            -- Teleport to the LATEST unlocked Tech World island (Matrix > Fragment > Spaceship > Base) to farm Tech Coins!
+            for _, isl in ipairs(techIslands) do
+                if unlockedSet[isl] and ProgAPI.HasBreakables(isl) then
+                    return isl
+                end
+            end
+        end
+
+        -- Fallback
+        if unlockedSet["Matrix"] and ProgAPI.HasBreakables("Matrix") then return "Matrix" end
+        if unlockedSet["Heaven"] and ProgAPI.HasBreakables("Heaven") then return "Heaven" end
+        return "Volcano"
+    elseif unlockedSet[mode] and ProgAPI.HasBreakables(mode) then
+        return mode
+    end
+
+    if ProgAPI.HasBreakables(pData.CurrentIsland) then
+        return pData.CurrentIsland
+    end
+    return "Heaven"
+end
+
+-- Target lock / focus fire cache
+local currentTargetUID: string? = nil
+local currentTargetModel: Model? = nil
+
+-- Finds the breakable zone part and zone ID for an island
+function ProgAPI.GetIslandBreakableZone(islandName: string?, ignoreBossChest: boolean?): (Instance?, string?)
+    if ignoreBossChest == nil then ignoreBossChest = true end
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    local islands = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Islands")
+    local isl = islands and islands:FindFirstChild(islandName)
+    local interact = isl and isl:FindFirstChild("Interact")
+    local bZones = interact and interact:FindFirstChild("BreakableZones")
+    if bZones then
+        local normalZone = bZones:FindFirstChild("1")
+        if normalZone and normalZone:IsA("BasePart") then
+            return normalZone, islandName .. "/1"
+        end
+        for _, child in ipairs(bZones:GetChildren()) do
+            if child:IsA("BasePart") then
+                local cName = child.Name:lower()
+                if not (ignoreBossChest and (cName:find("huge") or cName:find("boss") or cName:find("giant") or cName:find("chest"))) then
+                    return child, islandName .. "/" .. child.Name
+                end
+            end
+        end
+        local part = bZones:FindFirstChildWhichIsA("BasePart")
+        if part then
+            return part, islandName .. "/" .. part.Name
+        end
+    end
+
+    -- Check _THINGS._BreakableZones
+    local thingsBZones = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("_BreakableZones")
+    if thingsBZones then
+        local targetZoneName = (islandName .. "/1"):lower()
+        for _, z in ipairs(thingsBZones:GetChildren()) do
+            if z.Name:lower() == targetZoneName then
+                return z, z.Name
+            end
+        end
+        for _, z in ipairs(thingsBZones:GetChildren()) do
+            local zName = z.Name:lower()
+            if zName:find(islandName:lower()) then
+                if not (ignoreBossChest and (zName:find("huge") or zName:find("boss") or zName:find("giant") or zName:find("chest"))) then
+                    return z, z.Name
                 end
             end
         end
     end
-    return count
+
+    return nil, nil
 end
 
 function ProgAPI.GetBreakableZonePosition(islandName: string): Vector3?
-    local bz = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("_BreakableZones")
-    local zonePart = bz and (bz:FindFirstChild(islandName .. "/1") or bz:FindFirstChild(islandName))
-    if zonePart then
-        return zonePart:GetPivot().Position
+    local part = ProgAPI.GetIslandBreakableZone(islandName, true)
+    if part and part:IsA("BasePart") then
+        return part.Position
     end
-
     local fallbacks = {
         Volcano = Vector3.new(-228.66, 9667.0, 327.77),
         Heaven = Vector3.new(-153.86, 12668.5, 360.0),
@@ -1111,196 +1317,347 @@ function ProgAPI.GetBreakableZonePosition(islandName: string): Vector3?
     return fallbacks[islandName]
 end
 
-function ProgAPI.TeleportToBreakableZone(islandName: string): boolean
+-- Checks if the island has breakables
+function ProgAPI.HasBreakables(islandName: string?): boolean
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    if Directory and Directory.Islands and Directory.Islands[islandName] then
+        if Directory.Islands[islandName].Breakables ~= nil then
+            return true
+        end
+    end
+    local zonePart = ProgAPI.GetIslandBreakableZone(islandName, true)
+    return zonePart ~= nil
+end
+
+-- Stop attacking and cleanly detach from breakables zone so normal player clicking works seamlessly
+function ProgAPI.StopBreakables()
+    currentTargetModel = nil
+    currentTargetUID = nil
+    if BreakablesFrontend then
+        pcall(function()
+            BreakablesFrontend.SetExternalTarget(nil)
+            BreakablesFrontend.LeaveZone()
+        end)
+    end
+end
+
+-- Checks if a breakable model is considered a giant / boss chest
+function ProgAPI.IsBossChest(modelOrId: any): boolean
+    local str = ""
+    local maxHP = 0
+    if typeof(modelOrId) == "Instance" then
+        local bId = modelOrId:GetAttribute("BreakableId") or modelOrId.Name
+        str = tostring(bId):lower()
+        local zone = modelOrId:GetAttribute("BreakableZone")
+        if zone then str = str .. " " .. tostring(zone):lower() end
+        local mhp = modelOrId:GetAttribute("BreakableMaxHP") or modelOrId:GetAttribute("BreakableHP")
+        if type(mhp) == "number" then maxHP = mhp end
+    elseif type(modelOrId) == "string" then
+        str = modelOrId:lower()
+    end
+    return str:find("boss") ~= nil 
+        or str:find("giant") ~= nil 
+        or str:find("huge") ~= nil 
+        or str:find("grand") ~= nil
+        or maxHP > 40000000
+end
+
+local function resolveBreakableEntry(child)
+    if not child then return nil end
+    local uid = child:GetAttribute("BreakableUID") or (child.Name:find("%-") and child.Name) or child.Name
+    local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child) or child:FindFirstChildWhichIsA("BasePart") or child
+    local pivot = nil
+    if m:IsA("Model") then
+        pivot = m:GetPivot()
+    elseif m:IsA("BasePart") then
+        pivot = m.CFrame
+    elseif child:IsA("BasePart") then
+        pivot = child.CFrame
+    end
+    if not pivot then return nil end
+    local hp = m:GetAttribute("BreakableHP") or child:GetAttribute("BreakableHP") or 1
+    local isBoss = ProgAPI.IsBossChest(m) or ProgAPI.IsBossChest(child) or ProgAPI.IsBossChest(uid)
+    local zone = m:GetAttribute("BreakableZone") or child:GetAttribute("BreakableZone")
+    return {
+        uid = tostring(uid),
+        model = m,
+        pivot = pivot,
+        pos = pivot.Position,
+        hp = tonumber(hp) or 1,
+        isBoss = isBoss,
+        zone = zone
+    }
+end
+
+-- Teleports character directly to the active breakable box itself or zone center
+function ProgAPI.TeleportToBreakableZone(islandName: string?, ignoreBossChest: boolean?): boolean
+    if ignoreBossChest == nil then ignoreBossChest = true end
+    local zonePart, zoneId = ProgAPI.GetIslandBreakableZone(islandName, ignoreBossChest)
+    if not zonePart then return false end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    local pos = ProgAPI.GetBreakableZonePosition(islandName)
-    if pos then
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3.5, 0))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        return true
+    if BreakablesFrontend and zoneId then
+        pcall(function()
+            BreakablesFrontend.EnterZone(zoneId)
+        end)
     end
-    return false
-end
 
--- Finds whatever breakable is closest to the player (skipping boss/giant chests)
-function ProgAPI.GetNearestBreakable(targetIsland: string?, maxDistance: number?, ignoreBossChest: boolean?)
-    if ignoreBossChest == nil then ignoreBossChest = true end
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, math.huge end
-
-    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return nil, math.huge end
-
-    local hrpPos = hrp.Position
-    local zonePos = targetIsland and ProgAPI.GetBreakableZonePosition(targetIsland)
-    local bestModel = nil
-    local bestDist = maxDistance or math.huge
-
-    for _, child in ipairs(bf:GetChildren()) do
-        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
-        if m and m:IsA("Model") then
-            local uid = m:GetAttribute("BreakableUID")
-            local hp = m:GetAttribute("BreakableHP") or 0
-            if uid and hp > 0 then
-                local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-                local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-                if not isBoss or not ignoreBossChest then
-                    local ok, pivot = pcall(function() return m:GetPivot() end)
-                    if ok and pivot then
-                        local mPos = pivot.Position
-                        local inIsland = true
-                        if targetIsland then
-                            local bZone = tostring(m:GetAttribute("BreakableZone") or "")
-                            inIsland = bZone:find(targetIsland) ~= nil
-                            if not inIsland and zonePos then
-                                inIsland = (mPos - zonePos).Magnitude < 160
-                            end
-                        end
-                        if inIsland then
-                            local dist = (mPos - hrpPos).Magnitude
-                            if dist < bestDist then
-                                bestDist = dist
-                                bestModel = m
-                            end
-                        end
-                    end
+    local bestEntry = nil
+    local bestDist = math.huge
+    local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+    if breakablesFolder then
+        for _, f in ipairs(breakablesFolder:GetChildren()) do
+            local entry = resolveBreakableEntry(f)
+            if entry and entry.hp > 0 and not (ignoreBossChest and entry.isBoss) then
+                local dist = (entry.pos - zonePart.Position).Magnitude
+                if dist < 120 and dist < bestDist then
+                    bestDist = dist
+                    bestEntry = entry
                 end
             end
         end
     end
 
-    return bestModel, bestDist
+    if bestEntry then
+        hrp.CFrame = CFrame.lookAt(bestEntry.pos + Vector3.new(0, 1.5, 3), bestEntry.pos)
+        return true
+    else
+        hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+        return true
+    end
 end
 
--- Instantly snaps character CFrame right next to target breakable and aims camera (0ms delay)
-function ProgAPI.SnapToBreakable(targetModel: Model): boolean
+-- Attacks active breakable in the zone with 100% reliability (Focus Fire + Direct Server Remotes + Frontend Visuals + Player Tapping)
+function ProgAPI.AttackBreakable(ignoreBossChest: boolean?, islandName: string?): (boolean, string?, number?)
+    if ignoreBossChest == nil then ignoreBossChest = true end
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or not targetModel or not targetModel.Parent then return false end
+    if not hrp then return false, "No character", nil end
 
-    local ok, pivot = pcall(function() return targetModel:GetPivot() end)
-    if not ok or not pivot then return false end
+    local pData = ProgAPI.GetPlayerData()
+    islandName = islandName or pData.CurrentIsland
+    local zonePart, zoneId = ProgAPI.GetIslandBreakableZone(islandName, ignoreBossChest)
+    if not zonePart then return false, "No breakables on island", nil end
 
-    local tPos = pivot.Position
-    local eyePos = tPos + Vector3.new(0, 1.2, 2.8)
-
-    hrp.CFrame = CFrame.lookAt(eyePos, tPos)
-    hrp.AssemblyLinearVelocity = Vector3.zero
-    hrp.AssemblyAngularVelocity = Vector3.zero
-
-    local cam = workspace.CurrentCamera
-    if cam then
-        cam.CFrame = CFrame.lookAt(eyePos + Vector3.new(0, 1.8, 3.0), tPos)
-    end
-    return true
-end
-
--- Strikes breakable with player clicks and all equipped pets in non-blocking parallel tasks
-function ProgAPI.StrikeBreakable(targetModel: Model): boolean
-    if not targetModel or not targetModel.Parent then return false end
-    local uid = targetModel:GetAttribute("BreakableUID")
-    if not uid then return false end
-
-    local stats = Stats.Local() or {}
-    local equipped = stats.EquippedPets or {}
-    if next(equipped) == nil then
-        pcall(ProgAPI.EquipBest)
-        stats = Stats.Local() or {}
-        equipped = stats.EquippedPets or {}
+    if BreakablesFrontend and zoneId then
+        pcall(function() BreakablesFrontend.EnterZone(zoneId) end)
     end
 
-    -- 1. Parallel Non-Blocking Server RPCs
-    if Channels.Breakables then
-        task.spawn(function()
-            pcall(function() Channels.Breakables:InvokeServer("Click", uid) end)
-        end)
-        for guid in pairs(equipped) do
-            task.spawn(function()
-                pcall(function() Channels.Breakables:InvokeServer("Hit", uid, guid) end)
-            end)
+    -- Validate existing target lock (Focus Fire)
+    local targetModel = currentTargetModel
+    local targetUID = currentTargetUID
+
+    if targetModel and targetModel.Parent and targetUID then
+        local hp = targetModel:GetAttribute("BreakableHP") or (targetModel.Parent and targetModel.Parent:GetAttribute("BreakableHP"))
+        local isBoss = ProgAPI.IsBossChest(targetModel)
+        if (hp and hp <= 0) or (ignoreBossChest and isBoss) then
+            targetModel = nil
+            targetUID = nil
+            currentTargetModel = nil
+            currentTargetUID = nil
+            if BreakablesFrontend then
+                pcall(function() BreakablesFrontend.SetExternalTarget(nil) end)
+            end
+        end
+    else
+        targetModel = nil
+        targetUID = nil
+        currentTargetModel = nil
+        currentTargetUID = nil
+    end
+
+    -- If no valid locked target, select best candidate in zone
+    if not targetModel then
+        local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+        local candidates = {}
+
+        if breakablesFolder then
+            for _, f in ipairs(breakablesFolder:GetChildren()) do
+                local entry = resolveBreakableEntry(f)
+                if entry and entry.hp > 0 and not (ignoreBossChest and entry.isBoss) then
+                    local distToZone = (entry.pos - zonePart.Position).Magnitude
+                    local distToPlayer = (entry.pos - hrp.Position).Magnitude
+                    if distToZone < 140 or distToPlayer < 45 then
+                        table.insert(candidates, { entry = entry, dist = distToPlayer })
+                    end
+                end
+            end
+        end
+
+        if #candidates > 0 then
+            table.sort(candidates, function(a, b) return a.dist < b.dist end)
+            targetModel = candidates[1].entry.model
+            targetUID = candidates[1].entry.uid
+            currentTargetModel = targetModel
+            currentTargetUID = targetUID
         end
     end
 
-    -- 2. Client Frontend Reports
+    if not targetModel or not targetUID then
+        if zonePart and (hrp.Position - zonePart.Position).Magnitude > 30 then
+            hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+        end
+        return false, "Waiting for breakables respawn", nil
+    end
+
+    -- Face target and maintain close proximity
+    local pivot = (targetModel:IsA("Model") and targetModel:GetPivot()) or (targetModel:IsA("BasePart") and targetModel.CFrame) or hrp.CFrame
+    local dist = (hrp.Position - pivot.Position).Magnitude
+    if dist > 8 then
+        hrp.CFrame = CFrame.lookAt(pivot.Position + Vector3.new(0, 1.5, 3), pivot.Position)
+    else
+        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(pivot.Position.X, hrp.Position.Y, pivot.Position.Z))
+    end
+
+    -- Optimized Attack Execution (BreakablesFrontend + Pet Strikes)
+    local dmg = nil
+    local zone = targetModel:GetAttribute("BreakableZone") or (targetModel.Parent and targetModel.Parent:GetAttribute("BreakableZone")) or zoneId
     if BreakablesFrontend then
         pcall(function()
-            BreakablesFrontend.ReportClick(targetModel)
-            for guid in pairs(equipped) do
+            if zone then
+                BreakablesFrontend.EnterZone(zone)
+            end
+            dmg = BreakablesFrontend.ReportClick(targetModel)
+
+            local stats = Stats.Local(true) or {}
+            local equipped = stats.EquippedPets or {}
+            for guid, _ in pairs(equipped) do
                 BreakablesFrontend.ReportStrike(guid)
             end
         end)
     end
 
-    -- 3. Screen click via VirtualInputManager & internal Click
-    local ok, pivot = pcall(function() return targetModel:GetPivot() end)
-    if ok and pivot then
-        local tPos = pivot.Position
-        local cam = workspace.CurrentCamera
-        local vim = game:GetService("VirtualInputManager")
-        if cam and vim then
-            local sPos, onScreen = cam:WorldToViewportPoint(tPos)
-            if onScreen and sPos.Z > 0 then
-                vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, true, game, 0)
-                task.wait(0.005)
-                vim:SendMouseButtonEvent(sPos.X, sPos.Y, 0, false, game, 0)
-            end
+    -- Direct Server Click & Pet Hits (Guaranteed Server Execution + Player Tapping Damage)
+    if Channels.Breakables and targetUID then
+        pcall(function()
+            Channels.Breakables:InvokeServer("Click", targetUID)
+        end)
+        local stats = Stats.Local(true) or {}
+        local equipped = stats.EquippedPets or {}
+        for guid, _ in pairs(equipped) do
+            pcall(function()
+                Channels.Breakables:InvokeServer("Hit", targetUID, guid)
+            end)
         end
     end
 
+    -- Fire player core click alongside breakable attack for clicks multiplier
     ProgAPI.Click()
-    return true
+
+    return true, targetModel.Name, dmg
 end
 
--- Destroys everything near the player in the breakables arena simultaneously with zero delay
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
-    if ignoreBossChest == nil then ignoreBossChest = true end
-    local char = LocalPlayer.Character or (LocalPlayer.CharacterAdded and LocalPlayer.CharacterAdded:Wait())
-    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5))
-    if not hrp then return false, "No character" end
+    local ok, name = ProgAPI.AttackBreakable(ignoreBossChest, targetIsland)
+    return ok, name
+end
 
-    local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
-
-    -- If player is far outside the zone arena (> 220 studs), teleport to arena
-    if zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-        ProgAPI.TeleportToIsland(targetIsland)
-        task.wait(0.3)
-        ProgAPI.TeleportToBreakableZone(targetIsland)
-        task.wait(0.2)
-    end
-
-    if BreakablesFrontend then
-        pcall(function() BreakablesFrontend.EnterZone(targetIsland .. "/1") end)
-    end
-
+function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
     local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return false, "No breakables folder" end
-
-    -- 1. Scan for ALL breakables near the player (within 50 studs)
-    local nearby = {}
-    local anyInArena = {}
+    if not bf then return 0 end
+    local count = 0
     for _, child in ipairs(bf:GetChildren()) do
-        local m = child:FindFirstChildWhichIsA("Model") or (child:IsA("Model") and child)
-        if m and m:IsA("Model") then
-            local uid = m:GetAttribute("BreakableUID")
-            local hp = m:GetAttribute("BreakableHP") or 0
-            local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
-            local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
-            if uid and hp > 0 and (not isBoss or not ignoreBossChest) then
-                local ok, pivot = pcall(function() return m:GetPivot() end)
-                if ok and pivot then
-                    local mPos = pivot.Position
-                    local distToPlayer = (mPos - hrp.Position).Magnitude
-                    local distToZone = zonePos and (mPos - zonePos).Magnitude or distToPlayer
+        local entry = resolveBreakableEntry(child)
+        if entry and entry.hp > 0 and not entry.isBoss then
+            count = count + 1
+        end
+    end
+    return count
+end
 
-                    if distToZone < 160 then
-                        table.insert(anyInArena, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
-                        if distToPlayer <= 50 then
-                            table.insert(nearby, { model = m, uid = uid, pos = mPos, dist = distToPlayer, name = m.Name })
+
+-- Purchases any affordable and unlocked Skill Tree perks (Default & RNG trees), prioritizing Coins when preferCoins is true
+function ProgAPI.BuyAffordableSkillTree(preferCoins: boolean?): number
+    local stFrontend = nil
+    pcall(function()
+        stFrontend = require(Client:WaitForChild("SkillTreeFrontend"))
+    end)
+    if not Directory.SkillTree or not Channels.SkillTree then return 0 end
+
+    if preferCoins == nil then
+        local stProg = ProgAPI.GetSkillTreeProgress()
+        preferCoins = not stProg.CoinsComplete
+    end
+
+    local count = 0
+    local boughtAny = true
+
+    -- Loop to continuously purchase chained perks if previous purchase unlocks next perk
+    while boughtAny and count < 30 do
+        boughtAny = false
+        local stats = Stats.Local(true) or {}
+        local curr = stats.Currency or {}
+
+        for treeId, categories in pairs(Directory.SkillTree) do
+            if type(categories) == "table" then
+                for catId, catData in pairs(categories) do
+                    -- Check category price if required
+                    if catData.Price and stFrontend and not stFrontend.OwnsCategory(catId, treeId) then
+                        local p = catData.Price
+                        local isCoins = (p.Id == "Coins")
+                        local canBuyCat = (not preferCoins or isCoins)
+                        if canBuyCat and p and curr[p.Id] and curr[p.Id] >= p.Amount then
+                            local ok = false
+                            pcall(function()
+                                ok = Channels.SkillTree:InvokeServer("PurchaseCategory", catId, treeId)
+                            end)
+                            if ok == true then
+                                count = count + 1
+                                boughtAny = true
+                                curr[p.Id] = curr[p.Id] - p.Amount
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+
+                    local upgrades = (type(catData) == "table" and catData.Upgrades)
+                    if type(upgrades) == "table" then
+                        for skillId, skillData in pairs(upgrades) do
+                            local p = skillData.Price
+                            local isCoins = (p and p.Id == "Coins")
+                            local canBuyThis = (not preferCoins or isCoins)
+
+                            if canBuyThis then
+                                local alreadyOwned = false
+                                if stFrontend then
+                                    alreadyOwned = stFrontend.Owns(skillId, treeId)
+                                else
+                                    local saveKey = skillId
+                                    local util = nil
+                                    pcall(function() util = require(Library:WaitForChild("Utils"):WaitForChild("SkillTreeUtil")) end)
+                                    if util and util.GetSaveKey then
+                                        saveKey = util.GetSaveKey(skillId, treeId)
+                                    end
+                                    alreadyOwned = stats.SkillTree and stats.SkillTree[saveKey] == true
+                                end
+
+                                if not alreadyOwned then
+                                    local reqFail = nil
+                                    if stFrontend then
+                                        reqFail = stFrontend.GetRequirementFailure(skillData, treeId)
+                                    end
+
+                                    if not reqFail then
+                                        if p and curr[p.Id] and curr[p.Id] >= p.Amount then
+                                            local ok = false
+                                            pcall(function()
+                                                ok = Channels.SkillTree:InvokeServer("Purchase", skillId, treeId)
+                                            end)
+                                            if ok == true then
+                                                count = count + 1
+                                                boughtAny = true
+                                                curr[p.Id] = curr[p.Id] - p.Amount
+                                                task.wait(0.1)
+                                                break -- refresh and re-evaluate next tier perks
+                                            end
+                                        end
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -1308,130 +1665,61 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
         end
     end
 
-    -- 2. If nothing is within 50 studs, but some exist in the arena: teleport right to the closest one!
-    if #nearby == 0 and #anyInArena > 0 then
-        table.sort(anyInArena, function(a, b) return a.dist < b.dist end)
-        local closest = anyInArena[1]
-        hrp.CFrame = CFrame.new(closest.pos + Vector3.new(0, 2.5, 0))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        table.insert(nearby, closest)
-    elseif #nearby == 0 and #anyInArena == 0 then
-        -- No breakables in arena right now: stand on the arena pad waiting for respawn wave
-        if zonePos and (hrp.Position - zonePos).Magnitude > 30 then
-            hrp.CFrame = CFrame.new(zonePos + Vector3.new(0, 2.5, 0))
-        end
-        return false, "Waiting for breakables respawn"
-    end
-
-    -- 3. DESTROY EVERYTHING NEAR HIM SIMULTANEOUSLY WITH ZERO DELAY!
-    table.sort(nearby, function(a, b) return a.dist < b.dist end)
-    local primaryTarget = nearby[1]
-
-    -- Face the closest breakable
-    hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(primaryTarget.pos.X, hrp.Position.Y, primaryTarget.pos.Z))
-
-    local stats = Stats.Local() or {}
-    local equipped = stats.EquippedPets or {}
-    if next(equipped) == nil then
-        pcall(ProgAPI.EquipBest)
-        stats = Stats.Local() or {}
-        equipped = stats.EquippedPets or {}
-    end
-
-    -- Strike ALL nearby breakables in parallel!
-    for _, item in ipairs(nearby) do
-        if Channels.Breakables then
-            task.spawn(function()
-                pcall(function() Channels.Breakables:InvokeServer("Click", item.uid) end)
-            end)
-            for guid in pairs(equipped) do
-                task.spawn(function()
-                    pcall(function() Channels.Breakables:InvokeServer("Hit", item.uid, guid) end)
-                end)
-            end
-        end
-        if BreakablesFrontend then
-            pcall(function()
-                BreakablesFrontend.ReportClick(item.model)
-                for guid in pairs(equipped) do
-                    BreakablesFrontend.ReportStrike(guid)
-                end
-            end)
-        end
-    end
-
-    ProgAPI.Click()
-
-    local names = {}
-    for i = 1, math.min(3, #nearby) do
-        table.insert(names, nearby[i].name)
-    end
-    return true, table.concat(names, ", ") .. string.format(" (%d nearby)", #nearby)
+    return count
 end
 
--- Executes the Coins (Heaven ONLY) -> Tech World breakables pipeline
+-- Executes the exact dynamic Skill Tree & Breakables loop transferred from [CLICKER HUB]
 function ProgAPI.StepBreakablesPipeline(): (string, string)
     local stProg = ProgAPI.GetSkillTreeProgress()
+    local targetWorld = ProgAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Heaven"
+    local pData = ProgAPI.GetPlayerData()
 
-    -- Asynchronously reinvest in skill tree so it never blocks or delays breakable farming
+    -- Asynchronously purchase affordable perks (Coins prioritized first!)
     task.spawn(function()
-        pcall(function() ProgAPI.BuyAffordableSkillTree(not stProg.CoinsComplete) end)
+        pcall(function()
+            ProgAPI.BuyAffordableSkillTree(not stProg.CoinsComplete)
+        end)
     end)
 
-    -- 1. Coins Skill Tree NOT done: Farm ONLY Heaven breakables (NO VOLCANO)!
-    if not stProg.CoinsComplete then
-        local targetIsland = "Heaven"
-        local stats = Stats.Local() or {}
-        local curWorld = stats.CurrentWorld or "Overworld"
+    -- If player is not on the target breakables island, warp there
+    if targetWorld and targetWorld ~= pData.CurrentIsland then
+        ProgAPI.TeleportToIsland(targetWorld)
+        task.wait(0.35)
+        ProgAPI.TeleportToBreakableZone(targetWorld, true)
+        task.wait(0.15)
+    end
 
-        if curWorld ~= "Overworld" then
-            ProgAPI.TeleportToWorld("Overworld")
-            task.wait(0.4)
+    -- Keep character anchored inside breakables zone
+    local zonePart = ProgAPI.GetIslandBreakableZone(targetWorld, true)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
+        ProgAPI.TeleportToBreakableZone(targetWorld, true)
+    end
+
+    -- Attack breakable
+    local okAtk = false
+    local targetName, dmg = nil, nil
+    pcall(function()
+        okAtk, targetName, dmg = ProgAPI.AttackBreakable(true, targetWorld)
+    end)
+
+    -- If no breakables on current Coins island, switch immediately between Volcano and Heaven so it never stops!
+    if not okAtk and not stProg.CoinsComplete then
+        local altIsland = ProgAPI.ForceSwitchCoinsIsland()
+        if altIsland and altIsland ~= pData.CurrentIsland then
+            ProgAPI.TeleportToIsland(altIsland)
+            task.wait(0.35)
+            ProgAPI.TeleportToBreakableZone(altIsland, true)
+            targetWorld = altIsland
         end
+        return "Switching to " .. tostring(altIsland), tostring(altIsland)
+    end
 
-        local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
-        -- Only teleport if far away (> 220 studs)
-        if hrp and zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-            ProgAPI.TeleportToIsland(targetIsland)
-            task.wait(0.3)
-            ProgAPI.TeleportToBreakableZone(targetIsland)
-            task.wait(0.2)
-        end
-
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(targetIsland, true)
-        local activeRemaining = ProgAPI.GetActiveBreakablesCount(targetIsland, "1")
-        if attacked and targetName then
-            return "Attacking " .. tostring(targetName) .. " (" .. activeRemaining .. " left)", targetIsland
-        else
-            return "Waiting for Heaven breakables respawn", targetIsland
-        end
-
-    -- 2. Coins skill tree complete: Teleport to latest Tech World (Matrix) to farm Tech Coins!
+    if okAtk then
+        return "Attacking " .. tostring(targetName or "Breakable"), targetWorld
     else
-        local stats = Stats.Local() or {}
-        local curWorld = stats.CurrentWorld or "Overworld"
-
-        if curWorld ~= "Techworld" then
-            ProgAPI.TeleportToWorld("Techworld")
-            task.wait(0.4)
-        end
-
-        local techTarget = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
-        local zonePos = ProgAPI.GetBreakableZonePosition(techTarget)
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
-        if hrp and zonePos and (hrp.Position - zonePos).Magnitude > 220 then
-            ProgAPI.TeleportToIsland(techTarget)
-            task.wait(0.3)
-            ProgAPI.TeleportToBreakableZone(techTarget)
-            task.wait(0.2)
-        end
-
-        local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, true)
-        return "Attacking " .. tostring(targetName or "Tech Breakables"), techTarget
+        return tostring(targetName or "Waiting for breakables respawn"), targetWorld
     end
 end
 
