@@ -483,13 +483,14 @@ task.spawn(function()
     pcall(AutoProgAPI.EquipBest)
 end)
 
--- Rejoin & Startup Teleport Guarantee: If in Phase 2 / Coins Skill Tree, immediately teleport to Heaven breakables arena!
+-- Rejoin & Startup Teleport Guarantee: If in Phase 2, ALL islands unlocked, and ENTIRE team is Rainbow, teleport to Heaven breakables arena!
 task.spawn(function()
     task.wait(1.8)
     pcall(function()
         local pData = AutoProgAPI.GetPlayerData()
         local lockedIsland = AutoProgAPI.GetNextLockedIsland()
-        if lockedIsland == nil and State.AutoSkillTree then
+        local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
+        if lockedIsland == nil and isAllRainbow and State.AutoSkillTree then
             local stProg = AutoProgAPI.GetSkillTreeProgress()
             if not stProg.CoinsComplete then
                 AutoProgAPI.TeleportToWorld("Overworld")
@@ -675,13 +676,11 @@ table.insert(threads, task.spawn(function()
         task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
 
-        -- STRICT REQUIREMENT: Auto Skill Tree only runs if ALL islands are unlocked AND team is strong!
+        -- STRICT REQUIREMENT: Auto Skill Tree only runs if ALL islands are unlocked AND ENTIRE team is 100% RAINBOW!
         local allIslands = AutoProgAPI.AreAllIslandsUnlocked()
-        local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
         local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
-        local teamReady = isAllRainbow or isAllGold
 
-        if allIslands and teamReady and State.AutoSkillTree then
+        if allIslands and isAllRainbow and State.AutoSkillTree then
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
@@ -833,8 +832,8 @@ table.insert(threads, task.spawn(function()
                     end
                 end
 
-                -- 4. Auto ??? Secret Quest
-                if State.AutoSecretQuest and (now - lastQuestTick > 0.5) then
+                -- 4. Auto ??? Secret Quest (Runs once entire team is 100% Rainbow)
+                if isAllRainbow and State.AutoSecretQuest and (now - lastQuestTick > 0.5) then
                     lastQuestTick = now
                     local okQ, qMsg = AutoProgAPI.StepSecretQuest()
                     if okQ and qMsg and not qMsg:find("Already") then
@@ -870,7 +869,8 @@ local function updateTelemetry()
         ) or "N/A"
 
         local isAllGold = ProgAPI.IsEquippedTeamAllGold()
-        local goldStr = isAllGold and "100% FULL GOLD TEAM" or "In Progress (Hatching Best Egg...)"
+        local isAllRainbow = ProgAPI.IsEquippedTeamAllRainbow()
+        local teamStr = isAllRainbow and "🌈 100% FULL RAINBOW TEAM" or (isAllGold and "⭐ Full Gold (Crafting Rainbow...)" or "In Progress (Hatching Best Egg...)")
 
         local magmaPct = math.clamp(math.floor((pData.Rebirths / 1e19) * 100), 0, 100)
         local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, ProgAPI.FormatNumber(pData.Rebirths))
@@ -883,7 +883,7 @@ local function updateTelemetry()
             "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
             "🚀 **Prestige**: %s\n" ..
             "🏝️ **Islands**: %s\n" ..
-            "🐾 **Gold Team**: %s\n" ..
+            "🐾 **Pet Team**: %s\n" ..
             "🌳 **Skill Tree**: %s\n" ..
             "🔥 **Magma Skin**: %s",
             tostring(currentActivity or "Auto Progression Active"),
@@ -895,7 +895,7 @@ local function updateTelemetry()
             ProgAPI.FormatNumber(pData.SpaceCoins or 0),
             tostring(prestStr),
             tostring(islandProgressStr),
-            tostring(goldStr),
+            tostring(teamStr),
             tostring(stStr),
             tostring(magmaStr)
         )
