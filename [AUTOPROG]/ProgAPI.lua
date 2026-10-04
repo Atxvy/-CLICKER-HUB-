@@ -1395,6 +1395,53 @@ local function buildPetIslandMap()
     return petIslandIndexMap
 end
 
+-- Single source of truth validator for Mythic and above pets
+-- Strictly identifies and protects Mythic, Mythical, Special, Mega, Secret, Divine, and Exclusive pets
+-- Returns TRUE to protect the pet from any deletion/selling routines
+function ProgAPI.IsMythicOrAbove(p: any): boolean
+    if not p then return false end
+
+    local pId = (type(p) == "table" and (p.id or p.Id or p.Name)) or p
+    local directRarity = type(p) == "table" and (p.rarity or p.Rarity)
+
+    local meta = nil
+    if Directory and Directory.Pets then
+        meta = Directory.Pets[pId] or Directory.Pets[tostring(pId)]
+        if not meta and type(pId) == "string" then
+            for id, data in pairs(Directory.Pets) do
+                if tostring(id):lower() == pId:lower() then
+                    meta = data
+                    break
+                end
+            end
+        end
+    end
+
+    local r = (meta and meta.Rarity) or directRarity
+    if not r then
+        -- Safety safeguard: If rarity cannot be determined, treat as protected so we NEVER delete unknown pets
+        return true
+    end
+
+    -- Official game Constants.RarityOrder check:
+    -- Basic (1), Rare (2), Epic (3), Legendary (4) < 5
+    -- Mythical/Mythic (5), Exclusive (6), Special (6), Secret (7), Divine (8), Mega (9) >= 5
+    if Constants and Constants.RarityOrder and Constants.RarityOrder[r] then
+        if Constants.RarityOrder[r] >= 5 then
+            return true
+        end
+    end
+
+    local rLower = tostring(r):lower()
+    if rLower:find("mythic") or rLower:find("mythical") or rLower:find("secret")
+       or rLower:find("divine") or rLower:find("mega") or rLower:find("special")
+       or rLower:find("exclusive") then
+        return true
+    end
+
+    return false
+end
+
 -- Weak pet deletion: If highest unlocked island is N, delete all normal pets from world (N - 2) and below
 function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
     if ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
@@ -1431,11 +1478,12 @@ function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
     local toDelete = {}
     for guid, p in pairs(pets) do
         if not equipped[guid] and not p.Locked and not p.l then
-            local isSpecial = (p.rarity == "Secret" or p.rarity == "Divine" or p.rarity == "Mega" or p.rarity == "Exclusive")
+            -- ABSOLUTE SAFETY: Strictly NEVER delete Mythic or above pets!
+            local isMythicOrAbove = ProgAPI.IsMythicOrAbove(p)
             local isShiny = (p.Shiny or p.s or false)
             local isVariant = (p.v == "Golden" or p.v == "Rainbow" or p.v == "DarkMatter")
 
-            if not isSpecial and not isShiny and not isVariant then
+            if not isMythicOrAbove and not isShiny and not isVariant then
                 local petOriginWorld = petMap[p.id] or 1
                 if petOriginWorld <= deleteThreshold then
                     local isBestEggDrop = bestEggPets[p.id] == true
@@ -2768,8 +2816,9 @@ function ProgAPI.IsPhase3(): boolean
     return isSkillTreeMaxed == true
 end
 
--- Phase 3 Dedicated Mythic Filter: Keeps ONLY Mythic / Secret / Divine pets!
--- Deletes all non-mythic pets (Common, Rare, Epic, Legendary) and old weak unequipped pets
+-- Phase 3 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
+-- Strictly preserves Mythic, Mythical, Special, Mega, Secret, Divine, and Exclusive pets
+-- Deletes all non-mythic pets (Basic, Rare, Epic, Legendary, Stock)
 function ProgAPI.CleanNonMythicPets(): number
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
@@ -2779,13 +2828,11 @@ function ProgAPI.CleanNonMythicPets(): number
     for guid, p in pairs(pets) do
         -- Never delete currently equipped pets or locked pets
         if not equipped[guid] and not p.Locked and not p.l then
-            local pId = p.id or p.Name or p.Id
-            local meta = Directory.Pets and Directory.Pets[pId]
-            local r = (meta and meta.Rarity) or p.rarity or "Common"
-            local isMythicOrBetter = (r == "Mythic" or r == "Mythical" or r == "Secret" or r == "Divine" or r == "Mega" or r == "Exclusive")
+            -- Strictly keep ALL Mythic and above pets!
+            local isMythicOrAbove = ProgAPI.IsMythicOrAbove(p)
 
-            -- If it is NOT a Mythic (or better), delete it!
-            if not isMythicOrBetter then
+            -- If it is NOT a Mythic or above, delete it!
+            if not isMythicOrAbove then
                 table.insert(toDelete, guid)
             end
         end
@@ -2819,10 +2866,7 @@ function ProgAPI.IsEquippedTeamAllRainbowMythic(): (boolean, number, number)
         total = total + 1
         local pInfo = (stats.Pets and stats.Pets[guid]) or (stats.EquippedPets and stats.EquippedPets[guid])
         if pInfo then
-            local pId = pInfo.id or pInfo.Name or pInfo.Id
-            local meta = Directory.Pets and Directory.Pets[pId]
-            local r = (meta and meta.Rarity) or pInfo.rarity or ""
-            local isMythic = (r == "Mythic" or r == "Mythical" or r == "Secret" or r == "Divine")
+            local isMythic = ProgAPI.IsMythicOrAbove(pInfo)
             local isRainbow = (pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow" or pInfo.Rainbow == true)
             if isMythic and isRainbow then
                 mythicCount = mythicCount + 1
