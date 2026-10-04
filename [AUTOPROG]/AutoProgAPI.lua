@@ -394,6 +394,9 @@ function ProgAPI.SendTestWebhook(): (boolean, string)
     end
 end
 
+-- Declare telemetry updater upvalue for immediate hatch feedback
+local updateBlackScreenTelemetry = nil
+
 -- Setup background egg hatch event listener
 local function setupHatchTracker()
     if _G.__ProgAPI_HatchConn then
@@ -439,6 +442,12 @@ local function setupHatchTracker()
                 end)
             end
         end
+
+        pcall(function()
+            if updateBlackScreenTelemetry then
+                updateBlackScreenTelemetry()
+            end
+        end)
     end)
 end
 pcall(setupHatchTracker)
@@ -3401,8 +3410,21 @@ local isMapsRemoved = false
 
 ProgAPI.OnBlackScreenToggled = nil
 
-local function updateBlackScreenTelemetry()
-    if not blackScreenGui or not blackScreenGui.Enabled then return end
+updateBlackScreenTelemetry = function()
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    if not blackScreenGui or not blackScreenGui.Parent or not blackScreenGui.Enabled then
+        local found = (pg and pg:FindFirstChild("ClickerHub_BlackScreen")) or _G.__ProgAPI_BlackScreenGui
+        if found and found.Enabled and found.Parent then
+            blackScreenGui = found
+        else
+            return
+        end
+    end
+
+    local labels = _G.__ProgAPI_BlackScreenLabels or blackScreenRowLabels
+    if not labels then return end
+
     local pData = ProgAPI.GetPlayerData()
     local curPets = 0
     local maxPets = 0
@@ -3428,29 +3450,33 @@ local function updateBlackScreenTelemetry()
     end)
 
     local luckMult = ProgAPI.GetCurrentEggLuckMultiplier()
+    local chancesText = "N/A"
+    pcall(function()
+        chancesText = ProgAPI.GetEggDropChancesSummary(eggName)
+    end)
 
     pcall(function()
-        if blackScreenRowLabels.Clicks then blackScreenRowLabels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
-        if blackScreenRowLabels.Rebirths then blackScreenRowLabels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
-        if blackScreenRowLabels.Gems then blackScreenRowLabels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
-        if blackScreenRowLabels.World then blackScreenRowLabels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
-        if blackScreenRowLabels.Island then blackScreenRowLabels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
-        if blackScreenRowLabels.PetInv then blackScreenRowLabels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
-        if blackScreenRowLabels.SelectedEgg then
-            blackScreenRowLabels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
+        if labels.Clicks then labels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
+        if labels.Rebirths then labels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
+        if labels.Gems then labels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
+        if labels.World then labels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
+        if labels.Island then labels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
+        if labels.PetInv then labels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
+        if labels.SelectedEgg then
+            labels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
         end
-        if blackScreenRowLabels.EggLuck then
+        if labels.EggLuck then
             local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "2.7s"
-            blackScreenRowLabels.EggLuck.Text = string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(luckMult), speedText)
+            labels.EggLuck.Text = string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(luckMult), speedText)
         end
-        if blackScreenRowLabels.Activity then blackScreenRowLabels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
-        if blackScreenRowLabels.Chances then blackScreenRowLabels.Chances.Text = ProgAPI.GetEggDropChancesSummary(eggName) end
+        if labels.Activity then labels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
+        if labels.Chances then labels.Chances.Text = chancesText end
 
-        if blackScreenRowLabels.EggsHatched then blackScreenRowLabels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
-        if blackScreenRowLabels.Mythicals then blackScreenRowLabels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
-        if blackScreenRowLabels.Secrets then blackScreenRowLabels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
-        if blackScreenRowLabels.Megas then blackScreenRowLabels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
-        if blackScreenRowLabels.SessionTime then blackScreenRowLabels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+        if labels.EggsHatched then labels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
+        if labels.Mythicals then labels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
+        if labels.Secrets then labels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
+        if labels.Megas then labels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
+        if labels.SessionTime then labels.SessionTime.Text = ProgAPI.FormatSessionTime() end
 
         if _G.__ProgAPI_BlackScreenWebhookBox and not _G.__ProgAPI_BlackScreenWebhookBox:IsFocused() then
             local curUrl = ProgAPI.WebhookUrl or ""
@@ -3460,6 +3486,7 @@ local function updateBlackScreenTelemetry()
         end
     end)
 end
+ProgAPI.UpdateBlackScreenTelemetry = updateBlackScreenTelemetry
 
 function ProgAPI.SetBlackScreen(enabled: boolean)
     pcall(function()
@@ -3472,19 +3499,6 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
     local targetParent = pg
-
-    pcall(function()
-        if typeof(gethui) == "function" then
-            local h = gethui()
-            if h then
-                local test = Instance.new("Folder")
-                test.Parent = h
-                test:Destroy()
-                targetParent = h
-            end
-        end
-    end)
-    if not targetParent then targetParent = pg end
 
     if enabled then
         -- Suppress and listen for all ScreenGuis in PlayerGui
@@ -3546,21 +3560,12 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         if not blackScreenGui or not blackScreenGui.Parent then
-            if not targetParent and not pg then return end
+            if not pg then return end
 
             pcall(function()
-                if targetParent then
-                    for _, ch in ipairs(targetParent:GetChildren()) do
-                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                            ch:Destroy()
-                        end
-                    end
-                end
-                if pg and pg ~= targetParent then
-                    for _, ch in ipairs(pg:GetChildren()) do
-                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                            ch:Destroy()
-                        end
+                for _, ch in ipairs(pg:GetChildren()) do
+                    if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                        ch:Destroy()
                     end
                 end
             end)
@@ -3571,6 +3576,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             blackScreenGui.DisplayOrder = 2147483647
             blackScreenGui.IgnoreGuiInset = true
             blackScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            _G.__ProgAPI_BlackScreenGui = blackScreenGui
 
             local bg = Instance.new("Frame")
             bg.Name = "BlackBackground"
@@ -3812,14 +3818,9 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             hint.TextXAlignment = Enum.TextXAlignment.Center
             hint.Parent = card
 
-            local okParent = pcall(function()
-                blackScreenGui.Parent = targetParent
+            pcall(function()
+                blackScreenGui.Parent = pg
             end)
-            if not okParent and pg then
-                pcall(function()
-                    blackScreenGui.Parent = pg
-                end)
-            end
         end
 
         blackScreenGui.Enabled = true
@@ -3839,34 +3840,36 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                     end
                 end)
 
-                -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered
-                if blackScreenGui then
-                    blackScreenGui.Enabled = true
-                    blackScreenGui.DisplayOrder = 2147483647
-                    if targetParent and blackScreenGui.Parent ~= targetParent then
-                        blackScreenGui.Parent = targetParent
-                    end
-                end
-
-                -- 3. Continuously suppress all other game ScreenGuis and popups
-                if pg then
-                    for _, ch in ipairs(pg:GetChildren()) do
-                        if ch:IsA("ScreenGui") and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" and ch.Enabled then
-                            if savedGuiStates[ch] == nil then
-                                savedGuiStates[ch] = ch.Enabled
-                            end
-                            ch.Enabled = false
+                -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered in PlayerGui
+                pcall(function()
+                    if blackScreenGui then
+                        blackScreenGui.Enabled = true
+                        blackScreenGui.DisplayOrder = 2147483647
+                        if pg and blackScreenGui.Parent ~= pg then
+                            blackScreenGui.Parent = pg
                         end
                     end
-                    pcall(function()
+                end)
+
+                -- 3. Continuously suppress all other game ScreenGuis and popups
+                pcall(function()
+                    if pg then
+                        for _, ch in ipairs(pg:GetChildren()) do
+                            if ch:IsA("ScreenGui") and ch ~= blackScreenGui and ch.Name ~= "ClickerHub_BlackScreen" and ch.Enabled then
+                                if savedGuiStates[ch] == nil then
+                                    savedGuiStates[ch] = ch.Enabled
+                                end
+                                pcall(function() ch.Enabled = false end)
+                            end
+                        end
                         local trading = pg:FindFirstChild("Trading")
                         if trading and trading.Enabled then trading.Enabled = false end
                         local msg = pg:FindFirstChild("Message")
                         if msg and msg.Enabled then msg.Enabled = false end
                         local prompt = pg:FindFirstChild("InputPrompt")
                         if prompt and prompt.Enabled then prompt.Enabled = false end
-                    end)
-                end
+                    end
+                end)
 
                 pcall(updateBlackScreenTelemetry)
                 task.wait(0.5)
@@ -3911,6 +3914,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         if blackScreenGui then
             pcall(function() blackScreenGui:Destroy() end)
             blackScreenGui = nil
+            _G.__ProgAPI_BlackScreenGui = nil
         end
 
         pcall(function()
