@@ -275,7 +275,7 @@ function ProgAPI.SendHatchWebhook(eggName: string, pet: any, petDef: any): boole
     end
 
     local payload = {
-        username = "Zelqyn Hub • Clicker Simulator",
+        username = "Clicker Hub • Auto Progression",
         avatar_url = "https://i.imgur.com/8Q5FqWl.png",
         embeds = {
             {
@@ -293,7 +293,7 @@ function ProgAPI.SendHatchWebhook(eggName: string, pet: any, petDef: any): boole
                     { name = "📊 Eggs Hatched (Session)", value = ProgAPI.FormatNumber(ProgAPI.SessionStats.Eggs), inline = true },
                     { name = "⏱️ Session Time", value = ProgAPI.FormatSessionTime(), inline = true },
                 },
-                footer = { text = "Zelqyn Hub • Clicker Simulator Auto Progression" },
+                footer = { text = "Clicker Hub • Clicker Simulator Auto Progression" },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             }
         }
@@ -325,12 +325,12 @@ function ProgAPI.SendTestWebhook(): (boolean, string)
     end
 
     local payload = {
-        username = "Zelqyn Hub • Clicker Simulator",
+        username = "Clicker Hub • Auto Progression",
         avatar_url = "https://i.imgur.com/8Q5FqWl.png",
         embeds = {
             {
                 title = "🔔 DISCORD WEBHOOK TEST NOTIFICATION",
-                description = "Your Discord Webhook is successfully connected to **Zelqyn Hub**! You will receive notifications when a **Secret, Mega, Divine, or Exclusive** pet is hatched.",
+                description = "Your Discord Webhook is successfully connected to **Clicker Hub**! You will receive notifications when a **Secret, Mega, Divine, or Exclusive** pet is hatched.",
                 color = 0x22C55E,
                 fields = {
                     { name = "👤 Player", value = LocalPlayer.Name, inline = true },
@@ -340,7 +340,7 @@ function ProgAPI.SendTestWebhook(): (boolean, string)
                     { name = "⏱️ Session Time", value = ProgAPI.FormatSessionTime(), inline = true },
                     { name = "📊 Eggs Hatched", value = ProgAPI.FormatNumber(ProgAPI.SessionStats.Eggs), inline = true },
                 },
-                footer = { text = "Zelqyn Hub • Clicker Simulator Auto Progression" },
+                footer = { text = "Clicker Hub • Discord Webhook Integration" },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             }
         }
@@ -3270,24 +3270,26 @@ local function updateBlackScreenTelemetry()
 
     local luckMult = ProgAPI.GetCurrentEggLuckMultiplier()
 
-    if blackScreenRowLabels.Clicks then blackScreenRowLabels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
-    if blackScreenRowLabels.Rebirths then blackScreenRowLabels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
-    if blackScreenRowLabels.Gems then blackScreenRowLabels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
-    if blackScreenRowLabels.World then blackScreenRowLabels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
-    if blackScreenRowLabels.Island then blackScreenRowLabels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
-    if blackScreenRowLabels.PetInv then blackScreenRowLabels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
-    if blackScreenRowLabels.SelectedEgg then
-        blackScreenRowLabels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
-    end
-    if blackScreenRowLabels.EggLuck then blackScreenRowLabels.EggLuck.Text = ProgAPI.FormatLuck(luckMult) end
-    if blackScreenRowLabels.Activity then blackScreenRowLabels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
-    if blackScreenRowLabels.Chances then blackScreenRowLabels.Chances.Text = ProgAPI.GetEggDropChancesSummary(eggName) end
+    pcall(function()
+        if blackScreenRowLabels.Clicks then blackScreenRowLabels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
+        if blackScreenRowLabels.Rebirths then blackScreenRowLabels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
+        if blackScreenRowLabels.Gems then blackScreenRowLabels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
+        if blackScreenRowLabels.World then blackScreenRowLabels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
+        if blackScreenRowLabels.Island then blackScreenRowLabels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
+        if blackScreenRowLabels.PetInv then blackScreenRowLabels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
+        if blackScreenRowLabels.SelectedEgg then
+            blackScreenRowLabels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
+        end
+        if blackScreenRowLabels.EggLuck then blackScreenRowLabels.EggLuck.Text = ProgAPI.FormatLuck(luckMult) end
+        if blackScreenRowLabels.Activity then blackScreenRowLabels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
+        if blackScreenRowLabels.Chances then blackScreenRowLabels.Chances.Text = ProgAPI.GetEggDropChancesSummary(eggName) end
 
-    if blackScreenRowLabels.EggsHatched then blackScreenRowLabels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
-    if blackScreenRowLabels.Mythicals then blackScreenRowLabels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
-    if blackScreenRowLabels.Secrets then blackScreenRowLabels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
-    if blackScreenRowLabels.Megas then blackScreenRowLabels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
-    if blackScreenRowLabels.SessionTime then blackScreenRowLabels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+        if blackScreenRowLabels.EggsHatched then blackScreenRowLabels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
+        if blackScreenRowLabels.Mythicals then blackScreenRowLabels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
+        if blackScreenRowLabels.Secrets then blackScreenRowLabels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
+        if blackScreenRowLabels.Megas then blackScreenRowLabels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
+        if blackScreenRowLabels.SessionTime then blackScreenRowLabels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+    end)
 end
 
 function ProgAPI.SetBlackScreen(enabled: boolean)
@@ -3366,6 +3368,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             bg.Parent = blackScreenGui
 
             local card = Instance.new("Frame")
+            card.Name = "CardFrame"
             card.Size = UDim2.new(0, 460, 0, 560)
             card.AnchorPoint = Vector2.new(0.5, 0.5)
             card.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -3384,7 +3387,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             cardStroke.Parent = card
 
             local title = Instance.new("TextLabel")
-            title.Text = "ZELQYN HUB • CLICKER SIMULATOR"
+            title.Text = "CLICKER HUB • CLICKER SIMULATOR"
             title.Font = Enum.Font.GothamBold
             title.TextSize = 17
             title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3413,12 +3416,13 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             divider.Parent = card
 
             local container = Instance.new("Frame")
+            container.Name = "RowsContainer"
             container.Position = UDim2.new(0, 22, 0, 76)
             container.Size = UDim2.new(1, -44, 0, 380)
             container.BackgroundTransparency = 1
             container.Parent = card
 
-            local function addRow(lblText, defaultVal, yPos)
+            local function addRow(lblText, defaultVal, yPos, key)
                 local rowFrame = Instance.new("Frame")
                 rowFrame.Size = UDim2.new(1, 0, 0, 20)
                 rowFrame.Position = UDim2.new(0, 0, 0, yPos)
@@ -3436,6 +3440,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                 lbl.Parent = rowFrame
 
                 local val = Instance.new("TextLabel")
+                val.Name = "Value_" .. (key or lblText)
                 val.Text = defaultVal
                 val.Font = Enum.Font.RobotoMono
                 val.TextSize = 12.5
@@ -3450,24 +3455,48 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                 return val
             end
 
+            -- Live initial data pre-fetch so UI renders with actual numbers instantly
+            local pData = ProgAPI.GetPlayerData()
+            local initPets = 0
+            local initMaxPets = 0
+            pcall(function()
+                local Pets = require(Client:WaitForChild("Pets", 2))
+                if Pets and Pets.GetInventoryCount then initPets = Pets.GetInventoryCount() end
+                if Pets and Pets.GetEffectiveMaxInventoryPets then initMaxPets = Pets.GetEffectiveMaxInventoryPets() end
+            end)
+
+            local initEgg = ProgAPI.SelectedEgg or "MatrixEgg"
+            local initEggData = Directory.Eggs and Directory.Eggs[initEgg]
+            local initEggDisp = (initEggData and (initEggData.Name or initEggData.DisplayName)) or initEgg
+            local initEggCost = 0
+            local initEggCurr = (initEggData and initEggData.Info and initEggData.Info.Currency) or "Clicks"
+            pcall(function()
+                if EggsFrontend and EggsFrontend.GetEggCost then initEggCost = EggsFrontend.GetEggCost(initEgg) end
+            end)
+
+            local initLuck = ProgAPI.GetCurrentEggLuckMultiplier()
+            local initChances = ProgAPI.GetEggDropChancesSummary(initEgg)
+
             blackScreenRowLabels = {}
-            blackScreenRowLabels.Clicks = addRow("Clicks", "0", 0)
-            blackScreenRowLabels.Rebirths = addRow("Rebirths", "0", 20)
-            blackScreenRowLabels.Gems = addRow("Gems", "0", 40)
-            blackScreenRowLabels.World = addRow("World", "Overworld", 60)
-            blackScreenRowLabels.Island = addRow("Island", "Spawn", 80)
-            blackScreenRowLabels.PetInv = addRow("Pet Inventory", "0 / 0", 100)
-            blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", "Matrix Egg", 120)
-            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", "100%", 140)
+            blackScreenRowLabels.Clicks = addRow("Clicks", ProgAPI.FormatNumber(pData.Clicks), 0, "Clicks")
+            blackScreenRowLabels.Rebirths = addRow("Rebirths", ProgAPI.FormatNumber(pData.Rebirths), 20, "Rebirths")
+            blackScreenRowLabels.Gems = addRow("Gems", ProgAPI.FormatNumber(pData.Gems), 40, "Gems")
+            blackScreenRowLabels.World = addRow("World", tostring(pData.CurrentWorld or "Overworld"), 60, "World")
+            blackScreenRowLabels.Island = addRow("Island", tostring(pData.CurrentIsland or "Spawn"), 80, "Island")
+            blackScreenRowLabels.PetInv = addRow("Pet Inventory", string.format("%d / %d", initPets, initMaxPets), 100, "PetInv")
+            blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", string.format("%s (%s %s)", initEggDisp, ProgAPI.FormatNumber(initEggCost), initEggCurr), 120, "SelectedEgg")
+            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", ProgAPI.FormatLuck(initLuck), 140, "EggLuck")
 
-            blackScreenRowLabels.Activity = addRow("Current Activity", "Auto Farm Active", 168)
-            blackScreenRowLabels.Chances = addRow("Top Drop Chances", "Loading...", 188)
+            blackScreenRowLabels.Activity = addRow("Current Activity", tostring(ProgAPI.CurrentActivity or "Auto Farm Active"), 168, "Activity")
+            blackScreenRowLabels.Chances = addRow("Top Drop Chances", initChances, 188, "Chances")
 
-            blackScreenRowLabels.EggsHatched = addRow("Eggs Hatched (Session)", "0", 216)
-            blackScreenRowLabels.Mythicals = addRow("Mythicals (Session)", "0", 236)
-            blackScreenRowLabels.Secrets = addRow("Secrets (Session)", "0", 256)
-            blackScreenRowLabels.Megas = addRow("Megas (Session)", "0", 276)
-            blackScreenRowLabels.SessionTime = addRow("Session Time", "00:00:00", 296)
+            blackScreenRowLabels.EggsHatched = addRow("Eggs Hatched (Session)", tostring(ProgAPI.SessionStats.Eggs), 216, "EggsHatched")
+            blackScreenRowLabels.Mythicals = addRow("Mythicals (Session)", tostring(ProgAPI.SessionStats.Mythicals), 236, "Mythicals")
+            blackScreenRowLabels.Secrets = addRow("Secrets (Session)", tostring(ProgAPI.SessionStats.Secrets), 256, "Secrets")
+            blackScreenRowLabels.Megas = addRow("Megas (Session)", tostring(ProgAPI.SessionStats.Megas), 276, "Megas")
+            blackScreenRowLabels.SessionTime = addRow("Session Time", ProgAPI.FormatSessionTime(), 296, "SessionTime")
+
+            _G.__ProgAPI_BlackScreenLabels = blackScreenRowLabels
 
             local restoreBtn = Instance.new("TextButton")
             restoreBtn.Name = "DisableBtn"
