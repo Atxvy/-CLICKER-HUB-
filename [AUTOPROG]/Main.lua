@@ -475,8 +475,10 @@ RewardsTab:AddButton({
 -- Startup code & gifts claim
 task.spawn(function()
     task.wait(1.5)
+    pcall(AutoProgAPI.CheckAndSelectStarterPet)
     pcall(AutoProgAPI.RedeemAllCodes)
     pcall(AutoProgAPI.ClaimAllFreeGifts)
+    pcall(AutoProgAPI.ClaimCompletedQuests)
     pcall(AutoProgAPI.ClaimDaily)
     pcall(AutoProgAPI.EquipBest)
 end)
@@ -555,16 +557,17 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 5: DEDICATED AUTO FREE GIFTS, CHESTS, DAILY & MILESTONES THREAD
+-- THREAD 5: DEDICATED AUTO FREE GIFTS, CHESTS, DAILY, QUESTS & MILESTONES THREAD
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(4)
         if isRunning and State.MasterEnabled and State.AutoFreeGifts then
             pcall(function()
-                ProgAPI.ClaimAllFreeGifts()
-                ProgAPI.ClaimAllChests()
-                ProgAPI.ClaimDaily()
-                ProgAPI.ClaimAllMilestones()
+                AutoProgAPI.ClaimAllFreeGifts()
+                AutoProgAPI.ClaimAllChests()
+                AutoProgAPI.ClaimDaily()
+                AutoProgAPI.ClaimCompletedQuests()
+                AutoProgAPI.ClaimAllMilestones()
             end)
         end
     end
@@ -716,10 +719,15 @@ table.insert(threads, task.spawn(function()
             if not allIslandsUnlocked and lockedIsland ~= nil then
                 currentPhaseText = string.format("🌟 PHASE 1: ISLAND SPEEDRUN (%s)", lockedIsland.name)
 
-                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and not isAllGold
+                -- Auto pick starter pet if new player
+                pcall(AutoProgAPI.CheckAndSelectStarterPet)
 
-                -- 1. Auto Teleport to furthest unlocked island (Only when not actively hatching an egg!)
-                if not shouldHatch and (now - lastTeleportTick > 6) then
+                local bestEgg = AutoProgAPI.GetBestAffordableEgg()
+                local canAffordBestEgg = (bestEgg ~= nil) and (pData.Clicks >= bestEgg.cost)
+                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and (not isAllGold) and canAffordBestEgg
+
+                -- 1. Auto Teleport to furthest unlocked island (For best click multiplier when not hatching!)
+                if not shouldHatch and (now - lastTeleportTick > 3) then
                     lastTeleportTick = now
                     local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                     if pData.CurrentIsland ~= furthest then
@@ -751,23 +759,17 @@ table.insert(threads, task.spawn(function()
                     lastEggHatchTick = now
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
-                    -- If team is not yet all gold, hatch best egg on current furthest map!
-                    if not isAllGold then
-                        local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                        if bestEgg and pData.Clicks >= bestEgg.cost then
-                            currentActivity = string.format("[Phase 1] Hatching %s on %s for Golden Team", bestEgg.name, bestEgg.island)
-                            AutoProgAPI.OpenEgg(bestEgg.name, 1)
-                            pcall(AutoProgAPI.CraftGoldenPets)
-                            pcall(AutoProgAPI.EquipBest)
-                        end
-                    elseif not isNearUnlock and State.AutoBestEggs then
-                        local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                        if bestEgg and pData.Clicks >= bestEgg.cost then
-                            currentActivity = string.format("[Phase 1] Hatching %s on %s", bestEgg.name, bestEgg.island)
-                            AutoProgAPI.OpenEgg(bestEgg.name, 1)
-                            pcall(AutoProgAPI.CraftGoldenPets)
-                            pcall(AutoProgAPI.EquipBest)
-                        end
+                    -- If team is not yet all gold, hatch best affordable egg!
+                    if not isAllGold and canAffordBestEgg then
+                        currentActivity = string.format("[Phase 1] Hatching %s on %s for Golden Team", bestEgg.name, bestEgg.island)
+                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                        pcall(AutoProgAPI.CraftGoldenPets)
+                        pcall(AutoProgAPI.EquipBest)
+                    elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg then
+                        currentActivity = string.format("[Phase 1] Hatching %s on %s", bestEgg.name, bestEgg.island)
+                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                        pcall(AutoProgAPI.CraftGoldenPets)
+                        pcall(AutoProgAPI.EquipBest)
                     end
                 end
 
