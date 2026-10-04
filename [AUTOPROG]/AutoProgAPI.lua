@@ -274,6 +274,10 @@ end
 
 -- Executes highest affordable rebirth milestone button directly
 function ProgAPI.RebirthMaxTarget(): (boolean, any)
+    if ProgAPI.IsRainbowMode and ProgAPI.IsRainbowMode() then
+        return false, "Auto Rebirth disabled during Rainbow Mode to preserve clicks for egg hatching"
+    end
+
     local info = ProgAPI.GetMaxRebirthInfo()
     if info.CanAffordMax and info.BestAffordableIndex then
         -- 1. Direct channel fire to active button index
@@ -775,6 +779,13 @@ function ProgAPI.IsEquippedTeamAllRainbow(): boolean
     return hasAny
 end
 
+-- Rainbow Mode Checker: Active in Phase 2 when all islands are unlocked but team is NOT yet 100% Rainbow
+function ProgAPI.IsRainbowMode(): boolean
+    local allIslands = ProgAPI.AreAllIslandsUnlocked()
+    local isAllRainbow = ProgAPI.IsEquippedTeamAllRainbow()
+    return allIslands and (not isAllRainbow)
+end
+
 function ProgAPI.HasFullGoldEventTeam(): boolean
     local stats = Stats.Local(true) or {}
     local equipped = stats.EquippedPets or {}
@@ -917,8 +928,52 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     return false
 end
 
+-- Calculates dynamic max multi-open hatch amount (1x, 3x, 8x, or higher) based on gamepasses, boosts, inventory space, and clicks
+function ProgAPI.GetMaxEggOpenAmount(eggName: string?): number
+    eggName = eggName or "BasicEgg"
+    local maxCount = 8 -- Base multi-open fallback for players with multi-hatch capability
+
+    if EggsFrontend then
+        local count1 = pcall(function() return EggsFrontend.GetMaxButtonHatchCount(eggName) end) and EggsFrontend.GetMaxButtonHatchCount(eggName)
+        local count2 = pcall(function() return EggsFrontend.GetMaxHatchCount(eggName) end) and EggsFrontend.GetMaxHatchCount(eggName)
+        local count3 = pcall(function() return EggsFrontend.GetHalfHatchCount(eggName) end) and EggsFrontend.GetHalfHatchCount(eggName)
+        local shouldPrompt = pcall(function() return EggsFrontend.ShouldPromptX8Hatch(eggName) end) and EggsFrontend.ShouldPromptX8Hatch(eggName)
+
+        if not shouldPrompt and type(count1) == "number" and count1 > 0 then
+            maxCount = math.max(maxCount, count1)
+        elseif type(count3) == "number" and count3 > 0 then
+            maxCount = math.max(maxCount, count3)
+        elseif type(count2) == "number" and count2 > 0 then
+            maxCount = math.max(maxCount, count2)
+        end
+    end
+
+    -- Respect remaining inventory slots so inventory never overflows
+    local stats = Stats.Local(true) or {}
+    local curInv = 0
+    for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
+    local maxInv = stats.MaxInventoryPets or 200
+    local freeSlots = math.max(1, maxInv - curInv)
+    maxCount = math.min(maxCount, freeSlots)
+
+    -- Check affordability if eggName is known
+    if eggName then
+        local cost = (EggsFrontend and EggsFrontend.GetEggCost and pcall(function() return EggsFrontend.GetEggCost(eggName) end) and EggsFrontend.GetEggCost(eggName))
+            or (ProgAPI.EggData and ProgAPI.EggData[eggName] and ProgAPI.EggData[eggName].cost)
+        local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
+        if cost and cost > 0 then
+            local canAfford = math.floor(clicks / cost)
+            maxCount = math.min(maxCount, math.max(1, canAfford))
+        end
+    end
+
+    return math.max(1, math.floor(maxCount))
+end
+
 function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean?): (boolean, string)
-    amount = amount or 1
+    if not amount or amount <= 0 then
+        amount = ProgAPI.GetMaxEggOpenAmount(eggName)
+    end
     if not Channels.Egg then return false, "No Egg channel" end
 
     -- Verify character is in proximity to the egg model (server requires <= 20 studs)
