@@ -16,14 +16,15 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
+    local lp = LocalPlayer or Players.LocalPlayer or Players.PlayerAdded:Wait()
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    if pg then return pg end
     if gethui then
         local ok, h = pcall(gethui)
         if ok and h then return h end
     end
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
     if ok and cg then return cg end
-    local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
-    local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
     return pg
 end
 
@@ -407,67 +408,69 @@ function UILibrary.CreateWindow(config)
     end
 
     function Window:Notify(opts)
-        opts = opts or {}
-        local nTitle = opts.Title or "Notification"
-        local nContent = opts.Content or ""
-        local nDuration = opts.Duration or 3
+        pcall(function()
+            opts = opts or {}
+            local nTitle = opts.Title or "Notification"
+            local nContent = opts.Content or ""
+            local nDuration = opts.Duration or 3
 
-        local notif = Instance.new("Frame")
-        notif.Size = UDim2.new(1, 0, 0, 56)
-        notif.BackgroundColor3 = Color3.fromRGB(28, 22, 38)
-        notif.BackgroundTransparency = 1
-        notif.BorderSizePixel = 0
-        notif.Parent = NotifContainer
+            local notif = Instance.new("Frame")
+            notif.Size = UDim2.new(1, 0, 0, 56)
+            notif.BackgroundColor3 = Color3.fromRGB(28, 22, 38)
+            notif.BackgroundTransparency = 1
+            notif.BorderSizePixel = 0
+            notif.Parent = NotifContainer
 
-        local nCorner = Instance.new("UICorner")
-        nCorner.CornerRadius = UDim.new(0, 8)
-        nCorner.Parent = notif
+            local nCorner = Instance.new("UICorner")
+            nCorner.CornerRadius = UDim.new(0, 8)
+            nCorner.Parent = notif
 
-        local nStroke = Instance.new("UIStroke")
-        nStroke.Color = Color3.fromRGB(168, 85, 247)
-        nStroke.Thickness = 1
-        nStroke.Transparency = 1
-        nStroke.Parent = notif
+            local nStroke = Instance.new("UIStroke")
+            nStroke.Color = Color3.fromRGB(168, 85, 247)
+            nStroke.Thickness = 1
+            nStroke.Transparency = 1
+            nStroke.Parent = notif
 
-        local tLabel = Instance.new("TextLabel")
-        tLabel.Size = UDim2.new(1, -16, 0, 18)
-        tLabel.Position = UDim2.new(0, 12, 0, 8)
-        tLabel.BackgroundTransparency = 1
-        tLabel.Text = nTitle
-        tLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
-        tLabel.TextSize = 12
-        tLabel.Font = Enum.Font.GothamBold
-        tLabel.TextXAlignment = Enum.TextXAlignment.Left
-        tLabel.TextTransparency = 1
-        tLabel.Parent = notif
+            local tLabel = Instance.new("TextLabel")
+            tLabel.Size = UDim2.new(1, -16, 0, 18)
+            tLabel.Position = UDim2.new(0, 12, 0, 8)
+            tLabel.BackgroundTransparency = 1
+            tLabel.Text = nTitle
+            tLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
+            tLabel.TextSize = 12
+            tLabel.Font = Enum.Font.GothamBold
+            tLabel.TextXAlignment = Enum.TextXAlignment.Left
+            tLabel.TextTransparency = 1
+            tLabel.Parent = notif
 
-        local cLabel = Instance.new("TextLabel")
-        cLabel.Size = UDim2.new(1, -16, 0, 20)
-        cLabel.Position = UDim2.new(0, 12, 0, 26)
-        cLabel.BackgroundTransparency = 1
-        cLabel.Text = nContent
-        cLabel.TextColor3 = Color3.fromRGB(225, 220, 235)
-        cLabel.TextSize = 11
-        cLabel.Font = Enum.Font.Gotham
-        cLabel.TextXAlignment = Enum.TextXAlignment.Left
-        cLabel.TextTransparency = 1
-        cLabel.Parent = notif
+            local cLabel = Instance.new("TextLabel")
+            cLabel.Size = UDim2.new(1, -16, 0, 20)
+            cLabel.Position = UDim2.new(0, 12, 0, 26)
+            cLabel.BackgroundTransparency = 1
+            cLabel.Text = nContent
+            cLabel.TextColor3 = Color3.fromRGB(225, 220, 235)
+            cLabel.TextSize = 11
+            cLabel.Font = Enum.Font.Gotham
+            cLabel.TextXAlignment = Enum.TextXAlignment.Left
+            cLabel.TextTransparency = 1
+            cLabel.Parent = notif
 
-        -- Fade in
-        tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 0})
-        tween(nStroke, TweenInfo.new(0.2), {Transparency = 0.4})
-        tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 0})
-        tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 0})
+            -- Fade in
+            tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 0})
+            tween(nStroke, TweenInfo.new(0.2), {Transparency = 0.4})
+            tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 0})
+            tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 0})
 
-        task.delay(nDuration, function()
-            if notif and notif.Parent then
-                tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 1})
-                tween(nStroke, TweenInfo.new(0.2), {Transparency = 1})
-                tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 1})
-                tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 1})
-                task.wait(0.25)
-                pcall(function() notif:Destroy() end)
-            end
+            task.delay(nDuration, function()
+                if notif and notif.Parent then
+                    tween(notif, TweenInfo.new(0.2), {BackgroundTransparency = 1})
+                    tween(nStroke, TweenInfo.new(0.2), {Transparency = 1})
+                    tween(tLabel, TweenInfo.new(0.2), {TextTransparency = 1})
+                    tween(cLabel, TweenInfo.new(0.2), {TextTransparency = 1})
+                    task.wait(0.25)
+                    pcall(function() notif:Destroy() end)
+                end
+            end)
         end)
     end
 
