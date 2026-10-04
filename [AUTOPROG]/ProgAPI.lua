@@ -1088,6 +1088,36 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
     return count
 end
 
+function ProgAPI.GetBreakableZonePosition(islandName: string): Vector3?
+    local bz = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("_BreakableZones")
+    local zonePart = bz and (bz:FindFirstChild(islandName .. "/1") or bz:FindFirstChild(islandName))
+    if zonePart then
+        return zonePart:GetPivot().Position
+    end
+
+    local fallbacks = {
+        Volcano = Vector3.new(-228.66, 9667.0, 327.77),
+        Heaven = Vector3.new(-153.86, 12668.5, 360.0),
+        Matrix = Vector3.new(-120.0, 5000.0, 200.0),
+    }
+    return fallbacks[islandName]
+end
+
+function ProgAPI.TeleportToBreakableZone(islandName: string): boolean
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local pos = ProgAPI.GetBreakableZonePosition(islandName)
+    if pos then
+        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3.5, 0))
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        return true
+    end
+    return false
+end
+
 -- Teleports character directly to breakable & executes simultaneous Player Click + Pet Strikes
 -- Targets standard coins & tech breakables (skipping high-HP boss chests)
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
@@ -1100,8 +1130,16 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
     local stats = Stats.Local(true) or {}
     if stats.CurrentIsland ~= targetIsland then
         ProgAPI.TeleportToIsland(targetIsland)
-        task.wait(0.4)
-        return true, "Teleported to " .. targetIsland
+        task.wait(0.3)
+        ProgAPI.TeleportToBreakableZone(targetIsland)
+        task.wait(0.2)
+    end
+
+    -- Enforce that player is actually in the breakable area (if > 80 studs away, teleport directly in)
+    local zonePos = ProgAPI.GetBreakableZonePosition(targetIsland)
+    if zonePos and (hrp.Position - zonePos).Magnitude > 80 then
+        ProgAPI.TeleportToBreakableZone(targetIsland)
+        task.wait(0.15)
     end
 
     -- Enter zone frontend
@@ -1138,7 +1176,9 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
     end
 
     if not targetModel then
-        return false, "No active breakables in zone"
+        -- Even if no models are active yet, make sure character is waiting in the breakable area
+        ProgAPI.TeleportToBreakableZone(targetIsland)
+        return false, "Waiting for breakables in " .. targetIsland
     end
 
     local uid = targetModel:GetAttribute("BreakableUID")
@@ -1228,22 +1268,24 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
             task.wait(0.5)
         end
 
-        -- Ensure player is on activeCoinsIsland
+        -- Ensure player is on activeCoinsIsland and in breakable zone
         if curIsland ~= activeCoinsIsland then
             ProgAPI.TeleportToIsland(activeCoinsIsland)
             lastBreakablesSwitchTick = now
-            task.wait(0.4)
-            return "Teleported to " .. activeCoinsIsland, activeCoinsIsland
+            task.wait(0.3)
+            ProgAPI.TeleportToBreakableZone(activeCoinsIsland)
+            task.wait(0.2)
         end
 
         local activeOnCur = ProgAPI.GetActiveBreakablesCount(activeCoinsIsland, "1")
-        -- Only switch if we've been here at least 8 seconds AND there are 0 breakables, OR 30 seconds have passed
-        if (now - lastBreakablesSwitchTick > 8 and activeOnCur == 0) or (now - lastBreakablesSwitchTick > 30) then
+        -- Only switch if we've been here at least 10 seconds AND there are 0 breakables, OR 45 seconds have passed
+        if (now - lastBreakablesSwitchTick > 10 and activeOnCur == 0) or (now - lastBreakablesSwitchTick > 45) then
             lastBreakablesSwitchTick = now
             activeCoinsIsland = (activeCoinsIsland == "Volcano") and "Heaven" or "Volcano"
             ProgAPI.TeleportToIsland(activeCoinsIsland)
-            task.wait(0.4)
-            return "Switched Coins Zone to " .. activeCoinsIsland, activeCoinsIsland
+            task.wait(0.3)
+            ProgAPI.TeleportToBreakableZone(activeCoinsIsland)
+            task.wait(0.2)
         end
 
         local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, true)
@@ -1264,8 +1306,9 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         local curIsland = stats.CurrentIsland or ""
         if curIsland ~= techTarget then
             ProgAPI.TeleportToIsland(techTarget)
-            task.wait(0.4)
-            return "Teleported to " .. techTarget, techTarget
+            task.wait(0.3)
+            ProgAPI.TeleportToBreakableZone(techTarget)
+            task.wait(0.2)
         end
 
         local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, true)
