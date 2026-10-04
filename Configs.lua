@@ -35,6 +35,7 @@ Configs.Default = {
     AttackBigChests = true,
     BlackScreen = false,
     RemoveMaps = false,
+    OptimizeGameSettings = true,
     WalkSpeed = 16,
     JumpPower = 50,
 }
