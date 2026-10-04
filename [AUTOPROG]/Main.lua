@@ -151,6 +151,7 @@ local State = Configs.Load()
 --==============================================================================
 local Window = UILibrary:CreateWindow({
     Title = "CLICKER SIMULATOR — AUTO PROGRESSION",
+    SubTitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
     Subtitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
     Size = UDim2.fromOffset(660, 500),
     AccentColor = Color3.fromRGB(0, 170, 255),
@@ -175,9 +176,17 @@ DashTab:AddToggle("MasterEnabledToggle", {
 })
 
 DashTab:AddSection("LIVE TELEMETRY")
+local CurrentlyDoingCard = DashTab:AddParagraph({
+    Title = "Currently Doing:",
+    Content = "Evaluating Activity...",
+    Height = 52
+})
+_G.ClickerSimulatorCurrentlyDoingCard = CurrentlyDoingCard
+
 local LiveStatusCard = DashTab:AddParagraph({
     Title = "Progression Telemetry",
-    Content = "Initializing..."
+    Content = "Initializing...",
+    Height = 160
 })
 _G.ClickerSimulatorAutoProgCard = LiveStatusCard
 
@@ -699,6 +708,9 @@ table.insert(threads, task.spawn(function()
                 local action, targetIsl = AutoProgAPI.StepBreakablesPipeline()
                 if action then
                     currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Heaven"))
+                else
+                    local zone = (stProg and not stProg.CoinsComplete) and "Heaven" or "Matrix"
+                    currentActivity = string.format("[Skill Tree] Farming Breakables in %s", zone)
                 end
             end
         end
@@ -746,6 +758,10 @@ table.insert(threads, task.spawn(function()
                     if pData.CurrentIsland ~= furthest then
                         AutoProgAPI.TeleportToIsland(furthest)
                     end
+                end
+
+                if not shouldHatch and lockedIsland and pData.Clicks < lockedIsland.cost then
+                    currentActivity = string.format("[Phase 1] Speedrunning Clicks for %s (%s / %s)", lockedIsland.name, AutoProgAPI.FormatNumber(pData.Clicks), AutoProgAPI.FormatNumber(lockedIsland.cost))
                 end
 
                 -- 2. Auto buy island as soon as clicks requirement is met
@@ -845,6 +861,9 @@ table.insert(threads, task.spawn(function()
                         AutoProgAPI.TeleportToIsland(furthest)
                     end
                 end
+                if isSkillTreeMaxed and isAllRainbow then
+                    currentActivity = string.format("[Phase 2] Farming Clicks at %s (Preparing for Prestige)", AutoProgAPI.GetFurthestUnlockedIsland())
+                end
 
                 -- 4. 10 Qi Rebirth Goal & Magma Click Skin
                 if State.AutoMagmaSkin and (now - lastSkinTick > 3) then
@@ -889,10 +908,28 @@ local function updateTelemetry()
         local magmaPct = math.clamp(math.floor((pData.Rebirths / 1e19) * 100), 0, 100)
         local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, ProgAPI.FormatNumber(pData.Rebirths))
 
-        local cardTitle = "CURRENT: " .. tostring(currentActivity or "Auto Progression Active")
+        -- 1. Dedicated Currently Doing Display Card
+        if CurrentlyDoingCard then
+            local doingTitle = "Currently Doing:"
+            local doingContent = string.format("⚡ **Activity**: %s\n🎯 **Phase**: %s",
+                tostring(currentActivity or "Auto Progression Active"),
+                tostring(currentPhaseText or "Evaluating...")
+            )
+            CurrentlyDoingCard:Set({
+                Title = doingTitle,
+                Content = doingContent
+            })
+            if CurrentlyDoingCard.TitleLabel then
+                pcall(function() CurrentlyDoingCard.TitleLabel.Text = doingTitle end)
+            end
+            if CurrentlyDoingCard.BodyLabel then
+                pcall(function() CurrentlyDoingCard.BodyLabel.Text = doingContent end)
+            end
+        end
+
+        -- 2. Statistical Progression Telemetry Card
+        local cardTitle = "Progression Telemetry"
         local cardContent = string.format(
-            "📊 **Activity**: %s\n" ..
-            "🎯 **Phase**: %s\n" ..
             "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
             "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
             "🚀 **Prestige**: %s\n" ..
@@ -900,8 +937,6 @@ local function updateTelemetry()
             "🐾 **Pet Team**: %s\n" ..
             "🌳 **Skill Tree**: %s\n" ..
             "🔥 **Magma Skin**: %s",
-            tostring(currentActivity or "Auto Progression Active"),
-            tostring(currentPhaseText or "Phase 2"),
             ProgAPI.FormatNumber(pData.Clicks or 0),
             ProgAPI.FormatNumber(pData.Rebirths or 0),
             ProgAPI.FormatNumber(pData.Gems or 0),
@@ -929,9 +964,18 @@ local function updateTelemetry()
     end)
     if not ok then
         pcall(function()
+            if CurrentlyDoingCard then
+                local fallbackDoing = string.format("⚡ **Activity**: %s\n🎯 **Phase**: %s", tostring(currentActivity or "Active"), tostring(currentPhaseText or "Phase 2"))
+                CurrentlyDoingCard:Set({
+                    Title = "Currently Doing:",
+                    Content = fallbackDoing
+                })
+                if CurrentlyDoingCard.TitleLabel then pcall(function() CurrentlyDoingCard.TitleLabel.Text = "Currently Doing:" end) end
+                if CurrentlyDoingCard.BodyLabel then pcall(function() CurrentlyDoingCard.BodyLabel.Text = fallbackDoing end) end
+            end
             if LiveStatusCard then
-                local fallbackTitle = "CURRENT: " .. tostring(currentActivity or "Running")
-                local fallbackBody = string.format("📊 **Activity**: %s\n🎯 **Phase**: %s\n⚡ Running Auto Progression...", tostring(currentActivity or "Active"), tostring(currentPhaseText or "Phase 2"))
+                local fallbackTitle = "Progression Telemetry"
+                local fallbackBody = string.format("⚡ Running Auto Progression...\n📊 Status: %s", tostring(currentActivity or "Active"))
                 LiveStatusCard:Set({
                     Title = fallbackTitle,
                     Content = fallbackBody
@@ -943,23 +987,32 @@ local function updateTelemetry()
     end
 end
 
+-- Immediate initial telemetry update
+pcall(updateTelemetry)
+
 -- Refresh telemetry immediately on startup
 task.spawn(function()
     task.wait(0.2)
-    updateTelemetry()
+    pcall(updateTelemetry)
 end)
 
--- THREAD 5: TELEMETRY DISPLAY REFRESH LOOP
+-- THREAD 15: TELEMETRY DISPLAY REFRESH LOOP
 table.insert(threads, task.spawn(function()
+    pcall(updateTelemetry)
     while isRunning do
         task.wait(0.5)
         if not isRunning then break end
-        updateTelemetry()
+        local ok, err = pcall(updateTelemetry)
+        if not ok then
+            warn("[AutoProg] updateTelemetry error:", err)
+        end
     end
 end))
 
-Window:Notify({
-    Title = "Auto Progression Loaded!",
-    Content = "Autonomous Zero-to-Hero Speedrun Engine [AUTOPROG] is active!",
-    Duration = 4
-})
+pcall(function()
+    Window:Notify({
+        Title = "Auto Progression Loaded!",
+        Content = "Autonomous Zero-to-Hero Speedrun Engine [AUTOPROG] is active!",
+        Duration = 4
+    })
+end)
