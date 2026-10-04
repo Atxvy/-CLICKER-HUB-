@@ -2548,8 +2548,12 @@ end
 -- PERFORMANCE & MISC OPTIMIZATIONS (Black Screen 3D Render & Remove Maps)
 --==============================================================================
 local blackScreenGui = nil
+local savedGuiStates = {}
+local blackScreenInputConn = nil
 local originalTransparencies = {}
 local isMapsRemoved = false
+
+ProgAPI.OnBlackScreenToggled = nil
 
 function ProgAPI.SetBlackScreen(enabled: boolean)
     pcall(function()
@@ -2559,82 +2563,188 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
     end)
 
+    local targetParent = nil
+    pcall(function()
+        if typeof(gethui) == "function" then
+            targetParent = gethui()
+        end
+    end)
+    if not targetParent then
+        pcall(function()
+            targetParent = game:GetService("CoreGui")
+        end)
+    end
+    if not targetParent then
+        local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+        targetParent = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    end
+
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+
     if enabled then
-        if not blackScreenGui then
-            local lp = LocalPlayer or game:GetService("Players").LocalPlayer
-            local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
-            if not pg then return end
+        -- Hide all ScreenGuis in PlayerGui to eliminate 2D UI draw calls and lingering labels
+        if pg then
+            for _, ch in ipairs(pg:GetChildren()) do
+                if ch:IsA("ScreenGui") and ch ~= blackScreenGui then
+                    if savedGuiStates[ch] == nil then
+                        savedGuiStates[ch] = ch.Enabled
+                    end
+                    ch.Enabled = false
+                end
+            end
+        end
+
+        if not blackScreenGui or not blackScreenGui.Parent then
+            if not targetParent then return end
+
+            pcall(function()
+                for _, ch in ipairs(targetParent:GetChildren()) do
+                    if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                        ch:Destroy()
+                    end
+                end
+                if pg then
+                    for _, ch in ipairs(pg:GetChildren()) do
+                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                            ch:Destroy()
+                        end
+                    end
+                end
+            end)
 
             blackScreenGui = Instance.new("ScreenGui")
             blackScreenGui.Name = "ClickerHub_BlackScreen"
             blackScreenGui.ResetOnSpawn = false
-            blackScreenGui.DisplayOrder = 999998
+            blackScreenGui.DisplayOrder = 2147483647
+            blackScreenGui.IgnoreGuiInset = true
             blackScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
             local bg = Instance.new("Frame")
             bg.Name = "BlackBackground"
             bg.Size = UDim2.new(1, 0, 1, 0)
             bg.Position = UDim2.new(0, 0, 0, 0)
-            bg.BackgroundColor3 = Color3.fromRGB(6, 4, 10)
+            bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            bg.BackgroundTransparency = 0
             bg.BorderSizePixel = 0
+            bg.Active = true
             bg.Parent = blackScreenGui
 
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(0, 500, 0, 190)
+            card.Size = UDim2.new(0, 520, 0, 220)
             card.AnchorPoint = Vector2.new(0.5, 0.5)
             card.Position = UDim2.new(0.5, 0, 0.5, 0)
-            card.BackgroundColor3 = Color3.fromRGB(18, 14, 26)
+            card.BackgroundColor3 = Color3.fromRGB(15, 12, 22)
             card.BorderSizePixel = 0
             card.Parent = bg
 
             local cardCorner = Instance.new("UICorner")
-            cardCorner.CornerRadius = UDim.new(0, 12)
+            cardCorner.CornerRadius = UDim.new(0, 16)
             cardCorner.Parent = card
 
             local cardStroke = Instance.new("UIStroke")
             cardStroke.Color = Color3.fromRGB(168, 85, 247)
             cardStroke.Thickness = 2
+            cardStroke.Transparency = 0.2
             cardStroke.Parent = card
 
             local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, 0, 0, 48)
-            title.Position = UDim2.new(0, 0, 0, 24)
+            title.Size = UDim2.new(1, 0, 0, 50)
+            title.Position = UDim2.new(0, 0, 0, 22)
             title.BackgroundTransparency = 1
             title.Text = "Premium Script !"
             title.TextColor3 = Color3.fromRGB(255, 255, 255)
-            title.TextSize = 34
+            title.TextSize = 36
             title.Font = Enum.Font.GothamBold
             title.Parent = card
 
             local sub = Instance.new("TextLabel")
-            sub.Size = UDim2.new(1, -40, 0, 56)
-            sub.Position = UDim2.new(0, 20, 0, 80)
+            sub.Size = UDim2.new(1, -40, 0, 48)
+            sub.Position = UDim2.new(0, 20, 0, 76)
             sub.BackgroundTransparency = 1
             sub.Text = "⚡ <b>3D Rendering Disabled • CPU & GPU Saver Active</b> ⚡\nMemory and processor load minimized for 24/7 background AFK farming."
             sub.RichText = true
             sub.TextColor3 = Color3.fromRGB(192, 132, 252)
-            sub.TextSize = 15
+            sub.TextSize = 14
             sub.Font = Enum.Font.GothamMedium
             sub.TextWrapped = true
             sub.Parent = card
 
+            local restoreBtn = Instance.new("TextButton")
+            restoreBtn.Name = "RestoreBtn"
+            restoreBtn.Size = UDim2.new(0, 260, 0, 42)
+            restoreBtn.AnchorPoint = Vector2.new(0.5, 0)
+            restoreBtn.Position = UDim2.new(0.5, 0, 0, 136)
+            restoreBtn.BackgroundColor3 = Color3.fromRGB(126, 58, 242)
+            restoreBtn.BorderSizePixel = 0
+            restoreBtn.Text = "↺  Restore UI / Resume 3D"
+            restoreBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            restoreBtn.TextSize = 15
+            restoreBtn.Font = Enum.Font.GothamBold
+            restoreBtn.AutoButtonColor = true
+            restoreBtn.Parent = card
+
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 8)
+            btnCorner.Parent = restoreBtn
+
+            restoreBtn.MouseButton1Click:Connect(function()
+                ProgAPI.SetBlackScreen(false)
+            end)
+
             local hint = Instance.new("TextLabel")
-            hint.Size = UDim2.new(1, 0, 0, 24)
-            hint.Position = UDim2.new(0, 0, 0, 146)
+            hint.Size = UDim2.new(1, 0, 0, 20)
+            hint.Position = UDim2.new(0, 0, 0, 186)
             hint.BackgroundTransparency = 1
-            hint.Text = "Clicker Hub UI remains fully active above"
+            hint.Text = "Click button above or press RightControl to restore"
             hint.TextColor3 = Color3.fromRGB(140, 130, 160)
             hint.TextSize = 12
             hint.Font = Enum.Font.Gotham
             hint.Parent = card
 
-            blackScreenGui.Parent = pg
+            blackScreenGui.Parent = targetParent
         end
+
         blackScreenGui.Enabled = true
+
+        if not blackScreenInputConn then
+            local UserInputService = game:GetService("UserInputService")
+            blackScreenInputConn = UserInputService.InputBegan:Connect(function(input, gpe)
+                if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.RightShift then
+                    ProgAPI.SetBlackScreen(false)
+                end
+            end)
+        end
     else
+        if blackScreenInputConn then
+            blackScreenInputConn:Disconnect()
+            blackScreenInputConn = nil
+        end
+
         if blackScreenGui then
             blackScreenGui.Enabled = false
         end
+
+        -- Restore all previously hidden ScreenGuis
+        if pg then
+            for ch, wasEnabled in pairs(savedGuiStates) do
+                pcall(function()
+                    if ch and ch.Parent then
+                        ch.Enabled = wasEnabled
+                    end
+                end)
+            end
+            savedGuiStates = {}
+
+            local hubUI = pg:FindFirstChild("ClickerHub_UI")
+            if hubUI then
+                hubUI.Enabled = true
+            end
+        end
+    end
+
+    if ProgAPI.OnBlackScreenToggled then
+        pcall(ProgAPI.OnBlackScreenToggled, enabled)
     end
 end
 
