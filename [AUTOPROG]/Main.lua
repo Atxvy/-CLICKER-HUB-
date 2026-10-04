@@ -791,16 +791,36 @@ table.insert(threads, task.spawn(function()
         local stProg = AutoProgAPI.GetSkillTreeProgress()
         local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
 
-        -- Runs in Phase 2 until Skill Tree is fully maxed! (Farms Dominus Area exclusively for coins)
+        -- Runs in Phase 2 until Skill Tree is fully maxed! (Farms Dominus Area for Coins -> Tech World for Tech Coins)
         if allIslands and (not isSkillTreeMaxed) and State.AutoSkillTree then
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
+
+                -- If Coins skill tree is done, make sure we are in Tech World!
+                if stProg.CoinsComplete and not stProg.TechComplete then
+                    local pData = AutoProgAPI.GetPlayerData()
+                    local curWorld = pData.CurrentWorld or "Overworld"
+                    local MF = AutoProgAPI.GetMinigamesFrontend and AutoProgAPI.GetMinigamesFrontend()
+                    if (MF and MF.Active and MF.Active() == "DominusArea") or (curWorld ~= "Techworld" and curWorld ~= "Space") then
+                        AutoProgAPI.TeleportToWorld("Techworld")
+                        task.wait(0.4)
+                    end
+                end
+
                 local action, targetIsl = AutoProgAPI.StepBreakablesPipeline(false)
-                if action then
-                    currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "DominusArea"))
+                if stProg.CoinsComplete then
+                    if action then
+                        currentActivity = string.format("[Tech Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "Matrix"))
+                    else
+                        currentActivity = string.format("[Tech Skill Tree] Farming Breakables in %s", tostring(targetIsl or "Matrix"))
+                    end
                 else
-                    currentActivity = "[Skill Tree] Farming Breakables in Dominus Area"
+                    if action then
+                        currentActivity = string.format("[Skill Tree] %s in %s", tostring(action), tostring(targetIsl or "DominusArea"))
+                    else
+                        currentActivity = "[Skill Tree] Farming Breakables in Dominus Area"
+                    end
                 end
             end
         end
@@ -839,7 +859,8 @@ table.insert(threads, task.spawn(function()
 
                 local bestEgg = AutoProgAPI.GetBestAffordableEgg()
                 local canAffordBestEgg = (bestEgg ~= nil) and (pData.Clicks >= bestEgg.cost)
-                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and (not isAllGold) and canAffordBestEgg
+                local isSafeEgg = bestEgg and (bestEgg.name ~= "BasicEgg" or pData.CurrentIsland == "Spawn")
+                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and (not isAllGold) and canAffordBestEgg and isSafeEgg
 
                 -- 1. Auto Teleport to furthest unlocked island (For best click multiplier when not hatching!)
                 if not shouldHatch and (now - lastTeleportTick > 3) then
@@ -879,13 +900,13 @@ table.insert(threads, task.spawn(function()
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
                     -- If team is not yet all gold, hatch best affordable egg!
-                    if not isAllGold and canAffordBestEgg then
+                    if not isAllGold and canAffordBestEgg and isSafeEgg then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
                         AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
                         pcall(AutoProgAPI.CraftGoldenPets)
                         pcall(AutoProgAPI.EquipBest)
-                    elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg then
+                    elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg and isSafeEgg then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s", hatchAmount, bestEgg.name, bestEgg.island)
                         AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
@@ -913,8 +934,18 @@ table.insert(threads, task.spawn(function()
                 -- 3. Auto Rainbow Team Building: Initiates WHEN Skill Tree is MAXED!
                 if isSkillTreeMaxed and not isAllRainbow and (now - lastEggHatchTick > 0.35) then
                     lastEggHatchTick = now
-                    local latestEgg = AutoProgAPI.GetBestAffordableEgg()
-                    if latestEgg and pData.Clicks >= latestEgg.cost then
+                    local latestEgg = (AutoProgAPI.GetEndgameEgg and AutoProgAPI.GetEndgameEgg()) or AutoProgAPI.GetBestAffordableEgg()
+                    if latestEgg and latestEgg.name ~= "BasicEgg" and pData.Clicks >= latestEgg.cost then
+                        local eggModel, targetPart = AutoProgAPI.FindEggModel(latestEgg.name)
+                        local char = game:GetService("Players").LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 999
+                        if dist > 18 then
+                            currentActivity = string.format("[Phase 2: Rainbow] Teleporting to %s on %s...", latestEgg.name, latestEgg.island)
+                            AutoProgAPI.TeleportToEgg(latestEgg.name)
+                            task.wait(0.3)
+                        end
+
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(latestEgg.name)
                         currentActivity = string.format("[Phase 2: Rainbow] Hatching %dx %s -> Golden -> Rainbow Pipeline", hatchAmount, latestEgg.name)
                         AutoProgAPI.OpenEgg(latestEgg.name, hatchAmount)
@@ -923,12 +954,13 @@ table.insert(threads, task.spawn(function()
                         pcall(AutoProgAPI.ClaimRainbowPets)
                         pcall(AutoProgAPI.EquipBest)
                     else
-                        -- Accumulate clicks on furthest island if egg is unaffordable
+                        -- Accumulate clicks on furthest island if endgame egg is unaffordable
                         local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
                         if pData.CurrentIsland ~= furthest and (now - lastTeleportTick > 3) then
                             lastTeleportTick = now
                             AutoProgAPI.TeleportToIsland(furthest)
                         end
+                        currentActivity = string.format("[Phase 2: Rainbow] Farming Clicks at %s for Endgame Eggs...", furthest)
                     end
                 end
 
@@ -953,8 +985,8 @@ table.insert(threads, task.spawn(function()
                     end
                 end
 
-                -- 5. Auto ??? Secret Quest (Step 5)
-                if State.AutoSecretQuest and (now - lastQuestTick > 1.5) then
+                -- 5. Auto ??? Secret Quest (Step 5: Only runs when Skill Tree is maxed!)
+                if State.AutoSecretQuest and isSkillTreeMaxed and (now - lastQuestTick > 1.5) then
                     lastQuestTick = now
                     local qProg = AutoProgAPI.GetSecretQuestProgress()
                     if not qProg.DoorUnlocked then
