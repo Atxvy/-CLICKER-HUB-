@@ -483,20 +483,24 @@ task.spawn(function()
     pcall(AutoProgAPI.EquipBest)
 end)
 
--- Rejoin & Startup Teleport Guarantee: If in Phase 2, ALL islands unlocked, and ENTIRE team is Rainbow, teleport to Heaven breakables arena!
+-- Rejoin & Startup Teleport Guarantee: If in Phase 2 and Skill Tree is not maxed, teleport to active breakables arena!
 task.spawn(function()
     task.wait(1.8)
     pcall(function()
         local pData = AutoProgAPI.GetPlayerData()
         local lockedIsland = AutoProgAPI.GetNextLockedIsland()
-        local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
-        if lockedIsland == nil and isAllRainbow and State.AutoSkillTree then
+        if lockedIsland == nil and State.AutoSkillTree then
             local stProg = AutoProgAPI.GetSkillTreeProgress()
             if not stProg.CoinsComplete then
                 AutoProgAPI.TeleportToWorld("Overworld")
                 AutoProgAPI.TeleportToIsland("Heaven")
                 task.wait(0.4)
                 AutoProgAPI.TeleportToBreakableZone("Heaven")
+            elseif not stProg.TechComplete then
+                AutoProgAPI.TeleportToWorld("Techworld")
+                AutoProgAPI.TeleportToIsland("Matrix")
+                task.wait(0.4)
+                AutoProgAPI.TeleportToBreakableZone("Matrix")
             end
         end
     end)
@@ -676,18 +680,19 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 13: DEDICATED BREAKABLES & SKILL TREE ENGINE (Active ONLY in Phase 2 when all islands owned and team is ready!)
+-- THREAD 13: DEDICATED BREAKABLES & SKILL TREE ENGINE (Active in Phase 2 until Skill Tree is MAXED!)
 table.insert(threads, task.spawn(function()
     local lastBreakableTick = 0
     while isRunning do
         task.wait(0.04)
         if not State.MasterEnabled or not isRunning then continue end
 
-        -- STRICT REQUIREMENT: Auto Skill Tree only runs if ALL islands are unlocked AND ENTIRE team is 100% RAINBOW!
         local allIslands = AutoProgAPI.AreAllIslandsUnlocked()
-        local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
+        local stProg = AutoProgAPI.GetSkillTreeProgress()
+        local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
 
-        if allIslands and isAllRainbow and State.AutoSkillTree then
+        -- Runs in Phase 2 until Skill Tree is fully maxed!
+        if allIslands and (not isSkillTreeMaxed) and State.AutoSkillTree then
             local now = tick()
             if now - lastBreakableTick >= 0.05 then
                 lastBreakableTick = now
@@ -787,22 +792,36 @@ table.insert(threads, task.spawn(function()
             -- PHASE 2 (ENDGAME ROADMAP)
             -- Condition: ALL 17 islands are owned and unlocked!
             -- Progression Order:
-            -- 1. Prestige if possible
-            -- 2. Auto Rainbow pets (hatch latest world egg -> gold -> rainbow -> claim)
-            -- 3. Check team: once all rainbow -> start Skill Tree (Coins first, then Tech)
-            -- 4. ??? Quest
-            -- 5. 10Qi Quest / Magma Click Skin
+            -- 1. Accept ??? Quest EARLY at start of Phase 2
+            -- 2. Max Skill Tree (Coins first via Heaven/Volcano, then Tech via Matrix)
+            -- 3. Auto Rainbow pets (Hatch best egg -> Gold -> Rainbow -> Claim) once Skill Tree is maxed
+            -- 4. Prestige if possible (Resets islands & restarts Phase 1 with huge multiplier)
             -- =====================================================================
             else
                 currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
 
-                -- 1. Auto Rainbow Team Building: If not all rainbow, hatch best affordable egg & craft
-                if not isAllRainbow and (now - lastEggHatchTick > 0.35) then
+                local stProg = AutoProgAPI.GetSkillTreeProgress()
+                local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
+
+                -- 1. Accept / Advance ??? Secret Quest EARLY when Phase 2 starts!
+                if State.AutoSecretQuest and (now - lastQuestTick > 1.5) then
+                    lastQuestTick = now
+                    local qProg = AutoProgAPI.GetSecretQuestProgress()
+                    if not qProg.DoorUnlocked then
+                        local okQ, qMsg = AutoProgAPI.StepSecretQuest()
+                        if okQ and qMsg and not qMsg:find("Already") then
+                            currentActivity = "[??? Quest] " .. tostring(qMsg)
+                        end
+                    end
+                end
+
+                -- 2. Auto Rainbow Team Building: Initiates WHEN Skill Tree is MAXED!
+                if isSkillTreeMaxed and not isAllRainbow and (now - lastEggHatchTick > 0.35) then
                     lastEggHatchTick = now
                     local latestEgg = AutoProgAPI.GetBestAffordableEgg()
                     if latestEgg and pData.Clicks >= latestEgg.cost then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(latestEgg.name)
-                        currentActivity = string.format("[Phase 2] Hatching %dx %s -> Golden -> Rainbow Pipeline", hatchAmount, latestEgg.name)
+                        currentActivity = string.format("[Phase 2: Rainbow] Hatching %dx %s -> Golden -> Rainbow Pipeline", hatchAmount, latestEgg.name)
                         AutoProgAPI.OpenEgg(latestEgg.name, hatchAmount)
                         pcall(AutoProgAPI.CraftGoldenPets)
                         pcall(AutoProgAPI.CraftRainbowPets)
@@ -818,33 +837,21 @@ table.insert(threads, task.spawn(function()
                     end
                 end
 
-                -- 2. Furthest Map Teleport Check: when skill tree is fully complete or disabled, stay at furthest island for click farming
-                if (now - lastFurthestTpTick > 30) then
+                -- 3. Furthest Map Teleport Check: when skill tree is fully complete AND team is all rainbow, stay at furthest island for click farming
+                if isSkillTreeMaxed and isAllRainbow and (now - lastFurthestTpTick > 30) then
                     lastFurthestTpTick = now
-                    local stProg = AutoProgAPI.GetSkillTreeProgress()
-                    if (not State.AutoSkillTree) or (stProg.CoinsComplete and stProg.TechComplete) then
-                        local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
-                        if pData.CurrentIsland ~= furthest then
-                            AutoProgAPI.TeleportToIsland(furthest)
-                        end
+                    local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
+                    if pData.CurrentIsland ~= furthest then
+                        AutoProgAPI.TeleportToIsland(furthest)
                     end
                 end
 
-                -- 3. 10 Qi Rebirth Goal & Magma Click Skin
+                -- 4. 10 Qi Rebirth Goal & Magma Click Skin
                 if State.AutoMagmaSkin and (now - lastSkinTick > 3) then
                     lastSkinTick = now
                     local okSkin, skinMsg = AutoProgAPI.CheckAndEquipMagmaSkin()
                     if okSkin and skinMsg and not skinMsg:find("Active") then
                         currentActivity = "[Magma Skin] " .. tostring(skinMsg)
-                    end
-                end
-
-                -- 4. Auto ??? Secret Quest (Runs once entire team is 100% Rainbow)
-                if isAllRainbow and State.AutoSecretQuest and (now - lastQuestTick > 0.5) then
-                    lastQuestTick = now
-                    local okQ, qMsg = AutoProgAPI.StepSecretQuest()
-                    if okQ and qMsg and not qMsg:find("Already") then
-                        currentActivity = "[??? Quest] " .. tostring(qMsg)
                     end
                 end
             end
