@@ -987,61 +987,72 @@ function ProgAPI.GetSkillTreeProgress()
 end
 
 -- Purchases affordable perks using verified RPC: Channels.SkillTree:InvokeServer("Purchase", id, "Default")
+-- Chained multi-tier loop continuously buys newly unlocked perks as long as currency is available
 function ProgAPI.BuyAffordableSkillTree(preferCoins: boolean?): number
     if not Directory.SkillTree or not Channels.SkillTree then return 0 end
-    local stats = Stats.Local(true) or {}
-    local userSkills = stats.SkillTree or {}
-    local pData = ProgAPI.GetPlayerData()
-
-    local coins = pData.Coins
-    local spaceCoins = pData.SpaceCoins
-    local boughtCount = 0
-
     local skillTreeDefault = Directory.SkillTree.Default
     if not skillTreeDefault then return 0 end
 
-    local candidates = {}
-    for nodeName, nodeData in pairs(skillTreeDefault) do
-        if type(nodeData) == "table" and nodeData.Upgrades then
-            for upgId, upgData in pairs(nodeData.Upgrades) do
-                if not userSkills[upgId] then
-                    local req = upgData.Requires or {}
-                    local parentBought = (req.Upgrade == nil or userSkills[req.Upgrade] == true)
-                    local curr = upgData.Price and upgData.Price.Id
-                    local cost = upgData.Price and upgData.Price.Amount or 0
+    local totalBought = 0
+    local pData = ProgAPI.GetPlayerData()
+    local coins = pData.Coins
+    local spaceCoins = pData.SpaceCoins
 
-                    if parentBought and curr and cost > 0 then
-                        if curr == "Coins" and coins >= cost then
-                            table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = 1 })
-                        elseif (curr == "SpaceCoins" or curr == "TechCoins") and spaceCoins >= cost then
-                            table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = preferCoins and 2 or 1 })
+    local stats = Stats.Local(true) or {}
+    local userSkills = {}
+    for k, v in pairs(stats.SkillTree or {}) do
+        userSkills[k] = v
+    end
+
+    local keepSearching = true
+    while keepSearching do
+        keepSearching = false
+        local candidates = {}
+
+        for nodeName, nodeData in pairs(skillTreeDefault) do
+            if type(nodeData) == "table" and nodeData.Upgrades then
+                for upgId, upgData in pairs(nodeData.Upgrades) do
+                    if not userSkills[upgId] then
+                        local req = upgData.Requires or {}
+                        local parentBought = (req.Upgrade == nil or userSkills[req.Upgrade] == true)
+                        local curr = upgData.Price and upgData.Price.Id
+                        local cost = upgData.Price and upgData.Price.Amount or 0
+
+                        if parentBought and curr and cost > 0 then
+                            if curr == "Coins" and coins >= cost then
+                                table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = 1 })
+                            elseif (curr == "SpaceCoins" or curr == "TechCoins") and spaceCoins >= cost then
+                                table.insert(candidates, { id = upgId, curr = curr, cost = cost, prio = preferCoins and 2 or 1 })
+                            end
                         end
                     end
                 end
             end
         end
-    end
 
-    table.sort(candidates, function(a, b)
-        if a.prio ~= b.prio then return a.prio < b.prio end
-        return a.cost < b.cost
-    end)
-
-    for _, c in ipairs(candidates) do
-        local ok, res = pcall(function()
-            -- Server RPC is "Purchase", category "Default"
-            return Channels.SkillTree:InvokeServer("Purchase", c.id, "Default")
+        table.sort(candidates, function(a, b)
+            if a.prio ~= b.prio then return a.prio < b.prio end
+            return a.cost < b.cost
         end)
-        if ok and (res == true or type(res) == "table") then
-            boughtCount = boughtCount + 1
-            userSkills[c.id] = true
-            if c.curr == "Coins" then coins = coins - c.cost end
-            if c.curr == "SpaceCoins" or c.curr == "TechCoins" then spaceCoins = spaceCoins - c.cost end
-            task.wait(0.08)
+
+        for _, c in ipairs(candidates) do
+            if (c.curr == "Coins" and coins >= c.cost) or ((c.curr == "SpaceCoins" or c.curr == "TechCoins") and spaceCoins >= c.cost) then
+                local ok, res = pcall(function()
+                    return Channels.SkillTree:InvokeServer("Purchase", c.id, "Default")
+                end)
+                if ok and (res == true or type(res) == "table") then
+                    totalBought = totalBought + 1
+                    userSkills[c.id] = true
+                    if c.curr == "Coins" then coins = coins - c.cost end
+                    if c.curr == "SpaceCoins" or c.curr == "TechCoins" then spaceCoins = spaceCoins - c.cost end
+                    keepSearching = true
+                    task.wait(0.08)
+                end
+            end
         end
     end
 
-    return boughtCount
+    return totalBought
 end
 
 --==============================================================================
@@ -1058,9 +1069,12 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
         local m = child:FindFirstChildWhichIsA("Model") or child
         if m and m:GetAttribute("BreakableUID") then
             local z = tostring(m:GetAttribute("BreakableZone") or "")
+            local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
             local hp = m:GetAttribute("BreakableHP") or 0
-            if hp > 0 and z:find(islandName) then
-                count = count + 1
+            if hp > 0 then
+                if z:find(islandName) or (islandName == "Heaven" and (bName:find("heavengiant") or bName:find("giantchest") or z:find("HugeHeavenChest"))) then
+                    count = count + 1
+                end
             end
         end
     end
@@ -1068,8 +1082,11 @@ function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?)
 end
 
 -- Teleports character directly to breakable & executes simultaneous Player Click + Pet Strikes
+-- Actively targets Heaven Boss Chest (HeavenGiantChest) when on Heaven!
 function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: boolean?): (boolean, string?)
-    if ignoreBossChest == nil then ignoreBossChest = true end
+    if ignoreBossChest == nil then
+        ignoreBossChest = (targetIsland ~= "Heaven" and ignoreBossChest ~= false)
+    end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false, "No character" end
@@ -1094,14 +1111,17 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
     local bestDist = math.huge
 
     if breakablesFolder then
+        -- 1. Scan for closest active breakable in zone (actively including Heaven Boss Chest)
         for _, f in ipairs(breakablesFolder:GetChildren()) do
             local m = f:FindFirstChildWhichIsA("Model") or f
             if m and m:GetAttribute("BreakableUID") then
                 local bZone = tostring(m:GetAttribute("BreakableZone") or "")
                 local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
                 local isBoss = bName:find("giant") or bName:find("boss") or bName:find("huge")
+                local isHeavenBoss = (targetIsland == "Heaven" and (bName:find("heavengiant") or bName:find("giantchest") or bZone:find("HugeHeavenChest")))
+                local allowTarget = (not isBoss) or (not ignoreBossChest) or isHeavenBoss
 
-                if (bZone == "" or bZone:find(targetIsland)) and not (ignoreBossChest and isBoss) then
+                if (bZone == "" or bZone:find(targetIsland) or isHeavenBoss) and allowTarget then
                     local hp = m:GetAttribute("BreakableHP") or 1
                     if hp > 0 then
                         local dist = (m:GetPivot().Position - hrp.Position).Magnitude
@@ -1114,13 +1134,14 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
             end
         end
 
-        -- If all normal breakables cleared but boss chest exists, target boss chest
-        if not targetModel and not ignoreBossChest then
+        -- 2. Fallback: If no normal target found on Heaven, lock onto HeavenGiantChest
+        if not targetModel and targetIsland == "Heaven" then
             for _, f in ipairs(breakablesFolder:GetChildren()) do
                 local m = f:FindFirstChildWhichIsA("Model") or f
                 if m and m:GetAttribute("BreakableUID") then
+                    local bName = tostring(m:GetAttribute("BreakableId") or m.Name):lower()
                     local bZone = tostring(m:GetAttribute("BreakableZone") or "")
-                    if bZone == "" or bZone:find(targetIsland) then
+                    if bName:find("heavengiant") or bName:find("giantchest") or bZone:find("HugeHeavenChest") then
                         local hp = m:GetAttribute("BreakableHP") or 1
                         if hp > 0 then
                             targetModel = m
@@ -1173,7 +1194,8 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
         end
     end
 
-    return true, targetModel.Name
+    local displayName = targetModel:GetAttribute("BreakableId") or targetModel.Name
+    return true, displayName
 end
 
 -- Executes the full Coins (Volcano <-> Heaven) -> Tech World breakables state machine
@@ -1181,7 +1203,10 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     local stProg = ProgAPI.GetSkillTreeProgress()
     local now = tick()
 
-    -- 1. Coins Skill Tree NOT done: Alternate between Volcano and Heaven!
+    -- Continuously attempt to buy affordable skill tree perks
+    pcall(function() ProgAPI.BuyAffordableSkillTree(not stProg.CoinsComplete) end)
+
+    -- 1. Coins Skill Tree NOT done: Farm Heaven (including Heaven Boss Chest) and Volcano!
     if not stProg.CoinsComplete then
         local stats = Stats.Local(true) or {}
         local curIsland = stats.CurrentIsland or "Heaven"
@@ -1193,7 +1218,7 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end
 
         local activeOnCur = ProgAPI.GetActiveBreakablesCount(activeCoinsIsland, "1")
-        if activeOnCur == 0 or (now - lastBreakablesSwitchTick > 25) then
+        if activeOnCur == 0 or (now - lastBreakablesSwitchTick > 30) then
             lastBreakablesSwitchTick = now
             activeCoinsIsland = (activeCoinsIsland == "Volcano") and "Heaven" or "Volcano"
             ProgAPI.TeleportToIsland(activeCoinsIsland)
@@ -1201,9 +1226,9 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
             return "Switched Coins Zone", activeCoinsIsland
         end
 
-        ProgAPI.AttackBreakablesInZone(activeCoinsIsland, true)
+        local attacked, targetName = ProgAPI.AttackBreakablesInZone(activeCoinsIsland, false)
         pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
-        return "Farming Coins", activeCoinsIsland
+        return "Attacking " .. tostring(targetName or "Breakables"), activeCoinsIsland
 
     -- 2. Coins skill tree complete: Teleport to latest Tech World (Matrix) to farm Tech Coins!
     else
@@ -1216,9 +1241,9 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
         end
 
         local techTarget = ProgAPI.IsIslandUnlocked("Matrix") and "Matrix" or (ProgAPI.IsIslandUnlocked("Fragment") and "Fragment" or "Base")
-        ProgAPI.AttackBreakablesInZone(techTarget, true)
+        local attacked, targetName = ProgAPI.AttackBreakablesInZone(techTarget, false)
         pcall(function() ProgAPI.BuyAffordableSkillTree(false) end)
-        return "Farming Tech Coins", techTarget
+        return "Attacking " .. tostring(targetName or "Tech Breakables"), techTarget
     end
 end
 
