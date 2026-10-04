@@ -255,6 +255,22 @@ DashTab:AddButton({
     end
 })
 
+DashTab:AddButton({
+    Title = "Buy Affordable Rebirth Buttons Now",
+    Description = "Purchases all affordable rebirth buttons & double jumps immediately",
+    Callback = function()
+        local boughtAny = ProgAPI.BuyNextRebirthButton()
+        local boughtJump = ProgAPI.BuyNextDoubleJump()
+        local maxInfo = ProgAPI.GetMaxRebirthInfo()
+        Window:Notify({
+            Title = "Rebirth Buttons",
+            Content = string.format("Highest button unlocked: #%d (+%s)!", maxInfo.MaxButtonIndex, ProgAPI.FormatNumber(maxInfo.MaxAmount)),
+            Duration = 3
+        })
+    end
+})
+
+
 --==============================================================================
 -- 2. PHASE 1: ISLAND SPEEDRUN TAB
 --==============================================================================
@@ -487,6 +503,7 @@ table.insert(threads, task.spawn(function()
     local lastEquipTick = 0
     local lastPrestigeTick = 0
     local lastSkillTreeTick = 0
+    local lastRebirthButtonsTick = 0
 
     while isRunning do
         task.wait(0.5)
@@ -550,6 +567,15 @@ table.insert(threads, task.spawn(function()
             lastSkillTreeTick = now
             pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
         end
+
+        -- H. Auto Buy Rebirth Buttons & Double Jumps (Continuously purchases new buttons as gems allow)
+        if State.AutoRebirthButtons and (now - lastRebirthButtonsTick > 1.5) then
+            lastRebirthButtonsTick = now
+            pcall(function()
+                AutoProgAPI.BuyNextRebirthButton()
+                AutoProgAPI.BuyNextDoubleJump()
+            end)
+        end
     end
 end))
 
@@ -585,7 +611,8 @@ end))
 table.insert(threads, task.spawn(function()
     local lastTeleportTick = 0
     local lastEggHatchTick = 0
-    local lastUpgradesTick = 0
+    local lastMiniUpgradesTick = 0
+    local lastGemUpgradesTick = 0
     local lastSkinTick = 0
     local lastQuestTick = 0
     local lastRainbowTick = 0
@@ -645,14 +672,15 @@ table.insert(threads, task.spawn(function()
             end
 
             -- 4. Map Mini Upgrades (+1 Pet Slot, Storage)
-            if State.AutoMapUpgrades and (now - lastUpgradesTick > 2) then
-                lastUpgradesTick = now
+            if State.AutoMapUpgrades and (now - lastMiniUpgradesTick > 2) then
+                lastMiniUpgradesTick = now
                 AutoProgAPI.BuyAffordableMiniUpgrades()
             end
 
             -- 5. Gem Upgrades & Rebirth Buttons
-            if State.AutoGemUpgrades and (now - lastUpgradesTick > 1.5) then
-                AutoProgAPI.BuyAffordableGemUpgrades()
+            if (State.AutoGemUpgrades or State.AutoRebirthButtons) and (now - lastGemUpgradesTick > 1.5) then
+                lastGemUpgradesTick = now
+                if State.AutoGemUpgrades then AutoProgAPI.BuyAffordableGemUpgrades() end
                 if State.AutoRebirthButtons then
                     AutoProgAPI.BuyNextRebirthButton()
                     AutoProgAPI.BuyNextDoubleJump()
@@ -722,19 +750,23 @@ table.insert(threads, task.spawn(function()
                 end
             end
 
-            -- 4. PRIORITY 1: Desert Machine & Gem Upgrades Maxing
-            if State.AutoDesertMachine and (now - lastUpgradesTick > 2) then
-                lastUpgradesTick = now
-                AutoProgAPI.BuyAffordableGemUpgrades()
-                AutoProgAPI.BuyAffordableMiniUpgrades()
-                AutoProgAPI.BuyNextRebirthButton()
-                AutoProgAPI.BuyNextDoubleJump()
+            -- 4. PRIORITY 1: Desert Machine, Gem Upgrades & Rebirth Buttons Maxing
+            if (State.AutoDesertMachine or State.AutoGemUpgrades or State.AutoRebirthButtons) and (now - lastGemUpgradesTick > 1.5) then
+                lastGemUpgradesTick = now
+                if State.AutoDesertMachine or State.AutoGemUpgrades then
+                    AutoProgAPI.BuyAffordableGemUpgrades()
+                    AutoProgAPI.BuyAffordableMiniUpgrades()
+                end
+                if State.AutoRebirthButtons then
+                    AutoProgAPI.BuyNextRebirthButton()
+                    AutoProgAPI.BuyNextDoubleJump()
+                end
             end
 
             -- 5. PRIORITY 2: Skill Tree Coins First -> Tech Coins Pipeline
             if State.AutoSkillTree then
                 local action, targetIsl = AutoProgAPI.StepBreakablesPipeline()
-                currentActivity = string.format("[Skill Tree] %s in %s", action, targetIsl)
+                currentActivity = string.format("[Skill Tree] %s in %s", tostring(action or "Farming"), tostring(targetIsl or "Heaven"))
             end
 
             -- 6. 10 Qi Rebirth Goal & Magma Click Skin
@@ -796,39 +828,56 @@ local function updateTelemetry()
         local magmaPct = math.clamp(math.floor((pData.Rebirths / 1e19) * 100), 0, 100)
         local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, ProgAPI.FormatNumber(pData.Rebirths))
 
-        LiveStatusCard:Set({
-            Title = string.format("CURRENT: %s", currentActivity),
-            Content = string.format(
-                "📊 **Activity**: %s\n" ..
-                "🎯 **Phase**: %s\n" ..
-                "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
-                "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
-                "🚀 **Prestige**: %s\n" ..
-                "🏝️ **Islands**: %s\n" ..
-                "🐾 **Gold Team**: %s\n" ..
-                "🌳 **Skill Tree**: %s\n" ..
-                "🔥 **Magma Skin**: %s",
-                currentActivity,
-                currentPhaseText,
-                ProgAPI.FormatNumber(pData.Clicks),
-                ProgAPI.FormatNumber(pData.Rebirths),
-                ProgAPI.FormatNumber(pData.Gems),
-                ProgAPI.FormatNumber(pData.Coins),
-                ProgAPI.FormatNumber(pData.SpaceCoins),
-                prestStr,
-                islandProgressStr,
-                goldStr,
-                stStr,
-                magmaStr
-            )
-        })
+        local cardTitle = "CURRENT: " .. tostring(currentActivity or "Auto Progression Active")
+        local cardContent = string.format(
+            "📊 **Activity**: %s\n" ..
+            "🎯 **Phase**: %s\n" ..
+            "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
+            "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
+            "🚀 **Prestige**: %s\n" ..
+            "🏝️ **Islands**: %s\n" ..
+            "🐾 **Gold Team**: %s\n" ..
+            "🌳 **Skill Tree**: %s\n" ..
+            "🔥 **Magma Skin**: %s",
+            tostring(currentActivity or "Auto Progression Active"),
+            tostring(currentPhaseText or "Phase 2"),
+            ProgAPI.FormatNumber(pData.Clicks or 0),
+            ProgAPI.FormatNumber(pData.Rebirths or 0),
+            ProgAPI.FormatNumber(pData.Gems or 0),
+            ProgAPI.FormatNumber(pData.Coins or 0),
+            ProgAPI.FormatNumber(pData.SpaceCoins or 0),
+            tostring(prestStr),
+            tostring(islandProgressStr),
+            tostring(goldStr),
+            tostring(stStr),
+            tostring(magmaStr)
+        )
+
+        if LiveStatusCard then
+            LiveStatusCard:Set({
+                Title = cardTitle,
+                Content = cardContent
+            })
+            if LiveStatusCard.TitleLabel then
+                pcall(function() LiveStatusCard.TitleLabel.Text = cardTitle end)
+            end
+            if LiveStatusCard.BodyLabel then
+                pcall(function() LiveStatusCard.BodyLabel.Text = cardContent end)
+            end
+        end
     end)
     if not ok then
         pcall(function()
-            LiveStatusCard:Set({
-                Title = "CURRENT: " .. tostring(currentActivity),
-                Content = string.format("📊 **Activity**: %s\n🎯 **Phase**: %s\n⚡ Running Auto Progression...", tostring(currentActivity), tostring(currentPhaseText))
-            })
+            if LiveStatusCard then
+                local fallbackTitle = "CURRENT: " .. tostring(currentActivity or "Running")
+                local fallbackBody = string.format("📊 **Activity**: %s\n🎯 **Phase**: %s\n⚡ Running Auto Progression...", tostring(currentActivity or "Active"), tostring(currentPhaseText or "Phase 2"))
+                LiveStatusCard:Set({
+                    Title = fallbackTitle,
+                    Content = fallbackBody
+                })
+                if LiveStatusCard.TitleLabel then pcall(function() LiveStatusCard.TitleLabel.Text = fallbackTitle end) end
+                if LiveStatusCard.BodyLabel then pcall(function() LiveStatusCard.BodyLabel.Text = fallbackBody end) end
+            end
         end)
     end
 end
