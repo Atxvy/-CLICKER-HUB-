@@ -1482,7 +1482,9 @@ function ProgAPI.GetPlayerHatchSpeed(): number
             mult = m
         end
     end
-    return math.clamp(4.2 / mult, 0.05, 10.0)
+    local rawSpeed = 4.2 / mult
+    -- Add 0.15s buffer to prevent server rate-limiter tripping from network ping jitter
+    return math.clamp(rawSpeed + 0.15, 0.2, 10.0)
 end
 
 function ProgAPI.FormatHatchSpeed(): string
@@ -1648,6 +1650,14 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
             pcall(ProgAPI.CraftGoldenPets)
             pcall(function() ProgAPI.CleanWeakPets(false) end)
         end
+    end
+
+    -- If server rate-limited or player on cooldown, back off to let server cooldown expire
+    if tostring(reason):lower():find("too fast") or tostring(res):lower():find("too fast") then
+        ProgAPI.HatchBackoffUntil = tick() + 1.2
+    end
+    if tostring(reason):lower():find("cooldown") or tostring(res):lower():find("cooldown") or tostring(reason):lower():find("ratelimit") or tostring(res):lower():find("ratelimit") then
+        ProgAPI.HatchBackoffUntil = tick() + 3.5
     end
 
     -- If server rejected due to distance, re-snap character
