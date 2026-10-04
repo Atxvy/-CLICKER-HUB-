@@ -433,8 +433,8 @@ Phase3Tab:AddToggle("AutoReplaceTeamToggle_P3", {
 })
 
 Phase3Tab:AddToggle("PauseRebirthToggle_P3", {
-    Title = "Pause Rebirth for Clicks",
-    Description = "Pauses rebirth during Phase 3 to preserve all clicks for Matrix Egg hatching",
+    Title = "Rebirth at Max Milestone Only",
+    Description = "Waits until no more Next Rebirth button, then rebirths to the max affordable milestone",
     Default = State.PauseRebirthPhase3,
     Callback = function(val) State.PauseRebirthPhase3 = val; Configs.Set("PauseRebirthPhase3", val) end
 })
@@ -671,21 +671,28 @@ end))
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
-        task.wait(0.1)
+        task.wait(0.15)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
 
-        -- PHASE 3 & RAINBOW MODE PROTECTION: Pause auto rebirth so all possible clicks are kept for Matrix Egg!
-        local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
-        if (State.PauseRebirthPhase3 and isP3) or (AutoProgAPI.IsRainbowMode and AutoProgAPI.IsRainbowMode()) then
+        -- Phase 1 smart pause: accumulating clicks for next island unlock
+        if AutoProgAPI.IsSmartRebirthPaused and AutoProgAPI.IsSmartRebirthPaused() then
             task.wait(0.5)
             continue
         end
 
+
+        -- USER RULE: Wait until no more 'Next Rebirth' button (Goal visible = false)!
+        -- When there is a Next Rebirth pending (Image 2), wait!
+        if AutoProgAPI.HasNextRebirthGoal and AutoProgAPI.HasNextRebirthGoal() then
+            task.wait(0.3)
+            continue
+        end
+
         local now = tick()
-        if now - lastRebirthAttempt > 0.25 then
+        if now - lastRebirthAttempt > 0.4 then
             lastRebirthAttempt = now
             local maxInfo = ProgAPI.GetMaxRebirthInfo()
-            if maxInfo and maxInfo.CanAffordMax then
+            if maxInfo and maxInfo.CanAffordMax and maxInfo.BestAffordableIndex >= maxInfo.MaxButtonIndex then
                 ProgAPI.RebirthMaxTarget()
             end
         end
