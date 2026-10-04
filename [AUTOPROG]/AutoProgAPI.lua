@@ -779,11 +779,16 @@ function ProgAPI.IsEquippedTeamAllRainbow(): boolean
     return hasAny
 end
 
--- Rainbow Mode Checker: Active in Phase 2 when all islands are unlocked but team is NOT yet 100% Rainbow
+-- Rainbow Mode Checker: Active in Phase 2 when all islands are unlocked, Skill Tree is MAXED, but team is NOT yet 100% Rainbow
 function ProgAPI.IsRainbowMode(): boolean
     local allIslands = ProgAPI.AreAllIslandsUnlocked()
+    if not allIslands then return false end
+
+    local stProg = ProgAPI.GetSkillTreeProgress()
+    local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
     local isAllRainbow = ProgAPI.IsEquippedTeamAllRainbow()
-    return allIslands and (not isAllRainbow)
+
+    return isSkillTreeMaxed and (not isAllRainbow)
 end
 
 function ProgAPI.HasFullGoldEventTeam(): boolean
