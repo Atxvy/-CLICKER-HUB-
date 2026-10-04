@@ -16,11 +16,6 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local function getRootGui(): Instance
-    local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
-    local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
-    if pg then
-        return pg
-    end
     if gethui then
         local okH, h = pcall(gethui)
         if okH and h then
@@ -31,7 +26,9 @@ local function getRootGui(): Instance
     if ok and cg then
         return cg
     end
-    return game:GetService("CoreGui")
+    local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
+    local pg = lp:WaitForChild("PlayerGui", 5) or lp:FindFirstChildOfClass("PlayerGui")
+    return pg or game:GetService("CoreGui")
 end
 
 local function tween(inst: Instance, info: TweenInfo, props: {[string]: any})
