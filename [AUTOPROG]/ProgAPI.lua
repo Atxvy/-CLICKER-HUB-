@@ -57,6 +57,9 @@ pcall(function() SkillTreeFrontend = require(Client:WaitForChild("SkillTreeFront
 local QuestFrontend = nil
 pcall(function() QuestFrontend = require(Client:WaitForChild("QuestFrontend", 5)) end)
 
+local MinigamesFrontend = nil
+pcall(function() MinigamesFrontend = require(Client:WaitForChild("MinigamesFrontend", 5)) end)
+
 -- Channels
 local Channels = {
     Click = Network.Channel("Click"),
@@ -100,6 +103,35 @@ ProgAPI.QuestFrontend = QuestFrontend
 ProgAPI.AutoRebirthFrontend = AutoRebirthFrontend
 ProgAPI.SkillTreeFrontend = SkillTreeFrontend
 ProgAPI.BreakablesFrontend = BreakablesFrontend
+ProgAPI.MinigamesFrontend = MinigamesFrontend
+
+function ProgAPI.GetActiveMinigameName(): string?
+    local MF = MinigamesFrontend or (Client and Client:FindFirstChild("MinigamesFrontend") and require(Client.MinigamesFrontend))
+    if not MF or not MF.Active then return nil end
+    local a = MF.Active()
+    if not a then return nil end
+    if type(a) == "table" then return a.Name or a.WorldModel end
+    if type(a) == "string" then return a end
+    return nil
+end
+
+function ProgAPI.IsInMinigame(targetName: string?): boolean
+    local cur = ProgAPI.GetActiveMinigameName()
+    if not cur then return false end
+    if targetName then return cur:lower() == targetName:lower() end
+    return true
+end
+
+function ProgAPI.ExitMinigame(): boolean
+    local MF = MinigamesFrontend or (Client and Client:FindFirstChild("MinigamesFrontend") and require(Client.MinigamesFrontend))
+    if not MF or not MF.Exit then return false end
+    if ProgAPI.IsInMinigame() then
+        pcall(function() MF.Exit() end)
+        task.wait(0.35)
+        return true
+    end
+    return false
+end
 
 --==============================================================================
 -- SESSION TRACKING, TELEMETRY & DISCORD WEBHOOK INTEGRATION
@@ -654,6 +686,46 @@ function ProgAPI.RebirthMaxTarget(): (boolean, any)
     return false, info
 end
 
+-- Phase 1 Dedicated Rebirth: Rebirths at the highest affordable button as soon as affordable!
+-- Strictly follows user rule: Does NOT wait for Goal or button 57, rebirths immediately to speedrun clicks & islands!
+function ProgAPI.RebirthBestAffordable(): (boolean, any)
+    if ProgAPI.IsSmartRebirthPaused and ProgAPI.IsSmartRebirthPaused() then
+        return false, "Auto Rebirth paused: accumulating clicks for next island unlock"
+    end
+
+    local info = ProgAPI.GetMaxRebirthInfo()
+    if info.CanAffordMax and info.BestAffordableIndex then
+        local btnIdx = info.BestAffordableIndex
+
+        -- 1. Direct channel fire to active best affordable button index
+        if Channels.Rebirths then
+            Channels.Rebirths:FireServer("Rebirth", btnIdx)
+        end
+
+        -- 2. Notify AutoRebirthFrontend
+        if AutoRebirthFrontend then
+            pcall(function()
+                AutoRebirthFrontend.SetSelectedButtonIndex(btnIdx)
+                AutoRebirthFrontend.RequestImmediateCheck()
+            end)
+        end
+
+        -- 3. Click quick rebirth button in UI if available
+        pcall(function()
+            local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+            local qr = pg and pg:FindFirstChild("Main", true) and pg.Main:FindFirstChild("Left") and pg.Main.Left:FindFirstChild("QuickRebirth")
+            local btn = qr and qr:FindFirstChild("Rebirth") and qr.Rebirth:FindFirstChild("Main") and qr.Rebirth.Main:FindFirstChild("Button")
+            if btn and firesignal then
+                firesignal(btn.Activated)
+            end
+        end)
+
+        return true, info
+    end
+
+    return false, info
+end
+
 --==============================================================================
 -- PRESTIGE AUTOMATION
 --==============================================================================
@@ -797,11 +869,7 @@ function ProgAPI.GetNextLockedIsland()
 end
 
 function ProgAPI.TeleportToWorld(worldName: string): boolean
-    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
-    if MF and MF.Active and MF.Active() ~= nil then
-        pcall(function() MF.Exit() end)
-        task.wait(0.35)
-    end
+    ProgAPI.ExitMinigame()
 
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
@@ -809,6 +877,16 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
     if worldName == "Techworld" or worldName == "Tech" or worldName == "Space" then
         if curWorld == "Techworld" or curWorld == "Space" then
             return true
+        end
+
+        if Channels.Portals then
+            local ok, res = pcall(function()
+                return Channels.Portals:InvokeServer("TeleportToWorld", "Techworld")
+            end)
+            if ok and res == true then
+                task.wait(0.5)
+                return true
+            end
         end
 
         local ok, msg = ProgAPI.CheckAndEnterTechWorld()
@@ -830,6 +908,9 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
         end
         if Channels.Portals then
             pcall(function()
+                Channels.Portals:InvokeServer("TeleportToWorld", "Overworld")
+            end)
+            pcall(function()
                 Channels.Portals:InvokeServer("TeleportToIsland", "Spawn")
             end)
         end
@@ -839,22 +920,17 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
 end
 
 function ProgAPI.TeleportToIsland(islandName: string): boolean
-    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
     if islandName == "DominusArea" or islandName == "Dominus" then
-        if MF and MF.Enter then
-            local active = MF.Active and MF.Active()
-            local actName = (type(active) == "table" and active.Name) or tostring(active)
-            if actName ~= "DominusArea" then
+        if not ProgAPI.IsInMinigame("DominusArea") then
+            local MF = MinigamesFrontend or (Client and Client:FindFirstChild("MinigamesFrontend") and require(Client.MinigamesFrontend))
+            if MF and MF.Enter then
                 pcall(function() MF.Enter("DominusArea") end)
                 task.wait(0.35)
             end
-            return true
         end
+        return true
     else
-        if MF and MF.Active and MF.Active() ~= nil then
-            pcall(function() MF.Exit() end)
-            task.wait(0.35)
-        end
+        ProgAPI.ExitMinigame()
     end
 
     local meta = islandMetaLookup[islandName]
@@ -1367,11 +1443,7 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     local targetWorld = (meta and meta.world) or "Overworld"
 
     -- 1. Exit any active minigame (DominusArea, Raids, etc.)
-    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
-    if MF and MF.Active and MF.Active() ~= nil then
-        pcall(function() MF.Exit() end)
-        task.wait(0.35)
-    end
+    ProgAPI.ExitMinigame()
 
     -- 2. Switch world if needed (e.g. Overworld <-> Techworld)
     local stats = Stats.Local(true) or {}
@@ -1403,6 +1475,12 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     if hrp and targetPart then
         hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
         task.wait(0.15)
+        return true
+    end
+
+    -- Fallback for MatrixEgg: known position
+    if eggName == "MatrixEgg" and hrp then
+        hrp.CFrame = CFrame.new(7828.7, 6196.1, 303.1)
         return true
     end
 
@@ -2674,8 +2752,8 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
 
     -- When Coins skill tree is done, tp to Tech World after!
     if stProg.CoinsComplete then
-        if MF and MF.Active and MF.Active() == "DominusArea" then
-            pcall(function() MF.Exit() end)
+        if ProgAPI.IsInMinigame() then
+            ProgAPI.ExitMinigame()
             task.wait(0.35)
         end
         local curStats = Stats.Local(true) or {}
@@ -2689,8 +2767,8 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
 
     -- Minigame handling for DominusArea (the ??? area)
     if targetWorld == "DominusArea" then
-        if MF and MF.Active and MF.Active() ~= "DominusArea" then
-            pcall(function() MF.Enter("DominusArea") end)
+        if not ProgAPI.IsInMinigame("DominusArea") then
+            if MF and MF.Enter then pcall(function() MF.Enter("DominusArea") end) end
             task.wait(0.35)
         end
 
@@ -2701,7 +2779,7 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
                 dominusEmptyStartTick = tick()
             elseif (tick() - dominusEmptyStartTick) > 2.0 then
                 dominusEmptyStartTick = tick()
-                if MF and MF.Exit then pcall(MF.Exit) end
+                ProgAPI.ExitMinigame()
                 ProgAPI.TeleportToIsland("Spawn")
                 task.wait(0.6)
                 if MF and MF.Enter then pcall(function() MF.Enter("DominusArea") end) end
@@ -2713,8 +2791,8 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
             dominusEmptyStartTick = 0
         end
     else
-        if MF and MF.Active and MF.Active() == "DominusArea" then
-            pcall(function() MF.Exit() end)
+        if ProgAPI.IsInMinigame("DominusArea") or ProgAPI.IsInMinigame() then
+            ProgAPI.ExitMinigame()
             task.wait(0.35)
         end
     end
@@ -3154,6 +3232,8 @@ end
 function ProgAPI.IsPhase3(): boolean
     local allIslands = ProgAPI.AreAllIslandsUnlocked()
     if not allIslands then return false end
+    local pData = ProgAPI.GetPlayerData()
+    if pData.Rebirths < 1e15 then return false end
     local stProg = ProgAPI.GetSkillTreeProgress()
     local isSkillTreeMaxed = stProg and stProg.CoinsComplete and stProg.TechComplete
     return isSkillTreeMaxed == true
@@ -3289,6 +3369,13 @@ local function updateBlackScreenTelemetry()
         if blackScreenRowLabels.Secrets then blackScreenRowLabels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
         if blackScreenRowLabels.Megas then blackScreenRowLabels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
         if blackScreenRowLabels.SessionTime then blackScreenRowLabels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+
+        if _G.__ProgAPI_BlackScreenWebhookBox and not _G.__ProgAPI_BlackScreenWebhookBox:IsFocused() then
+            local curUrl = ProgAPI.WebhookUrl or ""
+            if _G.__ProgAPI_BlackScreenWebhookBox.Text ~= curUrl and curUrl ~= "" then
+                _G.__ProgAPI_BlackScreenWebhookBox.Text = curUrl
+            end
+        end
     end)
 end
 
@@ -3369,7 +3456,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
 
             local card = Instance.new("Frame")
             card.Name = "CardFrame"
-            card.Size = UDim2.new(0, 460, 0, 560)
+            card.Size = UDim2.new(0, 470, 0, 555)
             card.AnchorPoint = Vector2.new(0.5, 0.5)
             card.Position = UDim2.new(0.5, 0, 0.5, 0)
             card.BackgroundColor3 = Color3.fromRGB(11, 14, 21)
@@ -3498,15 +3585,81 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
 
             _G.__ProgAPI_BlackScreenLabels = blackScreenRowLabels
 
+            local webhookFrame = Instance.new("Frame")
+            webhookFrame.Name = "WebhookFrame"
+            webhookFrame.Position = UDim2.new(0, 22, 0, 404)
+            webhookFrame.Size = UDim2.new(1, -44, 0, 52)
+            webhookFrame.BackgroundColor3 = Color3.fromRGB(15, 20, 30)
+            webhookFrame.BorderSizePixel = 0
+            webhookFrame.Parent = card
+
+            local wfCorner = Instance.new("UICorner")
+            wfCorner.CornerRadius = UDim.new(0, 8)
+            wfCorner.Parent = webhookFrame
+
+            local wfStroke = Instance.new("UIStroke")
+            wfStroke.Color = Color3.fromRGB(37, 99, 235)
+            wfStroke.Thickness = 1
+            wfStroke.Transparency = 0.5
+            wfStroke.Parent = webhookFrame
+
+            local wfTitle = Instance.new("TextLabel")
+            wfTitle.Text = "DISCORD WEBHOOK (SECRET+ HATCH ALERTS)"
+            wfTitle.Font = Enum.Font.GothamBold
+            wfTitle.TextSize = 10
+            wfTitle.TextColor3 = Color3.fromRGB(120, 140, 175)
+            wfTitle.Position = UDim2.new(0, 10, 0, 5)
+            wfTitle.Size = UDim2.new(1, -20, 0, 14)
+            wfTitle.TextXAlignment = Enum.TextXAlignment.Left
+            wfTitle.BackgroundTransparency = 1
+            wfTitle.Parent = webhookFrame
+
+            local webhookBox = Instance.new("TextBox")
+            webhookBox.Name = "WebhookInput"
+            webhookBox.Position = UDim2.new(0, 10, 0, 22)
+            webhookBox.Size = UDim2.new(1, -20, 0, 24)
+            webhookBox.BackgroundTransparency = 1
+            webhookBox.Font = Enum.Font.RobotoMono
+            webhookBox.TextSize = 11.5
+            webhookBox.TextColor3 = Color3.fromRGB(240, 245, 255)
+            webhookBox.PlaceholderColor3 = Color3.fromRGB(100, 115, 140)
+            webhookBox.PlaceholderText = "Paste Discord Webhook URL here..."
+            webhookBox.Text = ProgAPI.WebhookUrl or ""
+            webhookBox.ClearTextOnFocus = false
+            webhookBox.TextXAlignment = Enum.TextXAlignment.Left
+            webhookBox.TextTruncate = Enum.TextTruncate.AtEnd
+            webhookBox.Parent = webhookFrame
+
+            local function saveWebhook(text)
+                local clean = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                ProgAPI.WebhookUrl = clean
+                pcall(function()
+                    local Configs = loadfile and isfile and isfile("[AUTOPROG]/Configs.lua") and loadfile("[AUTOPROG]/Configs.lua")()
+                    if Configs and Configs.Set then
+                        Configs.Set("WebhookUrl", clean)
+                        Configs.Save()
+                    end
+                end)
+                pcall(function()
+                    if _G.State then _G.State.WebhookUrl = clean end
+                end)
+            end
+
+            webhookBox.FocusLost:Connect(function()
+                saveWebhook(webhookBox.Text)
+            end)
+
+            _G.__ProgAPI_BlackScreenWebhookBox = webhookBox
+
             local restoreBtn = Instance.new("TextButton")
             restoreBtn.Name = "DisableBtn"
-            restoreBtn.Position = UDim2.new(0, 22, 0, 468)
-            restoreBtn.Size = UDim2.new(1, -44, 0, 44)
+            restoreBtn.Position = UDim2.new(0, 22, 0, 466)
+            restoreBtn.Size = UDim2.new(1, -44, 0, 40)
             restoreBtn.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
             restoreBtn.BorderSizePixel = 0
             restoreBtn.Text = "Disable Black Screen"
             restoreBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            restoreBtn.TextSize = 15
+            restoreBtn.TextSize = 14
             restoreBtn.Font = Enum.Font.GothamBold
             restoreBtn.AutoButtonColor = true
             restoreBtn.Parent = card
@@ -3520,7 +3673,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             end)
 
             local hint = Instance.new("TextLabel")
-            hint.Position = UDim2.new(0, 22, 0, 520)
+            hint.Position = UDim2.new(0, 22, 0, 514)
             hint.Size = UDim2.new(1, -44, 0, 18)
             hint.BackgroundTransparency = 1
             hint.Text = "Click button above or press RightControl to restore"
