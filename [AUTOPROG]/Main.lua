@@ -502,16 +502,26 @@ RewardsTab:AddButton({
 local MiscTab = Window:AddTab({ Title = "Misc", Icon = "⚙️" })
 
 MiscTab:AddSection("PERFORMANCE & CPU SAVER")
-MiscTab:AddToggle("BlackScreenToggle", {
+local blackScreenToggleObj
+blackScreenToggleObj = MiscTab:AddToggle("BlackScreenToggle", {
     Title = "Black Screen / 3D Render Off (Save CPU & Memory)",
     Description = "Disables 3D engine rendering and displays centered 'Premium Script !' AFK overlay",
     Default = State.BlackScreen,
     Callback = function(val)
+        if State.BlackScreen == val then return end
         State.BlackScreen = val
         Configs.Set("BlackScreen", val)
         AutoProgAPI.SetBlackScreen(val)
     end
 })
+
+AutoProgAPI.OnBlackScreenToggled = function(val)
+    State.BlackScreen = val
+    Configs.Set("BlackScreen", val)
+    if blackScreenToggleObj and blackScreenToggleObj.SetValue then
+        pcall(function() blackScreenToggleObj:SetValue(val) end)
+    end
+end
 
 MiscTab:AddToggle("RemoveMapsToggle", {
     Title = "Remove Maps (FPS & Memory Booster)",
