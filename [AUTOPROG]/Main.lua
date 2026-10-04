@@ -1019,7 +1019,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 -- 3. Auto buy egg for pets & auto gold pets
-                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(bestEgg and bestEgg.name)) or 2.5
                 if (State.AutoBestEggs or State.AutoGold) and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
                     local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
@@ -1097,7 +1097,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
-                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed()) or 2.7
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("MatrixEgg")) or 1.9
 
                 -- 1. Auto Open Matrix Egg (runs non-blocking in task.spawn without client animations)
                 if State.AutoMatrixEgg and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
