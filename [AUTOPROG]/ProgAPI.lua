@@ -338,6 +338,10 @@ function ProgAPI.GetPrestigeInfo()
 end
 
 function ProgAPI.CheckAndTriggerPrestige(): (boolean, string)
+    if ProgAPI.AreAllIslandsUnlocked and not ProgAPI.AreAllIslandsUnlocked() then
+        return false, "Cannot Prestige yet: All 17 islands must be unlocked first!"
+    end
+
     local pInfo = ProgAPI.GetPrestigeInfo()
     if pInfo.MaxPrestigeReached then
         return false, "Maximum Prestige level already achieved!"
@@ -1091,9 +1095,9 @@ function ProgAPI.CraftRainbowPets(): number
 
     local craftedCount = 0
     for _, g in pairs(groups) do
-        while #g.guids >= 5 do
+        while #g.guids >= 6 do
             local batch = {}
-            for i = 1, math.min(6, #g.guids) do
+            for i = 1, 6 do
                 table.insert(batch, table.remove(g.guids, 1))
             end
             local ok, res = pcall(function()
@@ -1120,17 +1124,22 @@ function ProgAPI.ClaimRainbowPets(): number
     local rainbowCrafts = stats.RainbowCrafts or stats.RainbowCraftQueue or {}
 
     if Channels.Pets then
-        for slotIndex = 1, math.min(5, #rainbowCrafts) do
-            local craft = rainbowCrafts[slotIndex]
-            if craft and craft.EndTimestamp then
+        for slotKey, craft in pairs(rainbowCrafts) do
+            local slotIndex = tonumber(slotKey)
+            if slotIndex and type(craft) == "table" and craft.EndTimestamp then
                 local now = workspace:GetServerTimeNow()
-                if (craft.EndTimestamp - now) <= 0 then
+                local saveAge = stats.SaveAge or 0
+                local remaining = craft.EndTimestamp - now
+                if craft.SaveAge ~= nil then
+                    remaining = remaining - (saveAge - craft.SaveAge) * 2
+                end
+                if remaining <= 0 then
                     local ok, res = pcall(function()
                         return Channels.Pets:InvokeServer("ClaimRainbowCraft", slotIndex)
                     end)
-                    if ok and res == true then
+                    if ok and (res == true or type(res) == "table") then
                         claimedCount = claimedCount + 1
-                        task.wait(0.2)
+                        task.wait(0.15)
                     end
                 end
             end
@@ -1146,6 +1155,10 @@ function ProgAPI.ClaimRainbowPets(): number
                 if ok then claimedCount = claimedCount + 1 end
             end
         end
+    end
+
+    if claimedCount > 0 then
+        pcall(ProgAPI.EquipBest)
     end
 
     return claimedCount
@@ -2319,6 +2332,8 @@ end
 --==============================================================================
 -- SECRET ??? QUESTLINE
 --==============================================================================
+-- SECRET ??? QUESTLINE (Overworld Gate / Dominus Area)
+--==============================================================================
 function ProgAPI.GetSecretQuestProgress()
     local stats = Stats.Local(true) or {}
     local collected = stats.SecretAreaCollectedFeathers or {}
@@ -2326,46 +2341,69 @@ function ProgAPI.GetSecretQuestProgress()
     for _ in pairs(collected) do count = count + 1 end
     return {
         FeathersCollected = count,
-        DoorUnlocked = stats.SecretAreaDoorUnlocked == true,
-        QuestClaimed = stats.SecretAreaQuestClaimed == true,
+        DoorUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true,
+        QuestClaimed = stats.DominusAreaUnlocked == true,
     }
 end
 
 function ProgAPI.StepSecretQuest(): (boolean, string)
-    local qProg = ProgAPI.GetSecretQuestProgress()
-    if qProg.QuestClaimed then return true, "Already Completed & Claimed" end
+    local stats = Stats.Local(true) or {}
+    local doorUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true
+    if doorUnlocked then
+        return true, "??? Door already unlocked!"
+    end
 
-    local secretCh = Network.Channel("SecretArea")
-    if not secretCh then return false, "No SecretArea channel" end
+    if not ProgAPI.IsIslandUnlocked("Mystical") then
+        return false, "Unlock Mystical Island first!"
+    end
 
-    if qProg.FeathersCollected < 5 then
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local mapFeathers = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Feathers")
-        if mapFeathers and hrp then
-            for idx, fObj in ipairs(mapFeathers:GetChildren()) do
-                local p = fObj:FindFirstChildWhichIsA("BasePart") or fObj
-                if p and p:IsA("BasePart") then
-                    hrp.CFrame = p.CFrame + Vector3.new(0, 1, 0)
-                    pcall(function() secretCh:InvokeServer("CollectFeather", idx) end)
-                    task.wait(0.3)
-                end
+    local questCh = Channels.Quest
+    if not questCh then return false, "No Quest channel" end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    -- 1. Try accepting/checking quest at Overworld Gate (workspace._MAP.Islands.Spawn.Map.Door)
+    local door = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Islands")
+        and workspace._MAP.Islands:FindFirstChild("Spawn")
+        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
+        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
+    local interact = door and door:FindFirstChild("Interact")
+
+    local ok, res1, res2 = pcall(function()
+        return questCh:InvokeServer("ClaimSecretAreaQuestline")
+    end)
+
+    if ok and res1 == true and res2 == "Unlocked" then
+        return true, "??? Door Unlocked!"
+    end
+
+    -- 2. If feathers quest is active (stats.Quests.secret_feathers), collect remaining feathers!
+    local feathersQuest = stats.Quests and stats.Quests.secret_feathers
+    if feathersQuest and hrp then
+        local collected = stats.SecretAreaCollectedFeathers or {}
+        local CollectionService = game:GetService("CollectionService")
+        local taggedFeathers = CollectionService:GetTagged("FindFeathers")
+        for _, featherObj in ipairs(taggedFeathers) do
+            if not collected[featherObj.Name] then
+                local pivot = featherObj:GetPivot()
+                hrp.CFrame = pivot + Vector3.new(0, 1, 0)
+                task.wait(0.25)
+                break
             end
         end
-        return false, string.format("Collecting Feathers (%d/5)", qProg.FeathersCollected)
+        return false, "Collecting Feathers for ??? Quest..."
     end
 
-    if not qProg.DoorUnlocked then
-        local ok, res = pcall(function() return secretCh:InvokeServer("UnlockDoor") end)
-        if ok and res == true then
-            return true, "Door Unlocked!"
-        end
+    -- 3. Teleport to door interact if needed to interact directly
+    if hrp and interact and (hrp.Position - interact.Position).Magnitude > 15 then
+        hrp.CFrame = interact.CFrame + Vector3.new(0, 2, 0)
+        task.wait(0.2)
+        pcall(function() questCh:InvokeServer("ClaimSecretAreaQuestline") end)
     end
 
-    local okClaim = pcall(function() return secretCh:InvokeServer("ClaimReward") end)
-    if okClaim then return true, "Claimed Secret Quest Reward!" end
-
-    return false, "In progress"
+    return false, tostring(res2 or "In progress")
 end
 
 return ProgAPI
