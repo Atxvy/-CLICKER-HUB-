@@ -939,6 +939,7 @@ table.insert(threads, task.spawn(function()
     local lastTeleportTick = 0
     local lastEggHatchTick = 0
     local isEggHatching = false
+    local lastEggHatchStartTick = 0
     local lastSkinTick = 0
     local lastQuestTick = 0
     local lastFurthestTpTick = 0
@@ -948,6 +949,12 @@ table.insert(threads, task.spawn(function()
         if not State.MasterEnabled or not isRunning then continue end
         pcall(function()
             local now = tick()
+
+            -- WATCHDOG: If egg hatching task hangs or takes > 3.5s, force unlock to prevent stalls
+            if isEggHatching and (now - lastEggHatchStartTick > 3.5) then
+                isEggHatching = false
+            end
+
             local pData = AutoProgAPI.GetPlayerData()
             local allIslandsUnlocked = AutoProgAPI.AreAllIslandsUnlocked()
             local lockedIsland = AutoProgAPI.GetNextLockedIsland()
@@ -1014,6 +1021,7 @@ table.insert(threads, task.spawn(function()
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
                         isEggHatching = true
+                        lastEggHatchStartTick = now
                         task.spawn(function()
                             pcall(function()
                                 AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
@@ -1026,6 +1034,7 @@ table.insert(threads, task.spawn(function()
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s", hatchAmount, bestEgg.name, bestEgg.island)
                         isEggHatching = true
+                        lastEggHatchStartTick = now
                         task.spawn(function()
                             pcall(function()
                                 AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
@@ -1082,7 +1091,10 @@ table.insert(threads, task.spawn(function()
                     local hrp = char and char:FindFirstChild("HumanoidRootPart")
                     local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 999
 
-                    if dist > 18 then
+                    if dist > 16 and targetPart and hrp then
+                        hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                        task.wait(0.08)
+                    elseif dist > 20 then
                         currentActivity = "[Phase 3: Matrix] Teleporting to Matrix Egg in Tech World..."
                         AutoProgAPI.TeleportToEgg("MatrixEgg")
                         task.wait(0.3)
@@ -1092,8 +1104,13 @@ table.insert(threads, task.spawn(function()
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
                         currentActivity = string.format("[Phase 3: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
                         isEggHatching = true
+                        lastEggHatchStartTick = now
                         task.spawn(function()
                             pcall(function()
+                                -- Proactive cleanup BEFORE open to guarantee free slots!
+                                if State.AutoMythicFilter then
+                                    pcall(AutoProgAPI.CleanNonMythicPets)
+                                end
                                 AutoProgAPI.OpenEgg("MatrixEgg", hatchAmount, true)
 
                                 -- 2. Mythic Pet Filter & Cleaner: Delete non-mythics and old weak pets
@@ -1117,8 +1134,8 @@ table.insert(threads, task.spawn(function()
                         end)
                     else
                         -- Not enough clicks yet for Matrix Egg: Stay directly on Matrix Egg to click & hatch!
-                        if dist > 18 then
-                            AutoProgAPI.TeleportToEgg("MatrixEgg")
+                        if dist > 16 and targetPart and hrp then
+                            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         end
                         currentActivity = string.format("[Phase 3: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
