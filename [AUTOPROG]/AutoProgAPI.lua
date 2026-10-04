@@ -745,7 +745,7 @@ function ProgAPI.IsEquippedTeamAllGold(): boolean
 
     for guid, _ in pairs(equipped) do
         hasAny = true
-        local pInfo = stats.Pets and stats.Pets[guid]
+        local pInfo = (stats.Pets and stats.Pets[guid]) or (stats.EquippedPets and stats.EquippedPets[guid])
         if not pInfo then return false end
         local isGold = (pInfo.v == "Golden" or pInfo.Variant == "Golden" or pInfo.Gold == true or pInfo.Type == "Golden" or pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow")
         if not isGold then
@@ -764,7 +764,7 @@ function ProgAPI.IsEquippedTeamAllRainbow(): boolean
 
     for guid, _ in pairs(equipped) do
         hasAny = true
-        local pInfo = stats.Pets and stats.Pets[guid]
+        local pInfo = (stats.Pets and stats.Pets[guid]) or (stats.EquippedPets and stats.EquippedPets[guid])
         if not pInfo then return false end
         local isRainbow = (pInfo.v == "Rainbow" or pInfo.Variant == "Rainbow")
         if not isRainbow then
