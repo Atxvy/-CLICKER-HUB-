@@ -3826,13 +3826,18 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         blackScreenGui.Enabled = true
 
         -- Start periodic telemetry refresh & continuous anti-disruption watchdog
+        _G.__ProgAPI_IsBlackScreenRunning = true
         if blackScreenRefreshTask then
             pcall(function() task.cancel(blackScreenRefreshTask) end)
             blackScreenRefreshTask = nil
         end
+        if _G.__ProgAPI_BlackScreenRefreshTask then
+            pcall(function() task.cancel(_G.__ProgAPI_BlackScreenRefreshTask) end)
+            _G.__ProgAPI_BlackScreenRefreshTask = nil
+        end
         blackScreenRefreshTask = task.spawn(function()
-            while blackScreenGui and blackScreenGui.Enabled and blackScreenGui.Parent do
-                -- 1. Continuously enforce 3D rendering disabled
+            while _G.__ProgAPI_IsBlackScreenRunning and blackScreenGui and blackScreenGui.Enabled and blackScreenGui.Parent do
+                -- 1. Continuously enforce 3D rendering disabled while black screen is active
                 pcall(function()
                     local RunService = game:GetService("RunService")
                     if RunService and RunService.Set3dRenderingEnabled then
@@ -3875,6 +3880,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                 task.wait(0.5)
             end
         end)
+        _G.__ProgAPI_BlackScreenRefreshTask = blackScreenRefreshTask
         pcall(updateBlackScreenTelemetry)
 
         if not blackScreenInputConn then
@@ -3886,9 +3892,14 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             end)
         end
     else
+        _G.__ProgAPI_IsBlackScreenRunning = false
         if blackScreenRefreshTask then
             pcall(function() task.cancel(blackScreenRefreshTask) end)
             blackScreenRefreshTask = nil
+        end
+        if _G.__ProgAPI_BlackScreenRefreshTask then
+            pcall(function() task.cancel(_G.__ProgAPI_BlackScreenRefreshTask) end)
+            _G.__ProgAPI_BlackScreenRefreshTask = nil
         end
 
         if blackScreenInputConn then
@@ -3918,10 +3929,38 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         pcall(function()
+            if pg then
+                for _, ch in ipairs(pg:GetChildren()) do
+                    if ch.Name == "ClickerHub_BlackScreen" then
+                        ch:Destroy()
+                    end
+                end
+            end
+        end)
+
+        -- Guaranteed 3D rendering recovery: restore immediately and pulse across next frames
+        pcall(function()
             local RunService = game:GetService("RunService")
             if RunService and RunService.Set3dRenderingEnabled then
                 RunService:Set3dRenderingEnabled(true)
             end
+        end)
+        task.spawn(function()
+            for _ = 1, 5 do
+                task.wait(0.08)
+                pcall(function()
+                    local RunService = game:GetService("RunService")
+                    if RunService and RunService.Set3dRenderingEnabled then
+                        RunService:Set3dRenderingEnabled(true)
+                    end
+                end)
+            end
+        end)
+
+        pcall(function()
+            if _G.State then _G.State.BlackScreen = false end
+            local Configs = rawget(_G, "Configs")
+            if Configs and Configs.Set then Configs.Set("BlackScreen", false) end
         end)
 
         -- Restore all previously hidden ScreenGuis
