@@ -246,6 +246,15 @@ DashTab:AddButton({
     end
 })
 
+DashTab:AddButton({
+    Title = "Upgrade Skill Tree Now",
+    Description = "Buys all currently affordable skill tree perks immediately",
+    Callback = function()
+        local bought = ProgAPI.BuyAffordableSkillTree(true)
+        Window:Notify({ Title = "Skill Tree", Content = string.format("Upgraded %d perk(s)!", bought), Duration = 2.5 })
+    end
+})
+
 --==============================================================================
 -- 2. PHASE 1: ISLAND SPEEDRUN TAB
 --==============================================================================
@@ -477,6 +486,7 @@ table.insert(threads, task.spawn(function()
     local lastCleanTick = 0
     local lastEquipTick = 0
     local lastPrestigeTick = 0
+    local lastSkillTreeTick = 0
 
     while isRunning do
         task.wait(0.5)
@@ -532,7 +542,13 @@ table.insert(threads, task.spawn(function()
         -- F. Auto Equip Best Pets
         if State.AutoEquipBest and (now - lastEquipTick > 4) then
             lastEquipTick = now
-            AutoProgAPI.EquipBest()
+            ProgAPI.EquipBest()
+        end
+
+        -- G. Auto Skill Tree Upgrades (Continuously reinvests coins)
+        if State.AutoSkillTree and (now - lastSkillTreeTick > 2) then
+            lastSkillTreeTick = now
+            pcall(function() ProgAPI.BuyAffordableSkillTree(true) end)
         end
     end
 end))
@@ -751,68 +767,84 @@ table.insert(threads, task.spawn(function()
     end
 end))
 
--- THREAD 5: TELEMETRY DISPLAY REFRESH
+local function updateTelemetry()
+    local ok, err = pcall(function()
+        local pData = ProgAPI.GetPlayerData()
+        local lockedIsland = ProgAPI.GetNextLockedIsland()
+        local totalIslands = (ProgAPI.OrderedIslands and #ProgAPI.OrderedIslands) or 17
+
+        local islandProgressStr = ""
+        if lockedIsland then
+            local pct = math.clamp(math.floor((pData.Clicks / math.max(1, lockedIsland.cost)) * 100), 0, 100)
+            islandProgressStr = string.format("Current: %s • Next: %s (%d%% of %s)", pData.CurrentIsland, lockedIsland.name, pct, ProgAPI.FormatNumber(lockedIsland.cost))
+        else
+            islandProgressStr = string.format("All %d/%d Islands Unlocked! (100%% Complete)", totalIslands, totalIslands)
+        end
+
+        local prestInfo = ProgAPI.GetPrestigeInfo()
+        local prestStr = prestInfo.CanPrestige and "READY TO PRESTIGE!" or string.format("Tier %d (Need %s Rebirths)", prestInfo.CurrentPrestige, ProgAPI.FormatNumber(prestInfo.RequiredRebirths))
+
+        local stProg = ProgAPI.GetSkillTreeProgress()
+        local stStr = stProg and string.format("Coins: %d/%d (%s) • Tech: %d/%d (%s)",
+            stProg.CoinsBought, stProg.CoinsTotal, stProg.CoinsComplete and "DONE" or "In Progress",
+            stProg.TechBought, stProg.TechTotal, stProg.TechComplete and "DONE" or "In Progress"
+        ) or "N/A"
+
+        local isAllGold = ProgAPI.IsEquippedTeamAllGold()
+        local goldStr = isAllGold and "100% FULL GOLD TEAM" or "In Progress (Hatching Best Egg...)"
+
+        local magmaPct = math.clamp(math.floor((pData.Rebirths / 1e19) * 100), 0, 100)
+        local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, ProgAPI.FormatNumber(pData.Rebirths))
+
+        LiveStatusCard:Set({
+            Title = string.format("CURRENT: %s", currentActivity),
+            Content = string.format(
+                "📊 **Activity**: %s\n" ..
+                "🎯 **Phase**: %s\n" ..
+                "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
+                "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
+                "🚀 **Prestige**: %s\n" ..
+                "🏝️ **Islands**: %s\n" ..
+                "🐾 **Gold Team**: %s\n" ..
+                "🌳 **Skill Tree**: %s\n" ..
+                "🔥 **Magma Skin**: %s",
+                currentActivity,
+                currentPhaseText,
+                ProgAPI.FormatNumber(pData.Clicks),
+                ProgAPI.FormatNumber(pData.Rebirths),
+                ProgAPI.FormatNumber(pData.Gems),
+                ProgAPI.FormatNumber(pData.Coins),
+                ProgAPI.FormatNumber(pData.SpaceCoins),
+                prestStr,
+                islandProgressStr,
+                goldStr,
+                stStr,
+                magmaStr
+            )
+        })
+    end)
+    if not ok then
+        pcall(function()
+            LiveStatusCard:Set({
+                Title = "CURRENT: " .. tostring(currentActivity),
+                Content = string.format("📊 **Activity**: %s\n🎯 **Phase**: %s\n⚡ Running Auto Progression...", tostring(currentActivity), tostring(currentPhaseText))
+            })
+        end)
+    end
+end
+
+-- Refresh telemetry immediately on startup
+task.spawn(function()
+    task.wait(0.2)
+    updateTelemetry()
+end)
+
+-- THREAD 5: TELEMETRY DISPLAY REFRESH LOOP
 table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(0.5)
         if not isRunning then break end
-
-        pcall(function()
-            local pData = AutoProgAPI.GetPlayerData()
-            local lockedIsland = AutoProgAPI.GetNextLockedIsland()
-            local totalIslands = #AutoProgAPI.OrderedIslands
-
-            local islandProgressStr = ""
-            if lockedIsland then
-                local pct = math.clamp(math.floor((pData.Clicks / math.max(1, lockedIsland.cost)) * 100), 0, 100)
-                islandProgressStr = string.format("Current: %s • Next: %s (%d%% of %s)", pData.CurrentIsland, lockedIsland.name, pct, AutoProgAPI.FormatNumber(lockedIsland.cost))
-            else
-                islandProgressStr = string.format("All %d/%d Islands Unlocked! (100%% Complete)", totalIslands, totalIslands)
-            end
-
-            local prestInfo = AutoProgAPI.GetPrestigeInfo()
-            local prestStr = prestInfo.CanPrestige and "READY TO PRESTIGE!" or string.format("Tier %d (Need %s Rebirths)", prestInfo.CurrentPrestige, AutoProgAPI.FormatNumber(prestInfo.RequiredRebirths))
-
-            local stProg = AutoProgAPI.GetSkillTreeProgress()
-            local stStr = stProg and string.format("Coins: %d/%d (%s) • Tech: %d/%d (%s)",
-                stProg.CoinsBought, stProg.CoinsTotal, stProg.CoinsComplete and "DONE" or "In Progress",
-                stProg.TechBought, stProg.TechTotal, stProg.TechComplete and "DONE" or "In Progress"
-            ) or "N/A"
-
-            local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
-            local goldStr = isAllGold and "100% FULL GOLD TEAM" or "In Progress (Hatching Best Egg...)"
-
-            local skinStatus = AutoProgAPI.CheckAndEquipMagmaSkin
-            local magmaPct = math.clamp(math.floor((pData.Rebirths / 1e19) * 100), 0, 100)
-            local magmaStr = (pData.Rebirths >= 1e19) and "UNLOCKED / ACTIVE" or string.format("%d%% of 10 Qi (%s/10 Qi)", magmaPct, AutoProgAPI.FormatNumber(pData.Rebirths))
-
-            LiveStatusCard:Set({
-                Title = "Speedrun Telemetry — " .. os.date("%X"),
-                Content = string.format(
-                    "📊 **Status**: %s\n" ..
-                    "🎯 **Phase**: %s\n" ..
-                    "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
-                    "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
-                    "🚀 **Prestige**: %s\n" ..
-                    "🏝️ **Islands**: %s\n" ..
-                    "🐾 **Gold Team**: %s\n" ..
-                    "🌳 **Skill Tree**: %s\n" ..
-                    "🔥 **Magma Skin**: %s",
-                    currentActivity,
-                    currentPhaseText,
-                    AutoProgAPI.FormatNumber(pData.Clicks),
-                    AutoProgAPI.FormatNumber(pData.Rebirths),
-                    AutoProgAPI.FormatNumber(pData.Gems),
-                    AutoProgAPI.FormatNumber(pData.Coins),
-                    AutoProgAPI.FormatNumber(pData.SpaceCoins),
-                    prestStr,
-                    islandProgressStr,
-                    goldStr,
-                    stStr,
-                    magmaStr
-                )
-            })
-        end)
+        updateTelemetry()
     end
 end))
 
