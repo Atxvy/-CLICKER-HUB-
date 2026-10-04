@@ -165,13 +165,13 @@ function UILibrary.CreateWindow(config)
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Name = "Title"
-    TitleLabel.Size = UDim2.new(0, 300, 1, 0)
+    TitleLabel.Size = UDim2.new(1, -90, 1, 0)
     TitleLabel.Position = UDim2.new(0, 16, 0, 0)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = Title .. "  <font color=\"rgb(140,130,165)\">|</font>  <font color=\"rgb(192,132,252)\">" .. SubTitle .. "</font>"
     TitleLabel.RichText = true
     TitleLabel.TextColor3 = Color3.fromRGB(245, 240, 255)
-    TitleLabel.TextSize = 13
+    TitleLabel.TextSize = 15
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = Header
@@ -185,7 +185,7 @@ function UILibrary.CreateWindow(config)
     CloseBtn.BackgroundTransparency = 1
     CloseBtn.Text = "✕"
     CloseBtn.TextColor3 = Color3.fromRGB(190, 180, 205)
-    CloseBtn.TextSize = 12
+    CloseBtn.TextSize = 14
     CloseBtn.Font = Enum.Font.GothamBold
     CloseBtn.Parent = Header
 
@@ -201,7 +201,7 @@ function UILibrary.CreateWindow(config)
     MinBtn.BackgroundTransparency = 1
     MinBtn.Text = "─"
     MinBtn.TextColor3 = Color3.fromRGB(190, 180, 205)
-    MinBtn.TextSize = 12
+    MinBtn.TextSize = 14
     MinBtn.Font = Enum.Font.GothamBold
     MinBtn.Parent = Header
 
@@ -512,8 +512,8 @@ function UILibrary.CreateWindow(config)
         TabLabel.BackgroundTransparency = 1
         TabLabel.Text = tabIcon .. "  " .. tabTitle
         TabLabel.TextColor3 = Color3.fromRGB(160, 150, 175)
-        TabLabel.TextSize = 12
-        TabLabel.Font = Enum.Font.GothamMedium
+        TabLabel.TextSize = 13
+        TabLabel.Font = Enum.Font.GothamBold
         TabLabel.TextXAlignment = Enum.TextXAlignment.Left
         TabLabel.Parent = TabBtn
 
@@ -579,7 +579,7 @@ function UILibrary.CreateWindow(config)
         local function createBaseRow(titleText, descText)
             local hasDesc = descText and descText ~= ""
             local el = Instance.new("Frame")
-            el.Size = UDim2.new(1, 0, 0, hasDesc and 58 or 42)
+            el.Size = UDim2.new(1, 0, 0, hasDesc and 64 or 46)
             el.BackgroundColor3 = Color3.fromRGB(25, 22, 35)
             el.BorderSizePixel = 0
             el.Parent = ContentScroll
@@ -595,29 +595,31 @@ function UILibrary.CreateWindow(config)
             s.Parent = el
 
             local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, -165, 0, 18)
-            title.Position = hasDesc and UDim2.new(0, 12, 0, 9) or UDim2.new(0, 12, 0.5, -9)
+            title.Size = UDim2.new(1, -165, 0, 20)
+            title.Position = hasDesc and UDim2.new(0, 12, 0, 9) or UDim2.new(0, 12, 0.5, -10)
             title.BackgroundTransparency = 1
             title.Text = titleText
             title.TextColor3 = Color3.fromRGB(245, 240, 255)
-            title.TextSize = 13
-            title.Font = Enum.Font.GothamMedium
+            title.TextSize = 14
+            title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.TextWrapped = true
+            title.RichText = true
             title.Parent = el
 
             if hasDesc then
                 local desc = Instance.new("TextLabel")
-                desc.Size = UDim2.new(1, -165, 0, 28)
-                desc.Position = UDim2.new(0, 12, 0, 27)
+                desc.Size = UDim2.new(1, -165, 0, 30)
+                desc.Position = UDim2.new(0, 12, 0, 30)
                 desc.BackgroundTransparency = 1
                 desc.Text = descText
-                desc.TextColor3 = Color3.fromRGB(155, 145, 175)
-                desc.TextSize = 11
-                desc.Font = Enum.Font.Gotham
+                desc.TextColor3 = Color3.fromRGB(165, 155, 185)
+                desc.TextSize = 12
+                desc.Font = Enum.Font.GothamMedium
                 desc.TextXAlignment = Enum.TextXAlignment.Left
                 desc.TextYAlignment = Enum.TextYAlignment.Top
                 desc.TextWrapped = true
+                desc.RichText = true
                 desc.Parent = el
             end
 
@@ -629,11 +631,11 @@ function UILibrary.CreateWindow(config)
 
         function TabMethods:AddSection(text)
             local sec = Instance.new("TextLabel")
-            sec.Size = UDim2.new(1, 0, 0, 24)
+            sec.Size = UDim2.new(1, 0, 0, 28)
             sec.BackgroundTransparency = 1
             sec.Text = string.upper(text)
             sec.TextColor3 = Color3.fromRGB(192, 132, 252)
-            sec.TextSize = 11
+            sec.TextSize = 13
             sec.Font = Enum.Font.GothamBold
             sec.TextXAlignment = Enum.TextXAlignment.Left
             sec.Parent = ContentScroll
@@ -643,7 +645,7 @@ function UILibrary.CreateWindow(config)
         function TabMethods:AddParagraph(opts)
             opts = opts or {}
             local el = Instance.new("Frame")
-            local minHeight = opts.Height or 78
+            local minHeight = opts.Height or 84
             el.Size = UDim2.new(1, 0, 0, minHeight)
             el.AutomaticSize = Enum.AutomaticSize.Y
             el.BackgroundColor3 = Color3.fromRGB(25, 21, 35)
@@ -661,21 +663,24 @@ function UILibrary.CreateWindow(config)
             s.Parent = el
 
             local pad = Instance.new("UIPadding")
-            pad.PaddingTop = UDim.new(0, 8)
-            pad.PaddingBottom = UDim.new(0, 10)
-            pad.PaddingLeft = UDim.new(0, 12)
-            pad.PaddingRight = UDim.new(0, 12)
+            pad.PaddingTop = UDim.new(0, 10)
+            pad.PaddingBottom = UDim.new(0, 12)
+            pad.PaddingLeft = UDim.new(0, 14)
+            pad.PaddingRight = UDim.new(0, 14)
             el.Name = "Paragraph_" .. tostring((opts.Title or "Card"):gsub("%s+", ""))
             pad.Parent = el
 
+            local titleSize = opts.TitleSize or 16
+            local bodySize = opts.BodySize or 14
+
             local title = Instance.new("TextLabel")
             title.Name = "ParagraphTitle"
-            title.Size = UDim2.new(1, 0, 0, 18)
+            title.Size = UDim2.new(1, 0, 0, titleSize + 6)
             title.Position = UDim2.new(0, 0, 0, 0)
             title.BackgroundTransparency = 1
             title.Text = opts.Title or ""
             title.TextColor3 = Color3.fromRGB(192, 132, 252)
-            title.TextSize = 12
+            title.TextSize = titleSize
             title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Parent = el
@@ -684,15 +689,16 @@ function UILibrary.CreateWindow(config)
             body.Name = "ParagraphBody"
             body.AutomaticSize = Enum.AutomaticSize.Y
             body.Size = UDim2.new(1, 0, 0, 0)
-            body.Position = UDim2.new(0, 0, 0, 20)
+            body.Position = UDim2.new(0, 0, 0, titleSize + 8)
             body.BackgroundTransparency = 1
             body.Text = opts.Content or ""
-            body.TextColor3 = Color3.fromRGB(215, 210, 230)
-            body.TextSize = 11
-            body.Font = Enum.Font.Gotham
+            body.TextColor3 = Color3.fromRGB(230, 225, 245)
+            body.TextSize = bodySize
+            body.Font = Enum.Font.GothamMedium
             body.TextXAlignment = Enum.TextXAlignment.Left
             body.TextYAlignment = Enum.TextYAlignment.Top
             body.TextWrapped = true
+            body.RichText = true
             body.Parent = el
 
             local ParaObj = {
@@ -719,13 +725,13 @@ function UILibrary.CreateWindow(config)
             local el = createBaseRow(opts.Title or "Button", opts.Description)
 
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, 86, 0, 28)
-            btn.Position = UDim2.new(1, -98, 0.5, -14)
+            btn.Size = UDim2.new(0, 96, 0, 30)
+            btn.Position = UDim2.new(1, -108, 0.5, -15)
             btn.BackgroundColor3 = Color3.fromRGB(42, 32, 58)
             btn.Text = "Execute"
             btn.TextColor3 = Color3.fromRGB(230, 225, 240)
-            btn.TextSize = 12
-            btn.Font = Enum.Font.GothamMedium
+            btn.TextSize = 13
+            btn.Font = Enum.Font.GothamBold
             btn.Parent = el
 
             local btnCorner = Instance.new("UICorner")
@@ -835,8 +841,8 @@ function UILibrary.CreateWindow(config)
             title.BackgroundTransparency = 1
             title.Text = opts.Title or "Slider"
             title.TextColor3 = Color3.fromRGB(245, 240, 255)
-            title.TextSize = 13
-            title.Font = Enum.Font.GothamMedium
+            title.TextSize = 14
+            title.Font = Enum.Font.GothamBold
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Parent = el
 
@@ -846,7 +852,7 @@ function UILibrary.CreateWindow(config)
             valLabel.BackgroundTransparency = 1
             valLabel.Text = tostring(currentVal) .. suffix
             valLabel.TextColor3 = Color3.fromRGB(192, 132, 252)
-            valLabel.TextSize = 12
+            valLabel.TextSize = 13
             valLabel.Font = Enum.Font.GothamBold
             valLabel.TextXAlignment = Enum.TextXAlignment.Right
             valLabel.Parent = el
@@ -941,8 +947,8 @@ function UILibrary.CreateWindow(config)
             dropBtn.BackgroundColor3 = Color3.fromRGB(36, 28, 48)
             dropBtn.Text = "  " .. tostring(selected)
             dropBtn.TextColor3 = Color3.fromRGB(230, 225, 240)
-            dropBtn.TextSize = 11
-            dropBtn.Font = Enum.Font.GothamMedium
+            dropBtn.TextSize = 13
+            dropBtn.Font = Enum.Font.GothamBold
             dropBtn.TextXAlignment = Enum.TextXAlignment.Left
             dropBtn.Parent = el
 
@@ -1008,8 +1014,8 @@ function UILibrary.CreateWindow(config)
                     itemBtn.BackgroundTransparency = 1
                     itemBtn.Text = "  " .. tostring(val)
                     itemBtn.TextColor3 = Color3.fromRGB(220, 215, 235)
-                    itemBtn.TextSize = 11
-                    itemBtn.Font = Enum.Font.Gotham
+                    itemBtn.TextSize = 12
+                    itemBtn.Font = Enum.Font.GothamMedium
                     itemBtn.TextXAlignment = Enum.TextXAlignment.Left
                     itemBtn.ZIndex = 81
                     itemBtn.Parent = dropMenu
@@ -1075,8 +1081,8 @@ function UILibrary.CreateWindow(config)
             box.PlaceholderText = opts.Placeholder or "Type here..."
             box.TextColor3 = Color3.fromRGB(230, 225, 240)
             box.PlaceholderColor3 = Color3.fromRGB(130, 120, 150)
-            box.TextSize = 11
-            box.Font = Enum.Font.Gotham
+            box.TextSize = 13
+            box.Font = Enum.Font.GothamMedium
             box.TextXAlignment = Enum.TextXAlignment.Left
             box.Parent = el
 
