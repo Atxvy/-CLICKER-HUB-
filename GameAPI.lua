@@ -2605,12 +2605,6 @@ function GameAPI.SuppressBlackShade()
 
     local function hookOverlayGui(gui)
         if gui.Name == "GUIOverlay" then
-            gui.Enabled = false
-            gui:GetPropertyChangedSignal("Enabled"):Connect(function()
-                if gui.Enabled then
-                    gui.Enabled = false
-                end
-            end)
             local function fixOverlayFrame(f)
                 if f.Name == "Overlay" and f:IsA("Frame") then
                     f.Visible = false
