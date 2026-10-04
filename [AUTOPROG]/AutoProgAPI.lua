@@ -856,7 +856,6 @@ end
 
 function ProgAPI.BuyNextRebirthButton(): boolean
     local stats = Stats.Local(true) or {}
-    local gems = stats.Currency and stats.Currency.Gems or 0
     local ownedList = stats.OwnedRebirthButtons or {}
     local unlockedIslands = stats.UnlockedIslands or {"Spawn"}
 
@@ -884,17 +883,20 @@ function ProgAPI.BuyNextRebirthButton(): boolean
         if not ownedMap[idx] then
             local rData = Constants.Rebirths[idx]
             local islandOk = (rData.RequiredIsland == nil or unlockedMap[rData.RequiredIsland] == true)
-            if islandOk and gems >= (rData.Cost or 0) then
-                local ok = Channels.RebirthShop:InvokeServer("BuyRebirthButton", idx)
-                if ok == true then
+            if islandOk then
+                local ok, res = pcall(function()
+                    return Channels.RebirthShop:InvokeServer("BuyRebirthButton", idx)
+                end)
+                if ok and res == true then
                     boughtAny = true
                     ownedMap[idx] = true
-                    gems = gems - (rData.Cost or 0)
-                    task.wait(0.1)
+                    task.wait(0.08)
                 else
+                    -- Server denied purchase (insufficient gems or prerequisites not met)
                     break
                 end
             else
+                -- Next required island is locked
                 break
             end
         end
@@ -904,19 +906,18 @@ end
 
 function ProgAPI.BuyNextDoubleJump(): boolean
     local stats = Stats.Local(true) or {}
-    local gems = stats.Currency and stats.Currency.Gems or 0
-    local currentDJ = stats.DoubleJumps or 0
+    local currentDJ = (stats.Upgrades and stats.Upgrades.DoubleJumps) or stats.DoubleJumps or 0
     local nextDJ = currentDJ + 1
 
-    local djData = Constants.DoubleJumps and Constants.DoubleJumps[nextDJ]
-    if djData and gems >= (djData.Cost or 0) and Channels.RebirthShop then
-        local ok = pcall(function()
-            return Channels.RebirthShop:InvokeServer("BuyDoubleJump", nextDJ)
+    if Channels.RebirthShop then
+        local ok, res = pcall(function()
+            return Channels.RebirthShop:InvokeServer("BuyDoubleJumpUpgrade", nextDJ)
         end)
-        return ok == true
+        return ok and res == true
     end
     return false
 end
+
 
 function ProgAPI.BuyAffordableMiniUpgrades(): number
     if not Directory.MiniUpgrades or not Channels.MiniUpgrades then return 0 end
