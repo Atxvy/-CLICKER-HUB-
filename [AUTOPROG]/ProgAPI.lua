@@ -54,6 +54,9 @@ pcall(function() AutoRebirthFrontend = require(Client:WaitForChild("AutoRebirthF
 local SkillTreeFrontend = nil
 pcall(function() SkillTreeFrontend = require(Client:WaitForChild("SkillTreeFrontend", 5)) end)
 
+local QuestFrontend = nil
+pcall(function() QuestFrontend = require(Client:WaitForChild("QuestFrontend", 5)) end)
+
 -- Channels
 local Channels = {
     Click = Network.Channel("Click"),
@@ -72,13 +75,13 @@ local Channels = {
     Upgrades = Network.Channel("Upgrades"),
     RebirthShop = Network.Channel("RebirthShop"),
     MiniUpgrades = Network.Channel("MiniUpgrades"),
-    Potions = Network.Channel("Potions"),
-    Fruits = Network.Channel("Fruits"),
     Crafting = Network.Channel("Crafting"),
     RNGUpgrades = Network.Channel("RNGUpgrades"),
     TradingPlazaTeleport = Network.Channel("TradingPlazaTeleport"),
     SkillTree = Network.Channel("SkillTree"),
-    Quests = Network.Channel("Quests"),
+    Quest = Network.Channel("Quest"),
+    Quests = Network.Channel("Quest"),
+    StarterPetAB = Network.Channel("StarterPetAB"),
     Prestige = Network.Channel("Prestige"),
     Breakables = Network.Channel("Breakables"),
     SummerEvent2026 = Network.Channel("SummerEvent2026"),
@@ -93,6 +96,7 @@ ProgAPI.Directory = Directory
 ProgAPI.Constants = Constants
 ProgAPI.Balancing = Balancing
 ProgAPI.AchievementsFrontend = AchievementsFrontend
+ProgAPI.QuestFrontend = QuestFrontend
 ProgAPI.AutoRebirthFrontend = AutoRebirthFrontend
 ProgAPI.SkillTreeFrontend = SkillTreeFrontend
 ProgAPI.BreakablesFrontend = BreakablesFrontend
@@ -100,6 +104,37 @@ ProgAPI.BreakablesFrontend = BreakablesFrontend
 -- Safe no-op to avoid interfering with game native UI modals and tabs
 function ProgAPI.SuppressBlackShade()
     return true
+end
+
+-- Checks if player is new and auto-claims starter pet (Cat)
+function ProgAPI.CheckAndSelectStarterPet(): boolean
+    if not Channels.StarterPetAB then return false end
+    local isNew = false
+    local checkOk, checkRes = pcall(function()
+        return Channels.StarterPetAB:InvokeServer("Check")
+    end)
+    if checkOk and checkRes == true then
+        isNew = true
+    end
+
+    if isNew then
+        local claimOk, claimRes = pcall(function()
+            return Channels.StarterPetAB:InvokeServer("Claim", "Cat")
+        end)
+        if claimOk and claimRes == true then
+            pcall(function()
+                local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+                local selectGui = pGui and pGui:FindFirstChild("SelectStarterPet")
+                if selectGui then
+                    selectGui.Enabled = false
+                end
+            end)
+            task.wait(0.3)
+            pcall(ProgAPI.EquipBest)
+            return true
+        end
+    end
+    return false
 end
 
 
@@ -473,52 +508,61 @@ function ProgAPI.TeleportToIsland(islandName: string): boolean
 end
 
 -- Checks if Hell is unlocked and navigates to the World 2 (Techworld) portal
-function ProgAPI.CheckAndEnterTechWorld(): boolean
-    if not ProgAPI.IsIslandUnlocked("Hell") then return false end
+function ProgAPI.CheckAndEnterTechWorld(): (boolean, string?)
+    if not ProgAPI.IsIslandUnlocked("Hell") then return false, "Hell island not unlocked yet" end
     local stats = Stats.Local(true) or {}
-    local curWorld = stats.CurrentWorld or "Overworld"
-
-    -- 1. Try server remote unlock & teleport to Techworld
-    if Channels.Portals then
-        pcall(function() Channels.Portals:InvokeServer("UnlockWorld", "Techworld") end)
-        pcall(function() Channels.Portals:InvokeServer("UnlockWorld", "Space") end)
-        pcall(function() Channels.Portals:InvokeServer("TeleportToWorld", "Techworld") end)
+    local prestiges = stats.Prestiges or 0
+    if prestiges < 1 then
+        return false, "You need 1 Prestige to enter Tech World!"
     end
 
-    -- 2. Physical Portal stepping on Hell island
+    local curWorld = stats.CurrentWorld or "Overworld"
+    if curWorld == "Techworld" or curWorld == "Space" then
+        if not ProgAPI.IsIslandUnlocked("Base") then
+            ProgAPI.UnlockIsland("Base")
+        end
+        return true, "Already in Tech World"
+    end
+
+    -- Navigate to TechPortal Hitbox in workspace._MAP.Interact.TechPortal
+    local mapFolder = workspace:FindFirstChild("_MAP")
+    local interact = mapFolder and mapFolder:FindFirstChild("Interact")
+    local techPortal = interact and interact:FindFirstChild("TechPortal")
+    local hitbox = techPortal and (techPortal:FindFirstChild("Hitbox") or techPortal:FindFirstChildWhichIsA("BasePart"))
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        local mapFolder = workspace:FindFirstChild("_MAP")
-        local portalsFolder = mapFolder and mapFolder:FindFirstChild("Portals")
-        local techPortal = portalsFolder and (portalsFolder:FindFirstChild("Techworld") or portalsFolder:FindFirstChild("Space") or portalsFolder:FindFirstChild("Base"))
-        
-        if not techPortal and mapFolder and mapFolder:FindFirstChild("Islands") and mapFolder.Islands:FindFirstChild("Hell") then
-            local hellInteract = mapFolder.Islands.Hell:FindFirstChild("Interact")
-            if hellInteract then
-                techPortal = hellInteract:FindFirstChild("Portal", true) or hellInteract:FindFirstChild("Portals", true)
-            end
-        end
 
-        if techPortal then
-            local part = techPortal:FindFirstChild("Portal") or techPortal:FindFirstChildWhichIsA("BasePart") or techPortal.PrimaryPart
-            if part then
-                local prevCF = hrp.CFrame
-                hrp.CFrame = part.CFrame + Vector3.new(0, 2, 0)
-                task.wait(0.25)
-                pcall(function() Channels.Portals:InvokeServer("UnlockIslandByHitbox", "Base") end)
-                pcall(function() Channels.Portals:InvokeServer("TeleportToWorld", "Techworld") end)
-                task.wait(0.2)
+    if hrp and hitbox then
+        local savedCF = hrp.CFrame
+        hrp.CFrame = hitbox.CFrame + Vector3.new(0, 2, 0)
+        task.wait(0.2)
+        local ok, res, msg = pcall(function()
+            return Channels.Portals:InvokeServer("EnterTechworld")
+        end)
+        task.wait(0.3)
+        if ok and res == true then
+            if not ProgAPI.IsIslandUnlocked("Base") then
+                ProgAPI.UnlockIsland("Base")
             end
+            return true, "Successfully entered Tech World!"
         end
     end
 
-    -- Try unlocking first tech world island (Base)
-    if not ProgAPI.IsIslandUnlocked("Base") then
-        ProgAPI.UnlockIsland("Base")
+    -- Direct remote attempt
+    if Channels.Portals then
+        local ok, res, msg = pcall(function()
+            return Channels.Portals:InvokeServer("EnterTechworld")
+        end)
+        if ok and res == true then
+            if not ProgAPI.IsIslandUnlocked("Base") then
+                ProgAPI.UnlockIsland("Base")
+            end
+            return true, "Successfully entered Tech World!"
+        end
     end
 
-    return true
+    return false, "Could not enter Tech World"
 end
 
 function ProgAPI.UnlockIsland(islandName: string): boolean
@@ -624,28 +668,37 @@ end
 -- PETS, EGG HATCHING & GOLDEN CRAFTING
 --==============================================================================
 local REAL_PROGRESSION_EGGS = {
-    { name = "BasicEgg",       cost = 250,         island = "Spawn" },
-    { name = "FlowerEgg",      cost = 2750,        island = "Spawn" },
-    { name = "AcornEgg",       cost = 175000,      island = "Spawn" },
-    { name = "SnowmanEgg",     cost = 1500000,     island = "Winter" },
-    { name = "WoodEgg",        cost = 40000000,    island = "Forest" },
-    { name = "CactusEgg",      cost = 300000000,   island = "Desert" },
-    { name = "CottonCandyEgg", cost = 20000000000, island = "Candy" },
-    { name = "ChocolateEgg",   cost = 70000000000, island = "Candy" },
-    { name = "PalmTreeEgg",    cost = 450000000000, island = "Beach" },
-    { name = "BeachBallEgg",   cost = 900000000000, island = "Beach" },
-    { name = "BlossomEgg",     cost = 1e14,        island = "Sakura" },
-    { name = "TechEgg",        cost = 5e14,        island = "Base" },
-    { name = "CosmicEgg",      cost = 1e15,        island = "Spaceship" },
-    { name = "VolcanoEgg",     cost = 1e16,        island = "Volcano" },
-    { name = "DiscoEgg",       cost = 2e17,        island = "Rave" },
-    { name = "AngelEgg",       cost = 4e18,        island = "Heaven" },
-    { name = "CastleEgg",      cost = 5e19,        island = "Castle" },
-    { name = "CursedEgg",      cost = 1.5e20,      island = "Mystical" },
-    { name = "DemonicEgg",     cost = 1.5e22,      island = "Hell" },
-    { name = "FragmentedEgg",  cost = 5e23,        island = "Fragment" },
-    { name = "MatrixEgg",      cost = 2.5e25,      island = "Matrix" },
-    { name = "CandyCornEgg",   cost = 10000000,    island = "Spawn" },
+    -- World 1 (Overworld)
+    { name = "BasicEgg",        cost = 250,             island = "Spawn" },
+    { name = "FlowerEgg",       cost = 2750,            island = "Spawn" },
+    { name = "AcornEgg",        cost = 175000,          island = "Winter" },
+    { name = "SnowmanEgg",      cost = 1500000,         island = "Winter" },
+    { name = "WoodEgg",         cost = 40000000,        island = "Forest" },
+    { name = "CactusEgg",       cost = 300000000,       island = "Desert" },
+    { name = "CottonCandyEgg",  cost = 20000000000,     island = "Candy" },
+    { name = "ChocolateEgg",    cost = 70000000000,     island = "Candy" },
+    { name = "PalmTreeEgg",     cost = 450000000000,    island = "Beach" },
+    { name = "BeachBallEgg",    cost = 900000000000,    island = "Beach" },
+    { name = "BlossomEgg",      cost = 1e14,            island = "Sakura" },
+    { name = "VolcanoEgg",      cost = 1e16,            island = "Volcano" },
+    { name = "DiscoEgg",        cost = 2e17,            island = "Rave" },
+    { name = "AngelEgg",        cost = 4e18,            island = "Heaven" },
+    { name = "CastleEgg",       cost = 5e19,            island = "Castle" },
+    { name = "CursedEgg",       cost = 1.5e20,          island = "Mystical" },
+    { name = "RockEgg",         cost = 1e21,            island = "Mystical" },
+    { name = "DemonicEgg",      cost = 1.5e22,          island = "Hell" },
+
+    -- World 2 (Tech World)
+    { name = "TechEgg",         cost = 4.5e22,          island = "Base" },
+    { name = "HolographicEgg",  cost = 1.5e23,          island = "Spaceship" },
+    { name = "404Egg",          cost = 5e23,            island = "Fragment" },
+    { name = "RedTechEgg",      cost = 1e24,            island = "Matrix" },
+    { name = "FragmentedEgg",   cost = 5e24,            island = "Fragment" },
+    { name = "MatrixEgg",       cost = 2.5e25,          island = "Matrix" },
+
+    -- Event Eggs (Spawn) - Costs 1e16 (10 Qa clicks), only affordable when clicks >= 1e16!
+    { name = "CandyCornEgg",    cost = 1e16,            island = "Spawn" },
+    { name = "SixSevenEgg",     cost = 1e16,            island = "Spawn" },
 }
 
 local eggData = {}
@@ -653,16 +706,19 @@ for _, e in ipairs(REAL_PROGRESSION_EGGS) do
     eggData[e.name] = { cost = e.cost, island = e.island, name = e.name }
 end
 
--- Dynamically incorporate any live eggs from Directory.Eggs
+-- Dynamically incorporate / update any live eggs from Directory.Eggs
 pcall(function()
     if Directory and Directory.Eggs then
         for name, data in pairs(Directory.Eggs) do
             local isRobux = (data.Currency == "Robux" or (data.Price and data.Price.Id == "Robux") or name:find("Robux"))
-            if not isRobux then
-                local cost = data.Cost or (data.Price and data.Price.Amount)
-                local isl = data.RequiredIsland or data.Island
-                if cost and isl then
-                    eggData[name] = { cost = cost, island = isl, name = name }
+            local info = data.Info or {}
+            local cur = info.Currency or data.Currency or "Clicks"
+            if not isRobux and cur == "Clicks" then
+                local cost = info.Cost or data.Cost or (data.Price and data.Price.Amount)
+                if cost and cost > 0 and cost < math.huge then
+                    if eggData[name] then
+                        eggData[name].cost = cost
+                    end
                 end
             end
         end
@@ -772,14 +828,13 @@ function ProgAPI.FindEggModel(eggName: string): (Instance?, BasePart?)
 end
 
 -- Retrieves best affordable egg for the current furthest island or specified target island
--- World 1 priority: if clicks >= 10M, hatch CandyCornEgg (Event Egg on Spawn) until full gold team!
+-- Scales naturally from BasicEgg -> Island Eggs -> Event Egg (CandyCornEgg / SixSevenEgg at 1e16 clicks)
 function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
     local stats = Stats.Local(true) or {}
     local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
-    local isAllGold = ProgAPI.IsEquippedTeamAllGold()
     local isFullEventGold = ProgAPI.HasFullGoldEventTeam()
 
-    -- 1. If targetIsland explicitly requested, match best on that island
+    -- 1. If targetIsland explicitly requested, match best affordable egg on that island
     if targetIsland then
         local bestEggName, bestCost = nil, 0
         for eggName, meta in pairs(eggData) do
@@ -795,47 +850,44 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
         end
     end
 
-    -- 2. World 1 Event Egg priority: CandyCornEgg (10M clicks) on Spawn
-    local curWorld = stats.CurrentWorld or "Overworld"
-    local eventEggMeta = eggData["CandyCornEgg"] or eggData["EventEgg"]
-    local eventCost = eventEggMeta and eventEggMeta.cost or 10000000
-    if clicks >= eventCost and not isFullEventGold and (curWorld == "Overworld" or not ProgAPI.AreAllIslandsUnlocked()) then
-        local eName = eggData["CandyCornEgg"] and "CandyCornEgg" or (eggData["EventEgg"] and "EventEgg" or "CandyCornEgg")
-        return { name = eName, cost = eventCost, island = (eggData[eName] and eggData[eName].island) or "Spawn" }
-    end
-
-    -- 3. Match highest affordable egg on the furthest unlocked island
-    local island = targetIsland or ProgAPI.GetFurthestUnlockedIsland()
+    -- 2. Progressive Egg Selection:
+    -- Searches all unlocked islands (and Spawn event eggs) for the highest egg cost <= clicks!
     local bestEggName = nil
     local bestCost = 0
 
     for eggName, meta in pairs(eggData) do
-        if meta.island == island and meta.cost <= clicks then
-            if meta.cost >= bestCost then
-                bestCost = meta.cost
-                bestEggName = eggName
-            end
-        end
-    end
+        local isEvent = (eggName == "CandyCornEgg" or eggName == "SixSevenEgg")
+        local isIslandAvailable = ProgAPI.IsIslandUnlocked(meta.island) or (meta.island == "Spawn")
 
-    -- 4. Fallback to the highest affordable egg across any unlocked island
-    if not bestEggName then
-        for eggName, meta in pairs(eggData) do
-            if ProgAPI.IsIslandUnlocked(meta.island) and meta.cost <= clicks then
-                if meta.cost >= bestCost then
+        if isIslandAvailable and meta.cost <= clicks then
+            local eligible = true
+            if isEvent then
+                -- Event eggs only hatch if clicks >= 1e16 and player still needs an event gold team
+                eligible = (clicks >= 1e16) and (not isFullEventGold)
+            end
+
+            if eligible then
+                if meta.cost > bestCost then
                     bestCost = meta.cost
+                    bestEggName = eggName
+                elseif meta.cost == bestCost and isEvent then
                     bestEggName = eggName
                 end
             end
         end
     end
 
+    -- 3. Fallback: if player has less than 250 clicks, default to BasicEgg
     if not bestEggName then
         bestEggName = "BasicEgg"
         bestCost = 250
     end
 
-    return { name = bestEggName, cost = bestCost, island = eggData[bestEggName] and eggData[bestEggName].island or "Spawn" }
+    return {
+        name = bestEggName,
+        cost = bestCost,
+        island = eggData[bestEggName] and eggData[bestEggName].island or "Spawn"
+    }
 end
 
 function ProgAPI.TeleportToEgg(eggName: string): boolean
@@ -1283,31 +1335,49 @@ function ProgAPI.BuyAffordableMiniUpgrades(): number
     if not Channels.MiniUpgrades then return 0 end
     local stats = Stats.Local(true) or {}
     local gems = stats.Currency and stats.Currency.Gems or 0
+    local ownedMini = stats.MiniUpgrades or {}
     local bought = 0
 
-    local islandNames = { "Spawn", "Winter", "Forest", "Desert", "Candy", "Beach", "Sakura", "Base", "Spaceship", "Volcano", "Rave", "Heaven", "Castle", "Mystical", "Hell", "Fragment", "Matrix" }
+    local miniFolder = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Interact")
+        and workspace._MAP.Interact:FindFirstChild("MiniUpgrades")
+    if not miniFolder then return 0 end
 
-    for _, isl in ipairs(islandNames) do
-        if ProgAPI.IsIslandUnlocked(isl) then
-            local cost = 500000000
-            pcall(function()
-                if Directory.MiniUpgrades and Directory.MiniUpgrades[isl] then
-                    cost = Directory.MiniUpgrades[isl].Cost or cost
-                end
-            end)
-            local owned = stats.MiniUpgrades and stats.MiniUpgrades[isl]
-            if not owned and gems >= cost then
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 0 end
+
+    local upgradeList = { "AutoClick", "WalkSpeed1", "PetEquip1", "Storage1" }
+
+    for _, id in ipairs(upgradeList) do
+        local dirData = Directory.MiniUpgrades and Directory.MiniUpgrades[id]
+        local cost = dirData and dirData.Cost or 999999999
+        local isOwned = ownedMini[id] == true
+
+        if not isOwned and gems >= cost then
+            local model = miniFolder:FindFirstChild(id)
+            local targetPart = model and (model:FindFirstChild("Part") or model:FindFirstChildWhichIsA("BasePart"))
+            if targetPart then
+                local savedCF = hrp.CFrame
+                hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+                task.wait(0.15)
                 local ok, res = pcall(function()
-                    return Channels.MiniUpgrades:InvokeServer("Buy", isl)
+                    return Channels.MiniUpgrades:InvokeServer("Purchase", id)
                 end)
                 if ok and res == true then
-                    gems = gems - cost
                     bought = bought + 1
-                    task.wait(0.08)
+                    gems = gems - cost
+                    ownedMini[id] = true
                 end
+                task.wait(0.1)
+                if hrp and hrp.Parent then
+                    hrp.CFrame = savedCF
+                end
+                task.wait(0.1)
             end
         end
     end
+
     return bought
 end
 
@@ -1932,6 +2002,50 @@ function ProgAPI.StepBreakablesPipeline(): (string, string)
     end
 end
 
+-- Automatically claims all completed quests (Legacy, Challenges, Clans)
+function ProgAPI.ClaimCompletedQuests(): number
+    if not Channels.Quest then return 0 end
+    local stats = Stats.Local(true) or {}
+    local quests = stats.Quests or {}
+    local claimedCount = 0
+
+    for qId, qData in pairs(quests) do
+        if type(qData) == "table" and qData.Completed ~= true then
+            local tier = qData.Tier or 1
+            local claimable = false
+
+            if QuestFrontend and QuestFrontend.GetQuest then
+                local qDef = QuestFrontend.GetQuest(qId)
+                local curTier = QuestFrontend.GetCurrentTier and QuestFrontend.GetCurrentTier(qId) or tier
+                local req = QuestFrontend.GetRequiredAmount and QuestFrontend.GetRequiredAmount(qId) or qData.Amount or 0
+                local prog = QuestFrontend.GetProgress and QuestFrontend.GetProgress(qId) or qData.Progress or 0
+                tier = curTier
+                if req > 0 and prog >= req and (not qDef or qDef.Category ~= "???") then
+                    claimable = true
+                end
+            else
+                local req = qData.Amount or 0
+                local prog = qData.Progress or 0
+                if req > 0 and prog >= req and qData.Category ~= "???" then
+                    claimable = true
+                end
+            end
+
+            if claimable then
+                local ok, res = pcall(function()
+                    return Channels.Quest:InvokeServer("Claim", qId, tier)
+                end)
+                if ok and (res == true or type(res) == "table") then
+                    claimedCount = claimedCount + 1
+                    task.wait(0.08)
+                end
+            end
+        end
+    end
+
+    return claimedCount
+end
+
 --==============================================================================
 -- MILESTONES & REWARDS AUTOMATION
 --==============================================================================
@@ -1939,10 +2053,12 @@ function ProgAPI.ClaimAllMilestones(): (number, number)
     local achClaimed = 0
     local roadClaimed = 0
 
-    -- 1. Achievements Milestones via Frontend & Direct Remote Calls
+    -- 1. Auto Claim Completed Quests
+    pcall(ProgAPI.ClaimCompletedQuests)
+
+    -- 2. Achievements (Milestones) via Frontend & Direct Remote Calls
     if Channels.Achievements then
         pcall(function() Channels.Achievements:FireServer("ClaimAll") end)
-        pcall(function() Channels.Achievements:InvokeServer("ClaimAll") end)
 
         if AchievementsFrontend and AchievementsFrontend.GetOrderedAchievements then
             local pcallOk, list = pcall(AchievementsFrontend.GetOrderedAchievements)
@@ -1951,7 +2067,6 @@ function ProgAPI.ClaimAllMilestones(): (number, number)
                     local achId = ach._id or ach.Id or ach.Name
                     if achId and (AchievementsFrontend.IsClaimable == nil or AchievementsFrontend.IsClaimable(achId)) then
                         pcall(function() Channels.Achievements:FireServer("Claim", achId) end)
-                        pcall(function() Channels.Achievements:InvokeServer("Claim", achId) end)
                         achClaimed = achClaimed + 1
                     end
                 end
@@ -1961,22 +2076,16 @@ function ProgAPI.ClaimAllMilestones(): (number, number)
         if Directory and Directory.Achievements then
             for achId, _ in pairs(Directory.Achievements) do
                 pcall(function() Channels.Achievements:FireServer("Claim", achId) end)
-                pcall(function() Channels.Achievements:InvokeServer("Claim", achId) end)
             end
         end
     end
 
-    -- 2. Dedicated Milestones Channel
+    -- 3. Dedicated Milestones Channel fallback
     if Channels.Milestones then
         pcall(function() Channels.Milestones:FireServer("ClaimAll") end)
-        pcall(function() Channels.Milestones:InvokeServer("ClaimAll") end)
-        for i = 1, 50 do
-            pcall(function() Channels.Milestones:FireServer("Claim", i) end)
-            pcall(function() Channels.Milestones:InvokeServer("Claim", tostring(i)) end)
-        end
     end
 
-    -- 3. Summer Road Milestones
+    -- 4. Summer Road Milestones
     local raw = Stats.Local(true) or {}
     local shells = raw.Currency and raw.Currency.Shells or 0
     local claimed = (raw.SummerRewardsRoad and raw.SummerRewardsRoad.Claimed) or {}
@@ -2008,7 +2117,7 @@ function ProgAPI.ClaimAllMilestones(): (number, number)
         end
     end
 
-    -- 4. Secondary Milestones & Retention / Leaving
+    -- 5. Secondary Milestones & Retention / Leaving
     pcall(function()
         if Channels.RetentionGift then Channels.RetentionGift:FireServer("Claim") end
         if Channels.LeavingGift then Channels.LeavingGift:FireServer("Claim") end
@@ -2022,26 +2131,12 @@ end
 function ProgAPI.UseItem(itemId: string, tier: number?, amount: number?): (boolean, any)
     tier = tier or 1
     amount = amount or 1
-    local ok, res = false, nil
-    
-    if Channels.Items then
-        ok, res = pcall(function()
-            return Channels.Items:InvokeServer("Use", itemId, tier, amount)
-        end)
-        pcall(function()
-            Channels.Items:FireServer("Use", itemId, tier, amount)
-        end)
-    end
-    if Channels.Potions then
-        pcall(function() Channels.Potions:InvokeServer("Consume", itemId, amount) end)
-        pcall(function() Channels.Potions:FireServer("Consume", itemId, amount) end)
-    end
-    if Channels.Fruits then
-        pcall(function() Channels.Fruits:InvokeServer("Consume", itemId, amount) end)
-        pcall(function() Channels.Fruits:FireServer("Consume", itemId, amount) end)
-    end
+    if not Channels.Items then return false, "No Items channel" end
 
-    return ok, res
+    local ok, res = pcall(function()
+        return Channels.Items:InvokeServer("Use", itemId, tier, amount)
+    end)
+    return ok and (res == true or type(res) == "table"), res
 end
 
 -- Consumables: Potions
@@ -2050,7 +2145,7 @@ function ProgAPI.UseAllBestPotions(): number
     local items = stats.Items or {}
     local usedCount = 0
 
-    local potionTypes = { "Clicks Potion", "Hatch Speed Potion", "Luck Potion", "Gems Potion", "Clicks Speed Potion" }
+    local potionTypes = { "Clicks Potion", "Hatch Speed Potion", "Luck Potion", "Gems Potion", "Clicks Speed Potion", "Raid Luck Potion", "Raid Damage Potion", "Raid XP Potion" }
     for _, pName in ipairs(potionTypes) do
         local bestTier = nil
         for tier = 10, 1, -1 do
@@ -2064,7 +2159,7 @@ function ProgAPI.UseAllBestPotions(): number
             local ok = ProgAPI.UseItem(pName, bestTier, 1)
             if ok then
                 usedCount = usedCount + 1
-                task.wait(0.1)
+                task.wait(0.08)
             end
         end
     end
@@ -2076,8 +2171,11 @@ function ProgAPI.UseAllBestPotions(): number
             local baseName, tierStr = key:match("^(.-)_(%d+)$")
             local tier = tonumber(tierStr) or 1
             baseName = baseName or key
-            ProgAPI.UseItem(baseName, tier, 1)
-            usedCount = usedCount + 1
+            local ok = ProgAPI.UseItem(baseName, tier, 1)
+            if ok then
+                usedCount = usedCount + 1
+                task.wait(0.05)
+            end
         end
     end
 
@@ -2112,8 +2210,12 @@ function ProgAPI.UseAllFruits(): number
             local baseName, tierStr = key:match("^(.-)_(%d+)$")
             local tier = tonumber(tierStr) or 1
             baseName = baseName or key
-            local toUse = math.min(amount, 5)
-            ProgAPI.UseItem(baseName, tier, toUse)
+            local toUse = math.min(amount, 10)
+            local ok = ProgAPI.UseItem(baseName, tier, toUse)
+            if ok then
+                usedCount = usedCount + toUse
+                task.wait(0.05)
+            end
         end
     end
 
@@ -2123,14 +2225,21 @@ end
 -- Free Gifts: Clicker Simulator uses Channels.FreeGifts:FireServer("ClaimGift", i)
 function ProgAPI.ClaimAllFreeGifts(): number
     if not Channels.FreeGifts then return 0 end
+    local stats = Stats.Local(true) or {}
+    local playtime = stats.FreeGiftsPlaytime or 0
+    local claimedGifts = stats.FreeGifts or {}
+    local times = (Directory and Directory.FreeGifts and Directory.FreeGifts.Times) or {3, 6, 9, 12, 15, 20, 25, 30, 40, 50, 55, 60}
     local claimed = 0
 
-    for i = 1, 12 do
-        pcall(function() Channels.FreeGifts:FireServer("ClaimGift", i) end)
-        pcall(function() Channels.FreeGifts:FireServer("Claim", i) end)
-        pcall(function() Channels.FreeGifts:InvokeServer("ClaimGift", i) end)
-        pcall(function() Channels.FreeGifts:InvokeServer("Claim", i) end)
-        claimed = claimed + 1
+    for i = 1, #times do
+        if claimedGifts[i] == nil then
+            local reqSeconds = times[i] * 60
+            if playtime >= reqSeconds then
+                Channels.FreeGifts:FireServer("ClaimGift", i)
+                claimed = claimed + 1
+                task.wait(0.08)
+            end
+        end
     end
 
     return claimed
