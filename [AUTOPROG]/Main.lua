@@ -527,6 +527,13 @@ table.insert(threads, task.spawn(function()
     while isRunning do
         task.wait(0.1)
         if not State.MasterEnabled or not State.AutoMaxRebirth or not isRunning then continue end
+
+        -- RAINBOW MODE PROTECTION: Disable auto rebirth while building Rainbow Team so zero clicks are wasted!
+        if AutoProgAPI.IsRainbowMode and AutoProgAPI.IsRainbowMode() then
+            task.wait(0.5)
+            continue
+        end
+
         local now = tick()
         if now - lastRebirthAttempt > 0.15 then
             lastRebirthAttempt = now
@@ -762,13 +769,15 @@ table.insert(threads, task.spawn(function()
 
                     -- If team is not yet all gold, hatch best affordable egg!
                     if not isAllGold and canAffordBestEgg then
-                        currentActivity = string.format("[Phase 1] Hatching %s on %s for Golden Team", bestEgg.name, bestEgg.island)
-                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
+                        currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
+                        AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
                         pcall(AutoProgAPI.CraftGoldenPets)
                         pcall(AutoProgAPI.EquipBest)
                     elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg then
-                        currentActivity = string.format("[Phase 1] Hatching %s on %s", bestEgg.name, bestEgg.island)
-                        AutoProgAPI.OpenEgg(bestEgg.name, 1)
+                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
+                        currentActivity = string.format("[Phase 1] Hatching %dx %s on %s", hatchAmount, bestEgg.name, bestEgg.island)
+                        AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount)
                         pcall(AutoProgAPI.CraftGoldenPets)
                         pcall(AutoProgAPI.EquipBest)
                     end
@@ -780,23 +789,21 @@ table.insert(threads, task.spawn(function()
             -- Progression Order:
             -- 1. Prestige if possible
             -- 2. Auto Rainbow pets (hatch latest world egg -> gold -> rainbow -> claim)
-            -- 3. Check team: once all rainbow/gold -> start Skill Tree (Coins first, then Tech)
+            -- 3. Check team: once all rainbow -> start Skill Tree (Coins first, then Tech)
             -- 4. ??? Quest
             -- 5. 10Qi Quest / Magma Click Skin
             -- =====================================================================
             else
                 currentPhaseText = "👑 PHASE 2: ENDGAME ROADMAP"
 
-                -- 1. Auto Rainbow Team Building: If not all rainbow, hatch latest world egg (Matrix) & craft
+                -- 1. Auto Rainbow Team Building: If not all rainbow, hatch best affordable egg & craft
                 if not isAllRainbow and (now - lastEggHatchTick > 0.35) then
                     lastEggHatchTick = now
-                    local latestEgg = AutoProgAPI.GetBestAffordableEgg("Matrix")
-                    if not latestEgg or latestEgg.cost > pData.Clicks then
-                        latestEgg = AutoProgAPI.GetBestAffordableEgg()
-                    end
+                    local latestEgg = AutoProgAPI.GetBestAffordableEgg()
                     if latestEgg and pData.Clicks >= latestEgg.cost then
-                        currentActivity = string.format("[Phase 2] Hatching %s -> Golden -> Rainbow Pipeline", latestEgg.name)
-                        AutoProgAPI.OpenEgg(latestEgg.name, 1)
+                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(latestEgg.name)
+                        currentActivity = string.format("[Phase 2] Hatching %dx %s -> Golden -> Rainbow Pipeline", hatchAmount, latestEgg.name)
+                        AutoProgAPI.OpenEgg(latestEgg.name, hatchAmount)
                         pcall(AutoProgAPI.CraftGoldenPets)
                         pcall(AutoProgAPI.CraftRainbowPets)
                         pcall(AutoProgAPI.ClaimRainbowPets)
