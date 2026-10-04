@@ -452,29 +452,61 @@ function ProgAPI.GetNextLockedIsland()
 end
 
 function ProgAPI.TeleportToWorld(worldName: string): boolean
-    if Channels.Portals then
-        local ok, res = pcall(function()
-            return Channels.Portals:InvokeServer("TeleportToWorld", worldName)
-        end)
-        if not ok or res ~= true then
-            pcall(function() Channels.Portals:InvokeServer("Teleport", worldName) end)
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+    if MF and MF.Active and MF.Active() ~= nil then
+        pcall(function() MF.Exit() end)
+        task.wait(0.35)
+    end
+
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+
+    if worldName == "Techworld" or worldName == "Tech" or worldName == "Space" then
+        if curWorld == "Techworld" or curWorld == "Space" then
+            return true
         end
-        return ok and res == true
+
+        local ok, msg = ProgAPI.CheckAndEnterTechWorld()
+        if ok then return true end
+
+        if Channels.Portals then
+            local ok2, res2 = pcall(function()
+                return Channels.Portals:InvokeServer("TeleportToIsland", "Matrix")
+            end)
+            if ok2 and res2 == true then return true end
+            pcall(function()
+                Channels.Portals:InvokeServer("TeleportToIsland", "Base")
+            end)
+        end
+        return true
+    elseif worldName == "Overworld" then
+        if curWorld == "Overworld" then
+            return true
+        end
+        if Channels.Portals then
+            pcall(function()
+                Channels.Portals:InvokeServer("TeleportToIsland", "Spawn")
+            end)
+        end
+        return true
     end
     return false
 end
 
 function ProgAPI.TeleportToIsland(islandName: string): boolean
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
     if islandName == "DominusArea" or islandName == "Dominus" then
-        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
         if MF and MF.Enter then
-            pcall(function() MF.Enter("DominusArea") end)
-            task.wait(0.35)
+            local active = MF.Active and MF.Active()
+            local actName = (type(active) == "table" and active.Name) or tostring(active)
+            if actName ~= "DominusArea" then
+                pcall(function() MF.Enter("DominusArea") end)
+                task.wait(0.35)
+            end
             return true
         end
     else
-        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
-        if MF and MF.Active and MF.Active() == "DominusArea" then
+        if MF and MF.Active and MF.Active() ~= nil then
             pcall(function() MF.Exit() end)
             task.wait(0.35)
         end
@@ -486,11 +518,14 @@ function ProgAPI.TeleportToIsland(islandName: string): boolean
     local curWorld = stats.CurrentWorld or "Overworld"
 
     -- 1. Switch world if targeting island in another world
-    if targetWorld ~= curWorld and Channels.Portals then
-        pcall(function()
-            Channels.Portals:InvokeServer("TeleportToWorld", targetWorld)
-        end)
-        task.wait(0.5)
+    if targetWorld ~= curWorld then
+        if targetWorld == "Techworld" then
+            ProgAPI.TeleportToWorld("Techworld")
+            task.wait(0.4)
+        elseif targetWorld == "Overworld" then
+            ProgAPI.TeleportToWorld("Overworld")
+            task.wait(0.4)
+        end
     end
 
     -- 2. Try server portal teleport
@@ -503,8 +538,10 @@ function ProgAPI.TeleportToIsland(islandName: string): boolean
         end
     end
 
-    -- 3. Instant client local teleport
-    if IslandsFrontend and IslandsFrontend.LocalTeleport then
+    -- 3. Instant client local teleport (only if in same world!)
+    stats = Stats.Local(true) or {}
+    curWorld = stats.CurrentWorld or "Overworld"
+    if targetWorld == curWorld and IslandsFrontend and IslandsFrontend.LocalTeleport then
         local ok, res = pcall(function()
             return IslandsFrontend.LocalTeleport(islandName)
         end)
@@ -886,7 +923,10 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
     end
 
     -- 2. Progressive Egg Selection:
-    -- Searches all unlocked islands (and Spawn event eggs) for the highest egg cost <= clicks!
+    local curWorld = stats.CurrentWorld or "Overworld"
+    local allIslands = ProgAPI.AreAllIslandsUnlocked()
+    local isTechWorld = (curWorld == "Techworld" or curWorld == "Space")
+
     local bestEggName = nil
     local bestCost = 0
 
@@ -894,7 +934,13 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
         local isEvent = (eggName == "CandyCornEgg" or eggName == "SixSevenEgg")
         local isIslandAvailable = ProgAPI.IsIslandUnlocked(meta.island) or (meta.island == "Spawn")
 
-        if isIslandAvailable and meta.cost <= clicks then
+        -- If player is in Tech World, strictly filter to Tech World eggs! Never select Spawn/Overworld eggs!
+        local isWorldAllowed = true
+        if isTechWorld then
+            isWorldAllowed = (meta.island == "Matrix" or meta.island == "Fragment" or meta.island == "Spaceship" or meta.island == "Base")
+        end
+
+        if isIslandAvailable and isWorldAllowed and meta.cost <= clicks then
             local eligible = true
             if isEvent then
                 -- Event eggs only hatch if clicks >= 1e16 and player still needs an event gold team
@@ -912,10 +958,14 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
         end
     end
 
-    -- 3. Fallback: if player has less than 250 clicks, default to BasicEgg
-    if not bestEggName then
+    -- 3. Fallback: ONLY for brand new players on Spawn with zero unlocked islands!
+    if not bestEggName and not isTechWorld and not allIslands and not ProgAPI.IsIslandUnlocked("Winter") and clicks >= 250 then
         bestEggName = "BasicEgg"
         bestCost = 250
+    end
+
+    if not bestEggName then
+        return nil
     end
 
     return {
@@ -925,20 +975,86 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
     }
 end
 
-function ProgAPI.TeleportToEgg(eggName: string): boolean
-    local eggMeta = eggData[eggName]
-    local island = eggMeta and eggMeta.island
-    if island and ProgAPI.IsIslandUnlocked(island) then
-        local stats = Stats.Local(true) or {}
-        if stats.CurrentIsland ~= island then
-            ProgAPI.TeleportToIsland(island)
-            task.wait(0.3)
+-- Selects the absolute highest affordable endgame egg in Tech World (or high Overworld)
+-- NEVER falls back to BasicEgg/Spawn in Phase 2!
+function ProgAPI.GetEndgameEgg()
+    local pData = ProgAPI.GetPlayerData()
+    local clicks = pData.Clicks or 0
+
+    local techEggs = {
+        { name = "MatrixEgg", cost = 2.5e25, island = "Matrix" },
+        { name = "FragmentedEgg", cost = 5e24, island = "Fragment" },
+        { name = "RedTechEgg", cost = 1e24, island = "Matrix" },
+        { name = "404Egg", cost = 5e23, island = "Fragment" },
+        { name = "HolographicEgg", cost = 1.5e23, island = "Spaceship" },
+        { name = "TechEgg", cost = 4.5e22, island = "Base" },
+    }
+
+    for _, e in ipairs(techEggs) do
+        if ProgAPI.IsIslandUnlocked(e.island) and clicks >= e.cost then
+            return e
         end
     end
 
+    local overworldEggs = {
+        { name = "DemonicEgg", cost = 1.5e22, island = "Hell" },
+        { name = "RockEgg", cost = 1e21, island = "Mystical" },
+        { name = "CursedEgg", cost = 1.5e20, island = "Mystical" },
+        { name = "CastleEgg", cost = 5e19, island = "Castle" },
+        { name = "AngelEgg", cost = 4e18, island = "Heaven" },
+        { name = "DiscoEgg", cost = 2e17, island = "Rave" },
+        { name = "VolcanoEgg", cost = 1e16, island = "Volcano" },
+    }
+
+    for _, e in ipairs(overworldEggs) do
+        if ProgAPI.IsIslandUnlocked(e.island) and clicks >= e.cost then
+            return e
+        end
+    end
+
+    return nil
+end
+
+function ProgAPI.TeleportToEgg(eggName: string): boolean
+    local eggMeta = eggData[eggName]
+    local island = eggMeta and eggMeta.island or "Spawn"
+    local meta = islandMetaLookup[island]
+    local targetWorld = (meta and meta.world) or "Overworld"
+
+    -- 1. Exit any active minigame (DominusArea, Raids, etc.)
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+    if MF and MF.Active and MF.Active() ~= nil then
+        pcall(function() MF.Exit() end)
+        task.wait(0.35)
+    end
+
+    -- 2. Switch world if needed (e.g. Overworld <-> Techworld)
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+    if targetWorld ~= curWorld and Channels.Portals then
+        pcall(function() Channels.Portals:InvokeServer("TeleportToWorld", targetWorld) end)
+        task.wait(0.6)
+    end
+
+    -- 3. Teleport to the target island
+    ProgAPI.TeleportToIsland(island)
+    task.wait(0.35)
+
+    -- 4. Find the egg model and stand directly on it (with streaming retry)
     local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    if not targetPart or not hrp then
+        for _ = 1, 5 do
+            task.wait(0.2)
+            char = LocalPlayer.Character
+            hrp = char and char:FindFirstChild("HumanoidRootPart")
+            eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+            if hrp and targetPart then break end
+        end
+    end
+
     if hrp and targetPart then
         hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
         task.wait(0.15)
@@ -991,6 +1107,16 @@ function ProgAPI.GetMaxEggOpenAmount(eggName: string?): number
 end
 
 function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean?): (boolean, string)
+    if not eggName or eggName == "" then return false, "No egg specified" end
+
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+
+    -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn!
+    if eggName == "BasicEgg" and (curWorld == "Techworld" or curWorld == "Space" or ProgAPI.AreAllIslandsUnlocked() or ProgAPI.IsIslandUnlocked("Winter")) then
+        return false, "Blocked opening BasicEgg on advanced progression"
+    end
+
     if not amount or amount <= 0 then
         amount = ProgAPI.GetMaxEggOpenAmount(eggName)
     end
@@ -1555,6 +1681,7 @@ end
 
 local currentCoinsIsland = "Heaven"
 local currentTechIsland = "Matrix"
+local dominusEmptyStartTick = 0
 
 -- Target lock / focus fire cache
 local currentTargetUID: string? = nil
@@ -2146,13 +2273,47 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
     end)
 
     local ignoreBoss = not attackBigChests
-
-    -- Minigame handling for DominusArea
     local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+
+    -- When Coins skill tree is done, tp to Tech World after!
+    if stProg.CoinsComplete then
+        if MF and MF.Active and MF.Active() == "DominusArea" then
+            pcall(function() MF.Exit() end)
+            task.wait(0.35)
+        end
+        local curStats = Stats.Local(true) or {}
+        local curWorld = curStats.CurrentWorld or "Overworld"
+        if curWorld ~= "Techworld" and curWorld ~= "Space" then
+            ProgAPI.TeleportToWorld("Techworld")
+            task.wait(0.5)
+        end
+        targetWorld = ProgAPI.GetBestBreakableIsland("Auto (Dynamic Smart)", false) or "Matrix"
+    end
+
+    -- Minigame handling for DominusArea (the ??? area)
     if targetWorld == "DominusArea" then
         if MF and MF.Active and MF.Active() ~= "DominusArea" then
             pcall(function() MF.Enter("DominusArea") end)
             task.wait(0.35)
+        end
+
+        -- Check if breakables have spawned in DominusArea. If not, tp to Spawn and re-enter!
+        local curCount = ProgAPI.GetActiveIslandBreakablesCount("DominusArea", false)
+        if curCount == 0 then
+            if dominusEmptyStartTick == 0 then
+                dominusEmptyStartTick = tick()
+            elseif (tick() - dominusEmptyStartTick) > 2.0 then
+                dominusEmptyStartTick = tick()
+                if MF and MF.Exit then pcall(MF.Exit) end
+                ProgAPI.TeleportToIsland("Spawn")
+                task.wait(0.6)
+                if MF and MF.Enter then pcall(function() MF.Enter("DominusArea") end) end
+                task.wait(0.5)
+                return "Respawning ??? Breakables via Spawn...", "DominusArea"
+            end
+            return "Waiting for ??? Breakables spawn...", "DominusArea"
+        else
+            dominusEmptyStartTick = 0
         end
     else
         if MF and MF.Active and MF.Active() == "DominusArea" then
@@ -2195,27 +2356,38 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
         okAtk, targetName, dmg = ProgAPI.AttackBreakable(ignoreBoss, targetWorld)
     end)
 
-    -- If no attack on current island, check if all breakables on current island are truly broken (count == 0)
-    if not okAtk and not stProg.CoinsComplete then
-        local curCount = ProgAPI.GetActiveIslandBreakablesCount(targetWorld, attackBigChests)
-        if curCount == 0 then
-            -- ALL breakables on current island are broken! Now and only now look for alternate island
-            local altIsland = (targetWorld == "Heaven") and "Volcano" or "Heaven"
-            if targetWorld == "DominusArea" then altIsland = "Heaven" end
-            local altCount = ProgAPI.GetActiveIslandBreakablesCount(altIsland, attackBigChests)
-            if altCount > 0 then
-                targetWorld = altIsland
-                if altIsland ~= "DominusArea" and MF and MF.Active and MF.Active() == "DominusArea" then
-                    pcall(function() MF.Exit() end)
-                    task.wait(0.3)
-                end
-                ProgAPI.TeleportToIsland(altIsland)
-                task.wait(0.35)
-                ProgAPI.TeleportToBreakableZone(altIsland, ignoreBoss)
-                return "Cleared arena! Teleporting to " .. tostring(altIsland), tostring(altIsland)
+    -- If no attack on current island, handle empty breakables
+    if not okAtk then
+        if targetWorld == "DominusArea" then
+            if dominusEmptyStartTick == 0 then
+                dominusEmptyStartTick = tick()
+            elseif (tick() - dominusEmptyStartTick) > 2.0 then
+                dominusEmptyStartTick = tick()
+                if MF and MF.Exit then pcall(MF.Exit) end
+                ProgAPI.TeleportToIsland("Spawn")
+                task.wait(0.6)
+                if MF and MF.Enter then pcall(function() MF.Enter("DominusArea") end) end
+                task.wait(0.5)
+                return "Respawning ??? Breakables via Spawn...", "DominusArea"
             end
+            return "Waiting for ??? Breakables respawn...", "DominusArea"
+        elseif not stProg.CoinsComplete then
+            local curCount = ProgAPI.GetActiveIslandBreakablesCount(targetWorld, attackBigChests)
+            if curCount == 0 then
+                local altIsland = (targetWorld == "Heaven") and "Volcano" or "Heaven"
+                local altCount = ProgAPI.GetActiveIslandBreakablesCount(altIsland, attackBigChests)
+                if altCount > 0 then
+                    targetWorld = altIsland
+                    ProgAPI.TeleportToIsland(altIsland)
+                    task.wait(0.35)
+                    ProgAPI.TeleportToBreakableZone(altIsland, ignoreBoss)
+                    return "Cleared arena! Teleporting to " .. tostring(altIsland), tostring(altIsland)
+                end
+            end
+            return "Waiting for breakables respawn in " .. tostring(targetWorld), tostring(targetWorld)
+        else
+            return "Waiting for Tech breakables respawn in " .. tostring(targetWorld), tostring(targetWorld)
         end
-        return "Waiting for breakables respawn in " .. tostring(targetWorld), tostring(targetWorld)
     end
 
     if okAtk then
@@ -2648,24 +2820,9 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
     -- 2. Secret Hatch Eggs: If secret_hatch_eggs is active and progress < amount
     local hatchQuest = quests.secret_hatch_eggs
     if hatchQuest and hatchQuest.Progress < hatchQuest.Amount then
-        if stats.CurrentIsland ~= "Spawn" then
-            ProgAPI.TeleportToIsland("Spawn")
-            task.wait(0.3)
-        end
-        local basicEgg = workspace:FindFirstChild("_MAP")
-            and workspace._MAP:FindFirstChild("Interact")
-            and workspace._MAP.Interact:FindFirstChild("Eggs")
-            and workspace._MAP.Interact.Eggs:FindFirstChild("BasicEgg")
-        if basicEgg and hrp then
-            local eggPart = basicEgg:FindFirstChild("EggModel") or basicEgg.PrimaryPart or basicEgg:FindFirstChildWhichIsA("BasePart")
-            if eggPart and (hrp.Position - eggPart.Position).Magnitude > 16 then
-                hrp.CFrame = eggPart.CFrame + Vector3.new(0, 3, 0)
-                task.wait(0.2)
-            end
-        end
-        local maxHatch = math.min(8, ProgAPI.GetMaxEggOpenAmount("BasicEgg"))
-        ProgAPI.OpenEgg("BasicEgg", maxHatch, true)
-        return false, string.format("Hatching Eggs for ??? Quest (%d/%d)...", hatchQuest.Progress, hatchQuest.Amount)
+        -- DO NOT teleport to World 1 or open BasicEgg!
+        -- Any eggs opened during gameplay (or Endgame eggs in Tech World) advance this quest passively.
+        return false, string.format("??? Quest: Hatching Eggs in progress (%d/%d)...", hatchQuest.Progress, hatchQuest.Amount)
     end
 
     -- 3. Secret Craft Golden: If secret_craft_golden is active and progress < amount
