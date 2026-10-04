@@ -153,7 +153,7 @@ local Window = UILibrary:CreateWindow({
     Title = "CLICKER SIMULATOR — AUTO PROGRESSION",
     SubTitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
     Subtitle = "Zero-To-Hero Speedrun Engine [AUTOPROG]",
-    Size = UDim2.fromOffset(660, 500),
+    Size = UDim2.fromOffset(700, 520),
     AccentColor = Color3.fromRGB(0, 170, 255),
     Theme = "Dark",
 })
@@ -179,14 +179,18 @@ DashTab:AddSection("LIVE TELEMETRY")
 local CurrentlyDoingCard = DashTab:AddParagraph({
     Title = "Currently Doing:",
     Content = "Evaluating Activity...",
-    Height = 52
+    TitleSize = 17,
+    BodySize = 15,
+    Height = 65
 })
 _G.ClickerSimulatorCurrentlyDoingCard = CurrentlyDoingCard
 
 local LiveStatusCard = DashTab:AddParagraph({
     Title = "Progression Telemetry",
     Content = "Initializing...",
-    Height = 160
+    TitleSize = 16,
+    BodySize = 14,
+    Height = 185
 })
 _G.ClickerSimulatorAutoProgCard = LiveStatusCard
 
@@ -911,7 +915,7 @@ local function updateTelemetry()
         -- 1. Dedicated Currently Doing Display Card
         if CurrentlyDoingCard then
             local doingTitle = "Currently Doing:"
-            local doingContent = string.format("⚡ **Activity**: %s\n🎯 **Phase**: %s",
+            local doingContent = string.format("⚡ <b>Activity:</b> %s\n🎯 <b>Phase:</b> %s",
                 tostring(currentActivity or "Auto Progression Active"),
                 tostring(currentPhaseText or "Evaluating...")
             )
@@ -930,13 +934,13 @@ local function updateTelemetry()
         -- 2. Statistical Progression Telemetry Card
         local cardTitle = "Progression Telemetry"
         local cardContent = string.format(
-            "⚡ **Clicks**: %s | **Rebirths**: %s\n" ..
-            "💎 **Gems**: %s | **Coins**: %s | **Tech Coins**: %s\n" ..
-            "🚀 **Prestige**: %s\n" ..
-            "🏝️ **Islands**: %s\n" ..
-            "🐾 **Pet Team**: %s\n" ..
-            "🌳 **Skill Tree**: %s\n" ..
-            "🔥 **Magma Skin**: %s",
+            "⚡ <b>Clicks:</b> %s  |  <b>Rebirths:</b> %s\n" ..
+            "💎 <b>Gems:</b> %s  |  <b>Coins:</b> %s  |  <b>Tech Coins:</b> %s\n" ..
+            "🚀 <b>Prestige:</b> %s\n" ..
+            "🏝️ <b>Islands:</b> %s\n" ..
+            "🐾 <b>Pet Team:</b> %s\n" ..
+            "🌳 <b>Skill Tree:</b> %s\n" ..
+            "🔥 <b>Magma Skin:</b> %s",
             ProgAPI.FormatNumber(pData.Clicks or 0),
             ProgAPI.FormatNumber(pData.Rebirths or 0),
             ProgAPI.FormatNumber(pData.Gems or 0),
@@ -965,7 +969,7 @@ local function updateTelemetry()
     if not ok then
         pcall(function()
             if CurrentlyDoingCard then
-                local fallbackDoing = string.format("⚡ **Activity**: %s\n🎯 **Phase**: %s", tostring(currentActivity or "Active"), tostring(currentPhaseText or "Phase 2"))
+                local fallbackDoing = string.format("⚡ <b>Activity:</b> %s\n🎯 <b>Phase:</b> %s", tostring(currentActivity or "Active"), tostring(currentPhaseText or "Phase 2"))
                 CurrentlyDoingCard:Set({
                     Title = "Currently Doing:",
                     Content = fallbackDoing
@@ -975,7 +979,7 @@ local function updateTelemetry()
             end
             if LiveStatusCard then
                 local fallbackTitle = "Progression Telemetry"
-                local fallbackBody = string.format("⚡ Running Auto Progression...\n📊 Status: %s", tostring(currentActivity or "Active"))
+                local fallbackBody = string.format("⚡ <b>Running Auto Progression...</b>\n📊 <b>Status:</b> %s", tostring(currentActivity or "Active"))
                 LiveStatusCard:Set({
                     Title = fallbackTitle,
                     Content = fallbackBody
