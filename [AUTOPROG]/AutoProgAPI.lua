@@ -465,6 +465,21 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
 end
 
 function ProgAPI.TeleportToIsland(islandName: string): boolean
+    if islandName == "DominusArea" or islandName == "Dominus" then
+        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+        if MF and MF.Enter then
+            pcall(function() MF.Enter("DominusArea") end)
+            task.wait(0.35)
+            return true
+        end
+    else
+        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+        if MF and MF.Active and MF.Active() == "DominusArea" then
+            pcall(function() MF.Exit() end)
+            task.wait(0.35)
+        end
+    end
+
     local meta = islandMetaLookup[islandName]
     local targetWorld = meta and meta.world or "Overworld"
     local stats = Stats.Local(true) or {}
@@ -1478,9 +1493,22 @@ function ProgAPI.GetSkillTreeProgress()
         SkillTreeUtil = require(Library:WaitForChild("Utils"):WaitForChild("SkillTreeUtil"))
     end)
 
+    local isDominusUnlocked = (stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true)
+
     for catName, catData in pairs(d) do
+        -- Skip hidden Dominus Fortune branch if DominusArea is not unlocked yet
+        local catRequiresDominus = (catData.Requires and catData.Requires.DominusArea == true)
+        if catRequiresDominus and not isDominusUnlocked then
+            continue
+        end
+
         if type(catData) == "table" and catData.Upgrades then
             for upgName, upgData in pairs(catData.Upgrades) do
+                local upgRequiresDominus = (upgData.Requires and upgData.Requires.DominusArea == true)
+                if upgRequiresDominus and not isDominusUnlocked then
+                    continue
+                end
+
                 local p = upgData.Price
                 local curr = p and p.Id or "Coins"
                 local isTech = (curr == "SpaceCoins")
@@ -1525,82 +1553,8 @@ function ProgAPI.GetSkillTreeProgress()
     }
 end
 
-local coinsSwitchTick = 0
-local currentCoinsIsland = "Volcano"
-
-function ProgAPI.ForceSwitchCoinsIsland(): string
-    coinsSwitchTick = tick()
-    currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
-    return currentCoinsIsland
-end
-
-function ProgAPI.GetBestBreakableIsland(mode: string?): string?
-    local pData = ProgAPI.GetPlayerData()
-    local unlocked = pData.UnlockedIslands or { "Spawn" }
-    local unlockedSet = {}
-    for _, isl in ipairs(unlocked) do unlockedSet[isl] = true end
-
-    -- Latest tech islands in descending order of progression (Matrix is the newest 17th world)
-    local techIslands = { "Matrix", "Fragment", "Spaceship", "Base" }
-
-    mode = mode or "Auto (Dynamic Smart)"
-
-    if mode == "Coins World (Volcano/Heaven)" or mode == "Coins Only" then
-        local now = tick()
-        if now - coinsSwitchTick > 10 then
-            coinsSwitchTick = now
-            currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
-        end
-        if unlockedSet[currentCoinsIsland] and ProgAPI.HasBreakables(currentCoinsIsland) then
-            return currentCoinsIsland
-        end
-        return unlockedSet["Heaven"] and "Heaven" or "Volcano"
-    elseif mode == "Tech World (Matrix/Fragment)" or mode == "Tech Only" then
-        for _, isl in ipairs(techIslands) do
-            if unlockedSet[isl] and ProgAPI.HasBreakables(isl) then
-                return isl
-            end
-        end
-        return "Matrix"
-    elseif mode == "Auto (Dynamic Smart)" or mode == "Best Unlocked" or mode == "" then
-        local progress = ProgAPI.GetSkillTreeProgress()
-
-        -- 1. PRIORITIZE COINS SKILL TREE FIRST!
-        -- Alternate between Volcano and Heaven to break all breakables!
-        if not progress.CoinsComplete then
-            local now = tick()
-            if now - coinsSwitchTick > 10 then
-                coinsSwitchTick = now
-                currentCoinsIsland = (currentCoinsIsland == "Volcano") and "Heaven" or "Volcano"
-            end
-            if unlockedSet[currentCoinsIsland] and ProgAPI.HasBreakables(currentCoinsIsland) then
-                return currentCoinsIsland
-            end
-            if unlockedSet["Heaven"] and ProgAPI.HasBreakables("Heaven") then return "Heaven" end
-            if unlockedSet["Volcano"] and ProgAPI.HasBreakables("Volcano") then return "Volcano" end
-        else
-            -- 2. AFTER ALL COINS UPGRADES ARE DONE:
-            -- Teleport to the LATEST unlocked Tech World island (Matrix > Fragment > Spaceship > Base) to farm Tech Coins!
-            for _, isl in ipairs(techIslands) do
-                if unlockedSet[isl] and ProgAPI.HasBreakables(isl) then
-                    return isl
-                end
-            end
-        end
-
-        -- Fallback
-        if unlockedSet["Matrix"] and ProgAPI.HasBreakables("Matrix") then return "Matrix" end
-        if unlockedSet["Heaven"] and ProgAPI.HasBreakables("Heaven") then return "Heaven" end
-        return "Volcano"
-    elseif unlockedSet[mode] and ProgAPI.HasBreakables(mode) then
-        return mode
-    end
-
-    if ProgAPI.HasBreakables(pData.CurrentIsland) then
-        return pData.CurrentIsland
-    end
-    return "Heaven"
-end
+local currentCoinsIsland = "Heaven"
+local currentTechIsland = "Matrix"
 
 -- Target lock / focus fire cache
 local currentTargetUID: string? = nil
@@ -1611,6 +1565,26 @@ function ProgAPI.GetIslandBreakableZone(islandName: string?, ignoreBossChest: bo
     if ignoreBossChest == nil then ignoreBossChest = true end
     local pData = ProgAPI.GetPlayerData()
     islandName = islandName or pData.CurrentIsland
+
+    if islandName == "DominusArea" or islandName == "Dominus" then
+        local mgFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Minigames")
+        local domMg = mgFolder and mgFolder:FindFirstChild("DominusArea")
+        if domMg then
+            local interact = domMg:FindFirstChild("Interact")
+            local tp = interact and interact:FindFirstChild("Teleport")
+            local tpPart = tp and (tp:IsA("BasePart") and tp or tp:FindFirstChildWhichIsA("BasePart"))
+            if tpPart then return tpPart, "DominusArea/1" end
+            local anyPart = domMg:FindFirstChildWhichIsA("BasePart", true)
+            if anyPart then return anyPart, "DominusArea/1" end
+        end
+        local domArea = workspace:FindFirstChild("_MAP")
+            and workspace._MAP:FindFirstChild("Interact")
+            and workspace._MAP.Interact:FindFirstChild("DominusArea")
+        local anchor = domArea and domArea:FindFirstChildWhichIsA("BasePart")
+        if anchor then return anchor, "DominusArea/1" end
+        return nil, "DominusArea/1"
+    end
+
     local islands = workspace:FindFirstChild("_MAP") and workspace._MAP:FindFirstChild("Islands")
     local isl = islands and islands:FindFirstChild(islandName)
     local interact = isl and isl:FindFirstChild("Interact")
@@ -1876,11 +1850,31 @@ function ProgAPI.AttackBreakable(ignoreBossChest: boolean?, islandName: string?)
         end
     end
 
-    if not targetModel or not targetUID then
+    if (not targetModel or not targetUID) and BreakablesFrontend and BreakablesFrontend.GetSnapshots then
+        local snaps = BreakablesFrontend.GetSnapshots()
+        for uid, snap in pairs(snaps) do
+            if (snap.islandId == islandName or islandName == "DominusArea") and (snap.hp or 1) > 0 then
+                targetUID = uid
+                break
+            end
+        end
+    end
+
+    if not targetUID then
         if zonePart and (hrp.Position - zonePart.Position).Magnitude > 30 then
             hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
         end
         return false, "Waiting for breakables respawn", nil
+    end
+
+    if not targetModel then
+        if Channels.Breakables then
+            pcall(function()
+                Channels.Breakables:InvokeServer("Click", targetUID)
+                Channels.Breakables:InvokeServer("Hit", targetUID, 1)
+            end)
+        end
+        return true, "Attacking Dominus Breakable", targetUID
     end
 
     -- Face target and maintain close proximity
@@ -1935,17 +1929,107 @@ function ProgAPI.AttackBreakablesInZone(targetIsland: string, ignoreBossChest: b
     return ok, name
 end
 
-function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
-    local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
-    if not bf then return 0 end
-    local count = 0
-    for _, child in ipairs(bf:GetChildren()) do
-        local entry = resolveBreakableEntry(child)
-        if entry and entry.hp > 0 and not entry.isBoss then
-            count = count + 1
+function ProgAPI.GetActiveIslandBreakablesCount(islandName: string, includeBoss: boolean?): number
+    if islandName == "DominusArea" or islandName == "Dominus" then
+        local dominusCenter = Vector3.new(400, 256.7, 2747.2)
+        local count = 0
+        local bf = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+        if bf then
+            for _, f in ipairs(bf:GetChildren()) do
+                local m = f:FindFirstChildWhichIsA("Model") or (f:IsA("Model") and f) or f:FindFirstChildWhichIsA("BasePart") or (f:IsA("BasePart") and f)
+                if m then
+                    local pos = m:IsA("Model") and m:GetPivot().Position or (m:IsA("BasePart") and m.Position)
+                    if pos and (pos - dominusCenter).Magnitude < 150 then
+                        local hp = m:GetAttribute("BreakableHP") or f:GetAttribute("BreakableHP") or 1
+                        if hp > 0 then
+                            count = count + 1
+                        end
+                    end
+                end
+            end
+        end
+        return count
+    end
+
+    if BreakablesFrontend and BreakablesFrontend.SyncIsland then
+        pcall(function() BreakablesFrontend.SyncIsland(islandName) end)
+    end
+    
+    local snaps = (BreakablesFrontend and BreakablesFrontend.GetSnapshots and BreakablesFrontend.GetSnapshots()) or {}
+    local snapCount = 0
+    for uid, snap in pairs(snaps) do
+        if snap.islandId == islandName and (snap.hp or 1) > 0 then
+            local isBoss = ProgAPI.IsBossChest(snap.breakableId or uid)
+            if includeBoss or not isBoss then
+                snapCount = snapCount + 1
+            end
         end
     end
-    return count
+
+    local wsCount = 0
+    local breakablesFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Breakables")
+    if breakablesFolder then
+        for _, f in ipairs(breakablesFolder:GetChildren()) do
+            local entry = resolveBreakableEntry(f)
+            if entry and entry.hp > 0 then
+                local inIsland = false
+                if entry.zone and entry.zone:find(islandName) then
+                    inIsland = true
+                else
+                    local zonePart = ProgAPI.GetIslandBreakableZone(islandName, false)
+                    if zonePart and (entry.pos - zonePart.Position).Magnitude < 160 then
+                        inIsland = true
+                    end
+                end
+                if inIsland then
+                    if includeBoss or not entry.isBoss then
+                        wsCount = wsCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    return math.max(snapCount, wsCount)
+end
+
+function ProgAPI.GetActiveBreakablesCount(islandName: string, zoneName: string?): number
+    return ProgAPI.GetActiveIslandBreakablesCount(islandName, false)
+end
+
+function ProgAPI.GetBestBreakableIsland(mode: string?, attackBigChests: boolean?): string?
+    local pData = ProgAPI.GetPlayerData()
+    local unlocked = pData.UnlockedIslands or { "Spawn" }
+    local unlockedSet = {}
+    for _, isl in ipairs(unlocked) do unlockedSet[isl] = true end
+
+    local techIslands = { "Matrix", "Fragment", "Spaceship", "Base" }
+    mode = mode or "Auto (Dynamic Smart)"
+
+    local progress = ProgAPI.GetSkillTreeProgress()
+    local stats = Stats.Local(true) or {}
+    local isDominusUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true
+
+    if not progress.CoinsComplete or mode == "Coins World (Volcano/Heaven)" or mode == "Coins Only" then
+        -- User instruction: "instead of heaven volcano the big heaven chess hell chest just do the ??? area"
+        currentCoinsIsland = "DominusArea"
+        return "DominusArea"
+    else
+        -- Tech World progression: Matrix > Fragment > Spaceship > Base
+        local curTechCount = ProgAPI.GetActiveIslandBreakablesCount(currentTechIsland, false)
+        if curTechCount > 0 then
+            return currentTechIsland
+        end
+
+        for _, isl in ipairs(techIslands) do
+            if unlockedSet[isl] and ProgAPI.GetActiveIslandBreakablesCount(isl, false) > 0 then
+                currentTechIsland = isl
+                return currentTechIsland
+            end
+        end
+
+        return "Matrix"
+    end
 end
 
 
@@ -2051,7 +2135,7 @@ end
 function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, string)
     if attackBigChests == nil then attackBigChests = true end
     local stProg = ProgAPI.GetSkillTreeProgress()
-    local targetWorld = ProgAPI.GetBestBreakableIsland("Auto (Dynamic Smart)") or "Heaven"
+    local targetWorld = ProgAPI.GetBestBreakableIsland("Auto (Dynamic Smart)", attackBigChests) or "Heaven"
     local pData = ProgAPI.GetPlayerData()
 
     -- Asynchronously purchase affordable perks (Coins prioritized first!)
@@ -2063,8 +2147,22 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
 
     local ignoreBoss = not attackBigChests
 
+    -- Minigame handling for DominusArea
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+    if targetWorld == "DominusArea" then
+        if MF and MF.Active and MF.Active() ~= "DominusArea" then
+            pcall(function() MF.Enter("DominusArea") end)
+            task.wait(0.35)
+        end
+    else
+        if MF and MF.Active and MF.Active() == "DominusArea" then
+            pcall(function() MF.Exit() end)
+            task.wait(0.35)
+        end
+    end
+
     -- If player is not on the target breakables island, warp there
-    if targetWorld and targetWorld ~= pData.CurrentIsland then
+    if targetWorld ~= "DominusArea" and targetWorld and targetWorld ~= pData.CurrentIsland then
         ProgAPI.TeleportToIsland(targetWorld)
         task.wait(0.35)
         ProgAPI.TeleportToBreakableZone(targetWorld, ignoreBoss)
@@ -2072,11 +2170,13 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
     end
 
     -- Keep character anchored inside breakables zone
-    local zonePart = ProgAPI.GetIslandBreakableZone(targetWorld, ignoreBoss)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
-        ProgAPI.TeleportToBreakableZone(targetWorld, ignoreBoss)
+    if targetWorld ~= "DominusArea" then
+        local zonePart = ProgAPI.GetIslandBreakableZone(targetWorld, ignoreBoss)
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 35 then
+            ProgAPI.TeleportToBreakableZone(targetWorld, ignoreBoss)
+        end
     end
 
     -- Periodically sync HugeHeavenChest snapshot when on Heaven
@@ -2095,16 +2195,27 @@ function ProgAPI.StepBreakablesPipeline(attackBigChests: boolean?): (string, str
         okAtk, targetName, dmg = ProgAPI.AttackBreakable(ignoreBoss, targetWorld)
     end)
 
-    -- If no breakables on current Coins island, switch immediately between Volcano and Heaven so it never stops!
+    -- If no attack on current island, check if all breakables on current island are truly broken (count == 0)
     if not okAtk and not stProg.CoinsComplete then
-        local altIsland = ProgAPI.ForceSwitchCoinsIsland()
-        if altIsland and altIsland ~= pData.CurrentIsland then
-            ProgAPI.TeleportToIsland(altIsland)
-            task.wait(0.35)
-            ProgAPI.TeleportToBreakableZone(altIsland, true)
-            targetWorld = altIsland
+        local curCount = ProgAPI.GetActiveIslandBreakablesCount(targetWorld, attackBigChests)
+        if curCount == 0 then
+            -- ALL breakables on current island are broken! Now and only now look for alternate island
+            local altIsland = (targetWorld == "Heaven") and "Volcano" or "Heaven"
+            if targetWorld == "DominusArea" then altIsland = "Heaven" end
+            local altCount = ProgAPI.GetActiveIslandBreakablesCount(altIsland, attackBigChests)
+            if altCount > 0 then
+                targetWorld = altIsland
+                if altIsland ~= "DominusArea" and MF and MF.Active and MF.Active() == "DominusArea" then
+                    pcall(function() MF.Exit() end)
+                    task.wait(0.3)
+                end
+                ProgAPI.TeleportToIsland(altIsland)
+                task.wait(0.35)
+                ProgAPI.TeleportToBreakableZone(altIsland, ignoreBoss)
+                return "Cleared arena! Teleporting to " .. tostring(altIsland), tostring(altIsland)
+            end
         end
-        return "Switching to " .. tostring(altIsland), tostring(altIsland)
+        return "Waiting for breakables respawn in " .. tostring(targetWorld), tostring(targetWorld)
     end
 
     if okAtk then
@@ -2488,7 +2599,11 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
     local stats = Stats.Local(true) or {}
     local doorUnlocked = stats.DominusAreaUnlocked == true or stats.SecretAreaDoorUnlocked == true
     if doorUnlocked then
-        return true, "??? Door already unlocked!"
+        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+        if MF and MF.Enter and MF.Active and MF.Active() ~= "DominusArea" then
+            pcall(function() MF.Enter("DominusArea") end)
+        end
+        return true, "??? Secret Door Unlocked!"
     end
 
     if not ProgAPI.IsIslandUnlocked("Mystical") then
@@ -2501,25 +2616,22 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
-    -- 1. Try accepting/checking quest at Overworld Gate (workspace._MAP.Islands.Spawn.Map.Door)
-    local door = workspace:FindFirstChild("_MAP")
-        and workspace._MAP:FindFirstChild("Islands")
-        and workspace._MAP.Islands:FindFirstChild("Spawn")
-        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
-        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
-    local interact = door and door:FindFirstChild("Interact")
-
-    local ok, res1, res2 = pcall(function()
-        return questCh:InvokeServer("ClaimSecretAreaQuestline")
-    end)
-
-    if ok and res1 == true and res2 == "Unlocked" then
-        return true, "??? Door Unlocked!"
+    -- Check if any completed secret sub-quests need claiming
+    local quests = stats.Quests or {}
+    for qId, qData in pairs(quests) do
+        if type(qData) == "table" and qId:find("secret_") then
+            if qData.Amount and qData.Progress and qData.Progress >= qData.Amount and qData.Completed ~= true then
+                pcall(function()
+                    questCh:InvokeServer("Claim", qId, qData.Tier or 1)
+                end)
+                task.wait(0.15)
+            end
+        end
     end
 
-    -- 2. If feathers quest is active (stats.Quests.secret_feathers), collect remaining feathers!
-    local feathersQuest = stats.Quests and stats.Quests.secret_feathers
-    if feathersQuest and hrp then
+    -- 1. Secret Feathers: If secret_feathers is active and progress < amount
+    local feathersQuest = quests.secret_feathers
+    if feathersQuest and feathersQuest.Progress < feathersQuest.Amount and hrp then
         local collected = stats.SecretAreaCollectedFeathers or {}
         local CollectionService = game:GetService("CollectionService")
         local taggedFeathers = CollectionService:GetTagged("FindFeathers")
@@ -2528,17 +2640,77 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
                 local pivot = featherObj:GetPivot()
                 hrp.CFrame = pivot + Vector3.new(0, 1, 0)
                 task.wait(0.25)
-                break
+                return false, string.format("Collecting Feathers (%d/%d)...", feathersQuest.Progress, feathersQuest.Amount)
             end
         end
-        return false, "Collecting Feathers for ??? Quest..."
     end
 
-    -- 3. Teleport to door interact if needed to interact directly
+    -- 2. Secret Hatch Eggs: If secret_hatch_eggs is active and progress < amount
+    local hatchQuest = quests.secret_hatch_eggs
+    if hatchQuest and hatchQuest.Progress < hatchQuest.Amount then
+        if stats.CurrentIsland ~= "Spawn" then
+            ProgAPI.TeleportToIsland("Spawn")
+            task.wait(0.3)
+        end
+        local basicEgg = workspace:FindFirstChild("_MAP")
+            and workspace._MAP:FindFirstChild("Interact")
+            and workspace._MAP.Interact:FindFirstChild("Eggs")
+            and workspace._MAP.Interact.Eggs:FindFirstChild("BasicEgg")
+        if basicEgg and hrp then
+            local eggPart = basicEgg:FindFirstChild("EggModel") or basicEgg.PrimaryPart or basicEgg:FindFirstChildWhichIsA("BasePart")
+            if eggPart and (hrp.Position - eggPart.Position).Magnitude > 16 then
+                hrp.CFrame = eggPart.CFrame + Vector3.new(0, 3, 0)
+                task.wait(0.2)
+            end
+        end
+        local maxHatch = math.min(8, ProgAPI.GetMaxEggOpenAmount("BasicEgg"))
+        ProgAPI.OpenEgg("BasicEgg", maxHatch, true)
+        return false, string.format("Hatching Eggs for ??? Quest (%d/%d)...", hatchQuest.Progress, hatchQuest.Amount)
+    end
+
+    -- 3. Secret Craft Golden: If secret_craft_golden is active and progress < amount
+    local craftQuest = quests.secret_craft_golden
+    if craftQuest and craftQuest.Progress < craftQuest.Amount then
+        ProgAPI.CraftGoldenPets()
+        return false, string.format("Crafting Golden Pets for ??? Quest (%d/%d)...", craftQuest.Progress, craftQuest.Amount)
+    end
+
+    -- 4. Secret Clicks: If secret_click_* is active and progress < amount
+    for _, clickKey in ipairs({"secret_click_1", "secret_click_2", "secret_click_3"}) do
+        local clickQ = quests[clickKey]
+        if clickQ and clickQ.Progress < clickQ.Amount then
+            ProgAPI.Click()
+            return false, string.format("Clicking for ??? Quest (%d/%d)...", clickQ.Progress, clickQ.Amount)
+        end
+    end
+
+    -- 5. Interacting with Door at Spawn to unlock
+    local door = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Islands")
+        and workspace._MAP.Islands:FindFirstChild("Spawn")
+        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
+        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
+    local interact = door and door:FindFirstChild("Interact")
+
     if hrp and interact and (hrp.Position - interact.Position).Magnitude > 15 then
+        if stats.CurrentIsland ~= "Spawn" then
+            ProgAPI.TeleportToIsland("Spawn")
+            task.wait(0.3)
+        end
         hrp.CFrame = interact.CFrame + Vector3.new(0, 2, 0)
         task.wait(0.2)
-        pcall(function() questCh:InvokeServer("ClaimSecretAreaQuestline") end)
+    end
+
+    local ok, res1, res2 = pcall(function()
+        return questCh:InvokeServer("ClaimSecretAreaQuestline")
+    end)
+
+    if ok and res1 == true and (res2 == "Unlocked" or res2 == "Claimed") then
+        local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+        if MF and MF.Enter then
+            pcall(function() MF.Enter("DominusArea") end)
+        end
+        return true, "??? Door Unlocked! Entered Dominus Area."
     end
 
     return false, tostring(res2 or "In progress")
@@ -2787,6 +2959,56 @@ function ProgAPI.SetRemoveMaps(enabled: boolean)
         end
         table.clear(originalTransparencies)
     end
+end
+
+function ProgAPI.SetDisableInGameSettings(enabled: boolean)
+    local SettingsCh = Channels.Settings or (Network and Network.Channel("Settings"))
+    if not SettingsCh then return false end
+
+    local targetSettings = {
+        PotatoMode = enabled,
+        DisableGoldenRolling = enabled,
+        DisableScreenShake = enabled,
+        HideClicksPopup = enabled,
+        HideCrit = enabled,
+        HidePetsOthers = enabled,
+        HidePetsOwn = enabled,
+        TransparentPets = enabled,
+        DisableServerMessages = enabled,
+    }
+
+    for settingName, val in pairs(targetSettings) do
+        pcall(function()
+            SettingsCh:InvokeServer("SetSetting", settingName, val)
+        end)
+    end
+
+    -- Visually update button states if PlayerGui.Settings is open
+    pcall(function()
+        local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+        local settingsGui = lp and lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("Settings")
+        if settingsGui then
+            local scrolling = settingsGui:FindFirstChild("Scrolling", true)
+            if scrolling then
+                for settingName, val in pairs(targetSettings) do
+                    local row = scrolling:FindFirstChild(settingName, true)
+                    local btn = row and row:FindFirstChild("Button", true)
+                    if btn then
+                        local onImg = btn:FindFirstChild("On")
+                        local offImg = btn:FindFirstChild("Off")
+                        local title = btn:FindFirstChild("Title", true)
+                        if onImg then onImg.Enabled = val end
+                        if offImg then offImg.Enabled = not val end
+                        if title and title:IsA("TextLabel") then
+                            title.Text = val and "On" or "Off"
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    return true
 end
 
 return ProgAPI
