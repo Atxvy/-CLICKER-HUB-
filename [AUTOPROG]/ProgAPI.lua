@@ -1593,8 +1593,17 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
 
-    -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn!
-    if eggName == "BasicEgg" and (curWorld == "Techworld" or curWorld == "Space" or ProgAPI.AreAllIslandsUnlocked() or ProgAPI.IsIslandUnlocked("Winter")) then
+    -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn, UNLESS doing Phase 3 secret quest!
+    local isPhase3Quest = false
+    pcall(function()
+        if ProgAPI.GetSecretQuestInfo then
+            local q = ProgAPI.GetSecretQuestInfo()
+            if not q.AllQuestsDone or not q.IsDoorUnlocked then
+                isPhase3Quest = true
+            end
+        end
+    end)
+    if eggName == "BasicEgg" and not isPhase3Quest and (curWorld == "Techworld" or curWorld == "Space" or ProgAPI.AreAllIslandsUnlocked() or ProgAPI.IsIslandUnlocked("Winter")) then
         return false, "Blocked opening BasicEgg on advanced progression"
     end
 
@@ -3417,16 +3426,203 @@ function ProgAPI.IsSecretQuestComplete(): boolean
     return info.IsDoorUnlocked or (info.IsClaimed and info.AllQuestsDone)
 end
 
+--==============================================================================
+-- DOMINUS FORTUNE SKILL TREE ENGINE (3 UPGRADES: 680B COINS TOTAL)
+-- 1. DominusEggHatch (80B Coins) -> Open +1 pet from every normal egg hatch!
+-- 2. DominusEggLuck (200B Coins) -> Gain +15% permanent Egg Luck!
+-- 3. DominusSecretSeeker (400B Coins) -> Secret pet chances are 10% higher!
+--==============================================================================
+
+function ProgAPI.GetDominusFortuneProgress(): {
+    HatchOwned: boolean,
+    LuckOwned: boolean,
+    SeekerOwned: boolean,
+    BoughtCount: number,
+    TotalCount: number,
+    IsComplete: boolean
+}
+    local stats = Stats.Local(true) or {}
+    local st = stats.SkillTree or {}
+    local stFrontend = nil
+    pcall(function()
+        stFrontend = require(Client:WaitForChild("SkillTreeFrontend"))
+    end)
+    local SkillTreeUtil = nil
+    pcall(function()
+        SkillTreeUtil = require(Library:WaitForChild("Utils"):WaitForChild("SkillTreeUtil"))
+    end)
+
+    local function checkOwned(upgId: string): boolean
+        local saveKey = upgId
+        if SkillTreeUtil and SkillTreeUtil.GetSaveKey then
+            pcall(function() saveKey = SkillTreeUtil.GetSaveKey(upgId, "Default") end)
+        end
+        if st[saveKey] == true or st[upgId] == true then return true end
+        if stFrontend and stFrontend.OwnsUpgrade then
+            local res = false
+            pcall(function() res = stFrontend.OwnsUpgrade(upgId, "Default") end)
+            if res == true then return true end
+        end
+        return false
+    end
+
+    local hatch = checkOwned("DominusEggHatch")
+    local luck = checkOwned("DominusEggLuck")
+    local seeker = checkOwned("DominusSecretSeeker")
+    local count = (hatch and 1 or 0) + (luck and 1 or 0) + (seeker and 1 or 0)
+
+    return {
+        HatchOwned = hatch,
+        LuckOwned = luck,
+        SeekerOwned = seeker,
+        BoughtCount = count,
+        TotalCount = 3,
+        IsComplete = (count >= 3)
+    }
+end
+
+function ProgAPI.IsDominusFortuneComplete(): boolean
+    local prog = ProgAPI.GetDominusFortuneProgress()
+    return prog.IsComplete
+end
+
+function ProgAPI.BuyDominusFortuneUpgrades(): number
+    if not Channels.SkillTree then return 0 end
+    local stats = Stats.Local(true) or {}
+    local curr = (stats.Currency and stats.Currency.Coins) or 0
+    local prog = ProgAPI.GetDominusFortuneProgress()
+    if prog.IsComplete then return 0 end
+
+    local boughtCount = 0
+
+    -- 1. DominusEggHatch (80B Coins)
+    if not prog.HatchOwned then
+        if curr >= 80000000000 then
+            local ok = false
+            pcall(function()
+                ok = Channels.SkillTree:InvokeServer("Purchase", "DominusEggHatch", "Default")
+            end)
+            if ok == true then
+                boughtCount = boughtCount + 1
+                curr = curr - 80000000000
+                task.wait(0.1)
+                prog = ProgAPI.GetDominusFortuneProgress()
+            end
+        end
+    end
+
+    -- 2. DominusEggLuck (200B Coins, requires DominusEggHatch)
+    if prog.HatchOwned and not prog.LuckOwned then
+        if curr >= 200000000000 then
+            local ok = false
+            pcall(function()
+                ok = Channels.SkillTree:InvokeServer("Purchase", "DominusEggLuck", "Default")
+            end)
+            if ok == true then
+                boughtCount = boughtCount + 1
+                curr = curr - 200000000000
+                task.wait(0.1)
+                prog = ProgAPI.GetDominusFortuneProgress()
+            end
+        end
+    end
+
+    -- 3. DominusSecretSeeker (400B Coins, requires DominusEggLuck)
+    if prog.LuckOwned and not prog.SeekerOwned then
+        if curr >= 400000000000 then
+            local ok = false
+            pcall(function()
+                ok = Channels.SkillTree:InvokeServer("Purchase", "DominusSecretSeeker", "Default")
+            end)
+            if ok == true then
+                boughtCount = boughtCount + 1
+                curr = curr - 400000000000
+                task.wait(0.1)
+            end
+        end
+    end
+
+    return boughtCount
+end
+
+function ProgAPI.EnterDominusArea(): boolean
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+    if MF and MF.Enter then
+        pcall(function() MF.Enter("DominusArea") end)
+    end
+    task.wait(0.3)
+    local zonePart = ProgAPI.GetIslandBreakableZone("DominusArea", false)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and zonePart then
+        hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+        return true
+    elseif hrp then
+        hrp.CFrame = CFrame.new(399.61, 256.0, 2758.04)
+        return true
+    end
+    return false
+end
+
+function ProgAPI.StepDominusAreaFarming(): (string, string)
+    local MF = MinigamesFrontend or (Library and require(Library.Client.MinigamesFrontend))
+
+    -- 1. Ensure we are in DominusArea minigame
+    if not ProgAPI.IsInMinigame("DominusArea") then
+        ProgAPI.EnterDominusArea()
+        task.wait(0.35)
+    end
+
+    -- 2. Position character in breakable zone
+    local zonePart = ProgAPI.GetIslandBreakableZone("DominusArea", false)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and zonePart and (hrp.Position - zonePart.Position).Magnitude > 30 then
+        hrp.CFrame = zonePart.CFrame * CFrame.new(0, 2, 0)
+    end
+
+    -- 3. Check for active breakables
+    local curCount = ProgAPI.GetActiveIslandBreakablesCount("DominusArea", false)
+    if curCount == 0 then
+        if dominusEmptyStartTick == 0 then
+            dominusEmptyStartTick = tick()
+        elseif (tick() - dominusEmptyStartTick) > 2.0 then
+            dominusEmptyStartTick = tick()
+            ProgAPI.ExitMinigame()
+            ProgAPI.TeleportToIsland("Spawn")
+            task.wait(0.6)
+            ProgAPI.EnterDominusArea()
+            task.wait(0.5)
+            return "Respawning Dominus Breakables via Spawn...", "DominusArea"
+        end
+        return "Waiting for Dominus Breakables spawn...", "DominusArea"
+    else
+        dominusEmptyStartTick = 0
+    end
+
+    -- 4. Attack breakable
+    local okAtk, targetName = pcall(function()
+        return ProgAPI.AttackBreakable(false, "DominusArea")
+    end)
+
+    if okAtk and targetName then
+        return string.format("Farming %s", tostring(targetName)), "DominusArea"
+    else
+        return "Targeting Dominus Breakables...", "DominusArea"
+    end
+end
+
 function ProgAPI.IsPhase3(): boolean
     if not ProgAPI.AreAllIslandsUnlocked() then return false end
     if not ProgAPI.IsSkillTreeMaxed() then return false end
-    return not ProgAPI.IsSecretQuestComplete()
+    return not ProgAPI.IsDominusFortuneComplete()
 end
 
 function ProgAPI.IsPhase4(): boolean
     if not ProgAPI.AreAllIslandsUnlocked() then return false end
     if not ProgAPI.IsSkillTreeMaxed() then return false end
-    return ProgAPI.IsSecretQuestComplete()
+    if not ProgAPI.IsSecretQuestComplete() then return false end
+    return ProgAPI.IsDominusFortuneComplete()
 end
 
 function ProgAPI.TeleportToSpawnDoor(): boolean
@@ -3558,69 +3754,91 @@ function ProgAPI.UnlockSecretDoor(): (boolean, string)
         pcall(function() fireproximityprompt(prompt) end)
     end
 
-    if ok and res == true then
-        return true, tostring(msg or "Door Unlocked")
+    -- Enter Dominus Area minigame
+    ProgAPI.EnterDominusArea()
+
+    if ok and (res == true or res == "Unlocked" or res == "Claimed") then
+        return true, tostring(msg or "Door Unlocked & Entered Dominus Area")
     end
-    return false, tostring(msg or res or "Failed to unlock door")
+    return true, tostring(msg or res or "Door Handled")
 end
 
 function ProgAPI.StepSecretQuest(): (boolean, string)
-    local info = ProgAPI.GetSecretQuestInfo()
-    if info.IsDoorUnlocked then
-        return true, "Dominus Secret Area already unlocked!"
+    local questInfo = ProgAPI.GetSecretQuestInfo()
+    local domProg = ProgAPI.GetDominusFortuneProgress()
+
+    -- 1. If Dominus Fortune is already 3/3 complete, Phase 3 is 100% complete!
+    if domProg.IsComplete then
+        return true, "Dominus Fortune 3/3 Complete! Ready for Phase 4."
     end
 
-    -- 1. Ensure quest is accepted
-    if not info.IsClaimed then
-        local okAcc, msgAcc = ProgAPI.AcceptSecretQuest()
-        return okAcc, "[Phase 3: ???] Accepting Quest: " .. tostring(msgAcc)
-    end
+    -- 2. If Secret Quest is NOT complete yet:
+    if not questInfo.IsDoorUnlocked and not questInfo.AllQuestsDone then
+        -- Ensure quest is accepted at Spawn door
+        if not questInfo.IsClaimed then
+            local okAcc, msgAcc = ProgAPI.AcceptSecretQuest()
+            return okAcc, "[Phase 3: ???] Accepting Quest: " .. tostring(msgAcc)
+        end
 
-    -- 2. Clicks (3,500)
-    if not info.Clicks.Done then
-        pcall(function() ProgAPI.Click(25) end)
-        return true, string.format("[Phase 3: ???] Clicking (%s / %s)", ProgAPI.FormatNumber(info.Clicks.Progress), ProgAPI.FormatNumber(info.Clicks.Amount))
-    end
+        -- Objective 1: Clicks (3,500)
+        if not questInfo.Clicks.Done then
+            pcall(function() ProgAPI.Click(25) end)
+            return true, string.format("[Phase 3: ???] Clicking (%s / %s)", ProgAPI.FormatNumber(questInfo.Clicks.Progress), ProgAPI.FormatNumber(questInfo.Clicks.Amount))
+        end
 
-    -- 3. Feathers (10)
-    if not info.Feathers.Done then
-        local count = ProgAPI.CollectSecretFeathers()
-        return true, string.format("[Phase 3: ???] Collecting Feathers (%d / %d)", info.Feathers.Progress, info.Feathers.Amount)
-    end
+        -- Objective 2: Feathers (10)
+        if not questInfo.Feathers.Done then
+            local count = ProgAPI.CollectSecretFeathers()
+            return true, string.format("[Phase 3: ???] Collecting Feathers (%d / %d)", questInfo.Feathers.Progress, questInfo.Feathers.Amount)
+        end
 
-    -- 4. Golden Pets (15)
-    if not info.Golden.Done then
-        local crafted = ProgAPI.CraftGoldenPets()
-        if crafted > 0 then
-            return true, string.format("[Phase 3: ???] Crafted %d Golden Pets (%d / %d)", crafted, info.Golden.Progress, info.Golden.Amount)
-        else
-            -- Need normal pets to craft golden: hatch best affordable egg
-            local bestEgg = ProgAPI.GetBestAffordableEgg()
-            local eggName = (bestEgg and bestEgg.name) or "MatrixEgg"
+        -- Objective 3: Golden Pets (15) - User instruction: use BasicEgg from World 1 Spawn
+        if not questInfo.Golden.Done then
+            local crafted = ProgAPI.CraftGoldenPets()
+            if crafted > 0 then
+                return true, string.format("[Phase 3: ???] Crafted %d Golden Pets (%d / %d)", crafted, questInfo.Golden.Progress, questInfo.Golden.Amount)
+            else
+                local eggName = "BasicEgg"
+                local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
+                ProgAPI.OpenEgg(eggName, openAmount, false)
+                task.wait(0.08)
+                pcall(ProgAPI.CraftGoldenPets)
+                pcall(ProgAPI.CleanWeakPets)
+                return true, string.format("[Phase 3: ???] Hatching %s at Spawn to craft Golden (%d / %d)", eggName, questInfo.Golden.Progress, questInfo.Golden.Amount)
+            end
+        end
+
+        -- Objective 4: Hatch Eggs (2,500) - User instruction: use BasicEgg from World 1 Spawn
+        if not questInfo.Hatch.Done then
+            local eggName = "BasicEgg"
             local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
             ProgAPI.OpenEgg(eggName, openAmount, false)
             pcall(ProgAPI.CraftGoldenPets)
-            return true, string.format("[Phase 3: ???] Hatching %s to craft Golden (%d / %d)", eggName, info.Golden.Progress, info.Golden.Amount)
+            pcall(ProgAPI.CleanWeakPets)
+            return true, string.format("[Phase 3: ???] Hatching %s at Spawn (%s / %s)", eggName, ProgAPI.FormatNumber(questInfo.Hatch.Progress), ProgAPI.FormatNumber(questInfo.Hatch.Amount))
         end
     end
 
-    -- 5. Hatch Eggs (2,500)
-    if not info.Hatch.Done then
-        local bestEgg = ProgAPI.GetBestAffordableEgg()
-        local eggName = (bestEgg and bestEgg.name) or "MatrixEgg"
-        local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
-        ProgAPI.OpenEgg(eggName, openAmount, false)
-        pcall(ProgAPI.CraftGoldenPets)
-        return true, string.format("[Phase 3: ???] Hatching Eggs (%s / %s)", ProgAPI.FormatNumber(info.Hatch.Progress), ProgAPI.FormatNumber(info.Hatch.Amount))
-    end
-
-    -- 6. Unlock Door
-    if info.AllQuestsDone and not info.IsDoorUnlocked then
+    -- 3. All 4 quests are done, but door not unlocked yet: TP to door & unlock!
+    if not questInfo.IsDoorUnlocked then
         local okDoor, msgDoor = ProgAPI.UnlockSecretDoor()
-        return okDoor, "[Phase 3: ???] Unlocking Door: " .. tostring(msgDoor)
+        return okDoor, "[Phase 3: ???] Unlocking Door & Entering: " .. tostring(msgDoor)
     end
 
-    return true, "??? Questline Complete"
+    -- 4. Door is unlocked! Grind Dominus Fortune skill tree (3 upgrades: 680B Coins total)!
+    pcall(ProgAPI.BuyDominusFortuneUpgrades)
+    local updatedProg = ProgAPI.GetDominusFortuneProgress()
+    if updatedProg.IsComplete then
+        return true, "Dominus Fortune 3/3 Complete! Ready for Phase 4."
+    end
+
+    -- Farm DominusArea breakables for Coins!
+    local action, zone = ProgAPI.StepDominusAreaFarming()
+    local stats = Stats.Local(true) or {}
+    local coins = (stats.Currency and stats.Currency.Coins) or 0
+    local nextCost = not updatedProg.HatchOwned and "80B" or (not updatedProg.LuckOwned and "200B" or "400B")
+    local nextName = not updatedProg.HatchOwned and "Dominus Hatch" or (not updatedProg.LuckOwned and "Dominus Luck" or "Secret Seeker")
+    return true, string.format("[Phase 3: Dominus Fortune] %s (%d/3: %s) Coins: %s / %s", tostring(action or "Farming"), updatedProg.BoughtCount, nextName, ProgAPI.FormatNumber(coins), nextCost)
 end
 
 --==============================================================================
