@@ -32,6 +32,9 @@ Configs.Default = {
     AutoPotions = true,
     AutoFruits = true,
     AutoFreeGifts = true,
+    AttackBigChests = true,
+    BlackScreen = false,
+    RemoveMaps = false,
     WalkSpeed = 16,
     JumpPower = 50,
 }
