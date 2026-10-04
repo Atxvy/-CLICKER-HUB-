@@ -895,6 +895,7 @@ table.insert(threads, task.spawn(function()
             local lockedIsland = AutoProgAPI.GetNextLockedIsland()
             local isAllGold = AutoProgAPI.IsEquippedTeamAllGold()
             local isAllRainbow = AutoProgAPI.IsEquippedTeamAllRainbow()
+            local isP3 = AutoProgAPI.IsPhase3 and AutoProgAPI.IsPhase3()
 
             -- =====================================================================
             -- STEP 1 (PHASE 1: ISLAND SPEEDRUN)
@@ -972,7 +973,7 @@ table.insert(threads, task.spawn(function()
             -- 1. Desert Gem Machine & Rebirth Shop Maxing (Thread 8 & 9)
             -- 2. Max Skill Tree (Dominus Area for Coins -> Matrix for Tech Coins) (Thread 13)
             -- =====================================================================
-            elseif not isSkillTreeMaxed then
+            elseif not isP3 then
                 currentPhaseText = "👑 PHASE 2: ENDGAME PREPARATION"
                 -- Thread 13 handles breakables and skill tree purchasing.
 
