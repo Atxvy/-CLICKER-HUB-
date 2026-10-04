@@ -1627,7 +1627,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     end
 
     -- Proactive Inventory Check & Cleaning BEFORE invoking the server!
-    local isP3 = ProgAPI.IsPhase3 and ProgAPI.IsPhase3()
+    local isP4 = ProgAPI.IsPhase4 and ProgAPI.IsPhase4()
     local curInv = 0
     for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
     local maxInv = 200
@@ -1641,7 +1641,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     end)
 
     if curInv + amount >= maxInv - 2 then
-        if isP3 then
+        if isP4 then
             pcall(ProgAPI.CleanNonMythicPets)
             pcall(ProgAPI.CraftGoldenPets)
         else
@@ -1666,7 +1666,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
 
     -- If server rejected due to full inventory, clean immediately
     if tostring(reason):lower():find("full") or tostring(res):lower():find("full") then
-        if isP3 then
+        if isP4 then
             pcall(ProgAPI.CleanNonMythicPets)
         else
             pcall(ProgAPI.CraftGoldenPets)
@@ -1957,7 +1957,7 @@ end
 
 -- Weak pet deletion: If highest unlocked island is N, delete all normal pets from world (N - 2) and below
 function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
-    if ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
         return ProgAPI.CleanNonMythicPets()
     end
     if protectCrafting == nil then protectCrafting = true end
@@ -3318,19 +3318,316 @@ function ProgAPI.CheckAndEquipMagmaSkin(): (boolean, string)
 end
 
 --==============================================================================
--- PHASE 3: ENDGAME MATRIX MYTHIC PIPELINE
--- Activates once Phase 2 (Desert Machine & Skill Tree) is 100% complete!
+-- PHASE RECOGNITION HELPERS
+-- Phase 1: Island Speedrun (locked islands remaining)
+-- Phase 2: Endgame Preparation (all islands unlocked, Skill Tree in progress)
+-- Phase 3: ??? Secret Quest (Skill Tree complete, ??? questline in progress)
+-- Phase 4: Endgame Matrix Mythics (Skill Tree complete AND ??? questline complete)
 --==============================================================================
-function ProgAPI.IsPhase3(): boolean
-    local allIslands = ProgAPI.AreAllIslandsUnlocked()
-    if not allIslands then return false end
+function ProgAPI.IsPhase1(): boolean
+    return not ProgAPI.AreAllIslandsUnlocked()
+end
+
+function ProgAPI.IsSkillTreeMaxed(): boolean
     local stProg = ProgAPI.GetSkillTreeProgress()
     local coinsDone = stProg and (stProg.CoinsComplete or stProg.CoinsBought >= 36)
     local techDone = stProg and (stProg.TechComplete or stProg.TechBought >= 13)
     return (coinsDone and techDone) == true
 end
 
--- Phase 3 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
+function ProgAPI.IsPhase2(): boolean
+    if not ProgAPI.AreAllIslandsUnlocked() then return false end
+    return not ProgAPI.IsSkillTreeMaxed()
+end
+
+--==============================================================================
+-- PHASE 3: ??? SECRET AREA QUESTLINE AUTOMATION
+-- Quests:
+-- 1. secret_click_1: Click 3,500 Times
+-- 2. secret_feathers: Collect 10 Feathers across maps
+-- 3. secret_craft_golden: Craft 15 Golden Pets
+-- 4. secret_hatch_eggs: Hatch 2,500 Eggs
+-- Door: Dominus secret door on Spawn island (Overworld)
+--==============================================================================
+
+function ProgAPI.GetSecretQuestInfo()
+    local stats = Stats.Local(true) or {}
+    local quests = stats.Quests or {}
+    local collectedFeathers = stats.SecretAreaCollectedFeathers or {}
+    local isDoorUnlocked = (stats.DominusAreaUnlocked == true)
+    local isClaimed = (stats.SecretAreaQuestClaimed == true)
+
+    local clickQ = quests.secret_click_1
+    local clickProg = clickQ and clickQ.Progress or 0
+    local clickReq = clickQ and clickQ.Amount or 3500
+    local clickDone = clickProg >= clickReq
+
+    local featherQ = quests.secret_feathers
+    local featherProg = featherQ and featherQ.Progress or 0
+    local featherReq = featherQ and featherQ.Amount or 10
+    local featherDone = featherProg >= featherReq
+
+    local goldenQ = quests.secret_craft_golden
+    local goldenProg = goldenQ and goldenQ.Progress or 0
+    local goldenReq = goldenQ and goldenQ.Amount or 15
+    local goldenDone = goldenProg >= goldenReq
+
+    local hatchQ = quests.secret_hatch_eggs
+    local hatchProg = hatchQ and hatchQ.Progress or 0
+    local hatchReq = hatchQ and hatchQ.Amount or 2500
+    local hatchDone = hatchProg >= hatchReq
+
+    local allQuestsDone = clickDone and featherDone and goldenDone and hatchDone
+    local isComplete = isDoorUnlocked or (isClaimed and allQuestsDone)
+
+    local currentStep = "Completed"
+    if isDoorUnlocked then
+        currentStep = "Dominus Area Unlocked!"
+    elseif not isClaimed then
+        currentStep = "Accept Quest (Spawn Door)"
+    elseif not clickDone then
+        currentStep = string.format("Clicks: %s / %s", ProgAPI.FormatNumber(clickProg), ProgAPI.FormatNumber(clickReq))
+    elseif not featherDone then
+        currentStep = string.format("Feathers: %d / %d", featherProg, featherReq)
+    elseif not goldenDone then
+        currentStep = string.format("Golden Pets: %d / %d", goldenProg, goldenReq)
+    elseif not hatchDone then
+        currentStep = string.format("Hatch Eggs: %s / %s", ProgAPI.FormatNumber(hatchProg), ProgAPI.FormatNumber(hatchReq))
+    elseif allQuestsDone and not isDoorUnlocked then
+        currentStep = "Unlock Spawn Door"
+    end
+
+    return {
+        IsClaimed = isClaimed,
+        IsDoorUnlocked = isDoorUnlocked,
+        AllQuestsDone = allQuestsDone,
+        IsComplete = isComplete,
+        CurrentStep = currentStep,
+        Clicks = { Progress = clickProg, Amount = clickReq, Done = clickDone },
+        Feathers = { Progress = featherProg, Amount = featherReq, Done = featherDone, Collected = collectedFeathers },
+        Golden = { Progress = goldenProg, Amount = goldenReq, Done = goldenDone },
+        Hatch = { Progress = hatchProg, Amount = hatchReq, Done = hatchDone },
+    }
+end
+
+function ProgAPI.IsSecretQuestComplete(): boolean
+    local stats = Stats.Local(true) or {}
+    if stats.DominusAreaUnlocked == true then return true end
+    local info = ProgAPI.GetSecretQuestInfo()
+    return info.IsDoorUnlocked or (info.IsClaimed and info.AllQuestsDone)
+end
+
+function ProgAPI.IsPhase3(): boolean
+    if not ProgAPI.AreAllIslandsUnlocked() then return false end
+    if not ProgAPI.IsSkillTreeMaxed() then return false end
+    return not ProgAPI.IsSecretQuestComplete()
+end
+
+function ProgAPI.IsPhase4(): boolean
+    if not ProgAPI.AreAllIslandsUnlocked() then return false end
+    if not ProgAPI.IsSkillTreeMaxed() then return false end
+    return ProgAPI.IsSecretQuestComplete()
+end
+
+function ProgAPI.TeleportToSpawnDoor(): boolean
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+    if curWorld ~= "Overworld" then
+        ProgAPI.TeleportToWorld("Overworld")
+        task.wait(0.6)
+    end
+    local curIsland = stats.CurrentIsland or ""
+    if curIsland ~= "Spawn" then
+        ProgAPI.TeleportToIsland("Spawn")
+        task.wait(0.4)
+    end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local door = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Islands")
+        and workspace._MAP.Islands:FindFirstChild("Spawn")
+        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
+        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
+    local interact = door and door:FindFirstChild("Interact")
+
+    if interact and interact:IsA("BasePart") then
+        hrp.CFrame = interact.CFrame + Vector3.new(0, 3, 4)
+        task.wait(0.1)
+        return true
+    else
+        hrp.CFrame = CFrame.new(-344, 15, 345)
+        task.wait(0.1)
+        return true
+    end
+end
+
+function ProgAPI.AcceptSecretQuest(): (boolean, string)
+    if not Channels.Quest then return false, "No Quest channel" end
+    local stats = Stats.Local(true) or {}
+    if stats.SecretAreaQuestClaimed then
+        return true, "Quest already claimed/in progress"
+    end
+
+    ProgAPI.TeleportToSpawnDoor()
+    task.wait(0.2)
+
+    local ok, res, msg = pcall(function()
+        return Channels.Quest:InvokeServer("ClaimSecretAreaQuestline")
+    end)
+
+    local door = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Islands")
+        and workspace._MAP.Islands:FindFirstChild("Spawn")
+        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
+        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
+    local interact = door and door:FindFirstChild("Interact")
+    local prompt = interact and interact:FindFirstChildOfClass("ProximityPrompt")
+    if prompt and type(fireproximityprompt) == "function" then
+        pcall(function() fireproximityprompt(prompt) end)
+    end
+
+    if ok and res == true then
+        return true, tostring(msg or "Quest Accepted")
+    end
+    return false, tostring(msg or res or "Failed to accept quest")
+end
+
+function ProgAPI.CollectSecretFeathers(): number
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 0 end
+
+    local feathersFolder = workspace:FindFirstChild("_THINGS") and workspace._THINGS:FindFirstChild("Feathers")
+    if not feathersFolder then return 0 end
+
+    local stats = Stats.Local(true) or {}
+    local collectedTable = stats.SecretAreaCollectedFeathers or {}
+    local newlyCollected = 0
+
+    for _, f in ipairs(feathersFolder:GetChildren()) do
+        local fName = f.Name
+        if collectedTable[fName] ~= true then
+            local hitbox = f:FindFirstChild("Hitbox")
+            if hitbox and hitbox:IsA("BasePart") then
+                if type(firetouchinterest) == "function" then
+                    firetouchinterest(hrp, hitbox, 0)
+                    task.wait(0.02)
+                    firetouchinterest(hrp, hitbox, 1)
+                    task.wait(0.01)
+                    newlyCollected = newlyCollected + 1
+                else
+                    local prevCF = hrp.CFrame
+                    hrp.CFrame = hitbox.CFrame
+                    task.wait(0.08)
+                    hrp.CFrame = prevCF
+                    newlyCollected = newlyCollected + 1
+                end
+            end
+        end
+    end
+    return newlyCollected
+end
+
+function ProgAPI.UnlockSecretDoor(): (boolean, string)
+    if not Channels.Quest then return false, "No Quest channel" end
+
+    ProgAPI.TeleportToSpawnDoor()
+    task.wait(0.2)
+
+    for _, qId in ipairs({"secret_click_1", "secret_feathers", "secret_craft_golden", "secret_hatch_eggs"}) do
+        pcall(function()
+            Channels.Quest:InvokeServer("Claim", qId, 1)
+        end)
+    end
+
+    local ok, res, msg = pcall(function()
+        return Channels.Quest:InvokeServer("ClaimSecretAreaQuestline")
+    end)
+
+    local door = workspace:FindFirstChild("_MAP")
+        and workspace._MAP:FindFirstChild("Islands")
+        and workspace._MAP.Islands:FindFirstChild("Spawn")
+        and workspace._MAP.Islands.Spawn:FindFirstChild("Map")
+        and workspace._MAP.Islands.Spawn.Map:FindFirstChild("Door")
+    local interact = door and door:FindFirstChild("Interact")
+    local prompt = interact and interact:FindFirstChildOfClass("ProximityPrompt")
+    if prompt and type(fireproximityprompt) == "function" then
+        pcall(function() fireproximityprompt(prompt) end)
+    end
+
+    if ok and res == true then
+        return true, tostring(msg or "Door Unlocked")
+    end
+    return false, tostring(msg or res or "Failed to unlock door")
+end
+
+function ProgAPI.StepSecretQuest(): (boolean, string)
+    local info = ProgAPI.GetSecretQuestInfo()
+    if info.IsDoorUnlocked then
+        return true, "Dominus Secret Area already unlocked!"
+    end
+
+    -- 1. Ensure quest is accepted
+    if not info.IsClaimed then
+        local okAcc, msgAcc = ProgAPI.AcceptSecretQuest()
+        return okAcc, "[Phase 3: ???] Accepting Quest: " .. tostring(msgAcc)
+    end
+
+    -- 2. Clicks (3,500)
+    if not info.Clicks.Done then
+        pcall(function() ProgAPI.Click(25) end)
+        return true, string.format("[Phase 3: ???] Clicking (%s / %s)", ProgAPI.FormatNumber(info.Clicks.Progress), ProgAPI.FormatNumber(info.Clicks.Amount))
+    end
+
+    -- 3. Feathers (10)
+    if not info.Feathers.Done then
+        local count = ProgAPI.CollectSecretFeathers()
+        return true, string.format("[Phase 3: ???] Collecting Feathers (%d / %d)", info.Feathers.Progress, info.Feathers.Amount)
+    end
+
+    -- 4. Golden Pets (15)
+    if not info.Golden.Done then
+        local crafted = ProgAPI.CraftGoldenPets()
+        if crafted > 0 then
+            return true, string.format("[Phase 3: ???] Crafted %d Golden Pets (%d / %d)", crafted, info.Golden.Progress, info.Golden.Amount)
+        else
+            -- Need normal pets to craft golden: hatch best affordable egg
+            local bestEgg = ProgAPI.GetBestAffordableEgg()
+            local eggName = (bestEgg and bestEgg.name) or "MatrixEgg"
+            local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
+            ProgAPI.OpenEgg(eggName, openAmount, false)
+            pcall(ProgAPI.CraftGoldenPets)
+            return true, string.format("[Phase 3: ???] Hatching %s to craft Golden (%d / %d)", eggName, info.Golden.Progress, info.Golden.Amount)
+        end
+    end
+
+    -- 5. Hatch Eggs (2,500)
+    if not info.Hatch.Done then
+        local bestEgg = ProgAPI.GetBestAffordableEgg()
+        local eggName = (bestEgg and bestEgg.name) or "MatrixEgg"
+        local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
+        ProgAPI.OpenEgg(eggName, openAmount, false)
+        pcall(ProgAPI.CraftGoldenPets)
+        return true, string.format("[Phase 3: ???] Hatching Eggs (%s / %s)", ProgAPI.FormatNumber(info.Hatch.Progress), ProgAPI.FormatNumber(info.Hatch.Amount))
+    end
+
+    -- 6. Unlock Door
+    if info.AllQuestsDone and not info.IsDoorUnlocked then
+        local okDoor, msgDoor = ProgAPI.UnlockSecretDoor()
+        return okDoor, "[Phase 3: ???] Unlocking Door: " .. tostring(msgDoor)
+    end
+
+    return true, "??? Questline Complete"
+end
+
+--==============================================================================
+-- PHASE 4: ENDGAME MATRIX MYTHIC PIPELINE
+-- Activates once Phase 3 (??? Secret Quest) is 100% complete!
+--==============================================================================
+-- Phase 4 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
 -- Strictly preserves Mythic, Mythical, Special, Mega, Secret, Divine, and Exclusive pets
 -- Deletes all non-mythic pets (Basic, Rare, Epic, Legendary, Stock)
 function ProgAPI.CleanNonMythicPets(): number
@@ -3391,13 +3688,9 @@ function ProgAPI.IsEquippedTeamAllRainbowMythic(): (boolean, number, number)
     return (total > 0 and mythicCount == total), mythicCount, total
 end
 
--- Backward compatibility stub
+-- Backward compatibility alias
 function ProgAPI.GetSecretQuestProgress()
-    return { DoorUnlocked = true, QuestClaimed = true }
-end
-
-function ProgAPI.StepSecretQuest(): (boolean, string)
-    return true, "??? Quest completed and bypassed for Phase 3"
+    return ProgAPI.GetSecretQuestInfo()
 end
 
 --==============================================================================
