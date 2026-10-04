@@ -1014,6 +1014,14 @@ table.insert(threads, task.spawn(function()
 end))
 
 pcall(function()
+    if Window then
+        if Window.ScreenGui then Window.ScreenGui.Enabled = true end
+        if Window.MainFrame then Window.MainFrame.Visible = true end
+        if Window.Show then Window:Show() end
+    end
+end)
+
+pcall(function()
     Window:Notify({
         Title = "Auto Progression Loaded!",
         Content = "Autonomous Zero-to-Hero Speedrun Engine [AUTOPROG] is active!",
