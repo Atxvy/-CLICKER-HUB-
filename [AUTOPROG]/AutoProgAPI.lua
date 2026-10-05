@@ -2152,41 +2152,41 @@ local function buildPetIslandMap()
 end
 
 -- Single source of truth validator for High-Tier & Protected Pets
--- STRICT USER REQUIREMENT: Exclusive, Secret, Stock, Divine, Mega, Mythic, Mythical, Special,
--- as well as Shiny, Locked, Variant, and Unknown pets must NEVER BE DELETED under ANY circumstances!
+-- STRICT USER REQUIREMENT:
+-- 1. High-Tier Pets (Exclusive, Secret, Stock, Divine, Mega, Mythic/Mythical, Special - Rarity Order >= 5):
+--    NEVER BE DELETED under ANY circumstances (whether Normal, Golden, Rainbow, Shiny, Mutated, etc.)!
+-- 2. Manually Locked Pets (p.Locked == true or p.l == true): NEVER BE DELETED!
+-- 3. Low-Tier Pets (Basic, Rare, Epic, Legendary - Rarity Order <= 4):
+--    MUST BE DELETED when cleaners run, EVEN IF Rainbow, Shiny, Mutated, or Dark Matter!
 function ProgAPI.IsSecretOrAbove(p: any): boolean
     if not p then return true end -- Fail-safe: nil pets are protected
 
-    if type(p) == "table" then
-        -- 1. Strictly protect locked pets
-        if p.Locked == true or p.l == true then return true end
-        -- 2. Strictly protect shiny pets
-        if p.Shiny == true or p.s == true then return true end
-        -- 3. Strictly protect variants (Rainbow / Dark Matter)
-        local v = p.v or p.Variant or p.variant
-        if v == "Rainbow" or v == "DarkMatter" or p.r == true or p.dm == true then return true end
-        -- 4. Strictly protect pets with ANY mutations (Honeyglazed, Giant, etc.)
-        if p.m and type(p.m) == "table" and next(p.m) ~= nil then return true end
-        if p.Mutations and type(p.Mutations) == "table" and next(p.Mutations) ~= nil then return true end
-        if p.mutations and type(p.mutations) == "table" and next(p.mutations) ~= nil then return true end
+    -- 1. Strictly protect locked pets
+    if type(p) == "table" and (p.Locked == true or p.l == true) then
+        return true
     end
 
     local pId = (type(p) == "table" and (p.id or p.Id or p.Name or p.PetId)) or (type(p) == "string" and p)
     if not pId then return true end
 
-    -- 4. Official game client engine Pets.GetRarityOrder check
+    -- 2. Official game client engine Pets.GetRarityOrder check
     -- Basic=1, Rare=2, Epic=3, Leg=4, Mythic/Mythical=5, Exclusive/Special=6, Secret/Stock=7, Divine=8, Mega=9
+    local order = nil
     pcall(function()
         local PetsMod = require(Client:WaitForChild("Pets", 2))
         if PetsMod and PetsMod.GetRarityOrder then
-            local order = PetsMod.GetRarityOrder(tostring(pId))
-            if type(order) == "number" and order >= 5 then
-                return true
-            end
+            order = PetsMod.GetRarityOrder(tostring(pId))
         end
     end)
+    if type(order) == "number" then
+        if order >= 5 then
+            return true -- Exclusive, Secret, Stock, Divine, Mega, Mythic, Special
+        elseif order <= 4 then
+            return false -- Basic, Rare, Epic, Legendary are fodder (even if Shiny/Rainbow/Mutated)
+        end
+    end
 
-    -- 5. Safe Directory lookup using pcall & rawget to avoid throwing on unknown keys
+    -- 3. Safe Directory lookup using pcall & rawget to avoid throwing on unknown keys
     local meta = nil
     pcall(function()
         if Directory and Directory.Pets then
@@ -2214,14 +2214,17 @@ function ProgAPI.IsSecretOrAbove(p: any): boolean
         return true
     end
 
-    -- 6. Official Constants.RarityOrder check (Mythic, Exclusive, Secret, Stock, Divine, Mega >= 5)
+    -- 4. Official Constants.RarityOrder check (Mythic, Exclusive, Secret, Stock, Divine, Mega >= 5)
     if Constants and Constants.RarityOrder and Constants.RarityOrder[r] then
-        if Constants.RarityOrder[r] >= 5 then
+        local constOrder = Constants.RarityOrder[r]
+        if constOrder >= 5 then
             return true
+        elseif constOrder <= 4 then
+            return false
         end
     end
 
-    -- 7. String matching on rarity: Exclusive, Secret, Stock, Divine, Mega, Mythic, Mythical, Special
+    -- 5. String matching on rarity: Exclusive, Secret, Stock, Divine, Mega, Mythic, Mythical, Special
     local rLower = tostring(r):lower()
     if rLower:find("exclusive") or rLower:find("secret") or rLower:find("stock")
        or rLower:find("divine") or rLower:find("mega") or rLower:find("mythic")
@@ -2229,7 +2232,7 @@ function ProgAPI.IsSecretOrAbove(p: any): boolean
         return true
     end
 
-    -- 8. String matching on Pet ID and Display Name
+    -- 6. String matching on Pet ID and Display Name
     local idLower = tostring(pId):lower()
     local nameLower = meta and meta.Name and tostring(meta.Name):lower() or ""
     if idLower:find("secret") or idLower:find("divine") or idLower:find("mega")
@@ -2365,10 +2368,8 @@ function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
         if not equipped[guid] and not p.Locked and not p.l then
             -- ABSOLUTE SAFETY: Strictly NEVER delete Exclusive, Secret, Stock, Divine, Mega, Mythic or protected pets!
             local isProtected = ProgAPI.IsSecretOrAbove(p)
-            local isShiny = (p.Shiny or p.s or false)
-            local isVariant = (p.v == "Golden" or p.v == "Rainbow" or p.v == "DarkMatter")
 
-            if not isProtected and not isShiny and not isVariant then
+            if not isProtected then
                 local petOriginWorld = petMap[p.id] or 999 -- Default to 999 (safe / endgame), NEVER 1!
                 if petOriginWorld <= deleteThreshold then
                     local isBestEggDrop = bestEggPets[p.id] == true
