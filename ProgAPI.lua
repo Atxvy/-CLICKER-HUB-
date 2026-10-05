@@ -2165,6 +2165,10 @@ function ProgAPI.IsSecretOrAbove(p: any): boolean
         -- 3. Strictly protect variants (Rainbow / Dark Matter)
         local v = p.v or p.Variant or p.variant
         if v == "Rainbow" or v == "DarkMatter" or p.r == true or p.dm == true then return true end
+        -- 4. Strictly protect pets with ANY mutations (Honeyglazed, Giant, etc.)
+        if p.m and type(p.m) == "table" and next(p.m) ~= nil then return true end
+        if p.Mutations and type(p.Mutations) == "table" and next(p.Mutations) ~= nil then return true end
+        if p.mutations and type(p.mutations) == "table" and next(p.mutations) ~= nil then return true end
     end
 
     local pId = (type(p) == "table" and (p.id or p.Id or p.Name or p.PetId)) or (type(p) == "string" and p)
