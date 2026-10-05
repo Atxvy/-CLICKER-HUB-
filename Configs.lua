@@ -34,13 +34,22 @@ Configs.Default = {
     AutoSecretCraftGolden = true,
     AutoUnlockSecretDoor = true,
     -- Phase 3: Endgame Skill Tree (39/39) & Preparation
-    -- Phase 4: Endgame Matrix Mythics
+    -- Phase 4: Auto Index Pets
+    AutoIndexPets = true,
+    IndexUnlockNormal = true,
+    IndexUnlockGold = true,
+    IndexUnlockRainbow = false,
+    IndexUnlockDarkMatter = false,
+    IndexIgnoreMythicAndAbove = true,
+    IndexAutoDeleteFodder = true,
+    -- Phase 5: Endgame Matrix Mythics
     AutoMatrixEgg = true,
     AutoMythicFilter = true,
     AutoCraftMythics = true,
     AutoReplaceTeam = true,
     PauseRebirthPhase3 = true,
     PauseRebirthPhase4 = true,
+    PauseRebirthPhase5 = true,
     AutoPotions = true,
     AutoFruits = true,
     AutoFreeGifts = true,
