@@ -55,11 +55,12 @@ Configs.Default = {
     AutoSecretCraftGolden = true,
     AutoUnlockSecretDoor = true,
     -- Phase 3: Endgame Skill Tree (39/39) & Preparation
-    -- Phase 4: Auto Index Pets
+    -- Phase 4: Auto Index Pets (Goal: 250 Total Index)
     AutoIndexPets = true,
+    IndexTargetTotal = 250,
     IndexUnlockNormal = true,
     IndexUnlockGold = true,
-    IndexUnlockRainbow = true, -- Common & Rare pets only (Easy ones, auto-queues in Rainbow Machine)
+    IndexUnlockRainbow = true, -- Common & Rare pets only (Easy ones, auto-queues in Rainbow Machine up to target 250)
     IndexUnlockDarkMatter = false,
     IndexIgnoreMythicAndAbove = true,
     IndexAutoDeleteFodder = true,
@@ -124,7 +125,11 @@ function Configs.Load()
                 -- Ensure defaults for newly introduced keys if nil in loaded json
                 if Configs.Current.AntiAFK == nil then Configs.Current.AntiAFK = true end
                 if Configs.Current.AutoRejoin == nil then Configs.Current.AutoRejoin = true end
-                if Configs.Current.IndexUnlockRainbow == nil then Configs.Current.IndexUnlockRainbow = true end
+                if Configs.Current.IndexUnlockRainbow == nil or Configs.Current._RainbowV3Default == nil then
+                    Configs.Current.IndexUnlockRainbow = true
+                    Configs.Current._RainbowV3Default = true
+                end
+                if Configs.Current.IndexTargetTotal == nil then Configs.Current.IndexTargetTotal = 250 end
 
                 -- If loaded from legacy config, save into new isolated path immediately
                 if targetPath == LEGACY_CONFIG_PATH and not isfile(CONFIG_PATH) then
