@@ -5110,4 +5110,242 @@ function ProgAPI.ToggleBank(): (boolean, string)
     end
 end
 
+--==============================================================================
+-- MULTI-ACCOUNT PROFILE UTILITIES
+--==============================================================================
+function ProgAPI.GetUserAccountName(): string
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    return (lp and lp.Name) or "Player"
+end
+
+function ProgAPI.GetUserAccountUserId(): number
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    return (lp and lp.UserId) or 0
+end
+
+function ProgAPI.GetUserAccountFolder(): string
+    return string.format("[AUTOPROG]/[%s][%s]", ProgAPI.GetUserAccountName(), tostring(ProgAPI.GetUserAccountUserId()))
+end
+
+function ProgAPI.GetUserAccountConfigPath(): string
+    return string.format("%s/config.json", ProgAPI.GetUserAccountFolder())
+end
+
+--==============================================================================
+-- ANTI-AFK ENGINE (Idle Kick Interception & Controller Keepalive)
+--==============================================================================
+local _antiAfkConnection = nil
+local _antiAfkThread = nil
+local _antiAfkActive = false
+
+function ProgAPI.IsAntiAFKEnabled(): boolean
+    return _antiAfkActive
+end
+
+function ProgAPI.StartAntiAFK()
+    if _antiAfkActive then return end
+    _antiAfkActive = true
+
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+
+    -- 1. Disable / disconnect any existing internal Roblox Idled listeners if executor supports getconnections
+    pcall(function()
+        if getconnections and lp then
+            for _, conn in ipairs(getconnections(lp.Idled)) do
+                pcall(function()
+                    if conn.Disable then
+                        conn:Disable()
+                    elseif conn.Disconnect then
+                        conn:Disconnect()
+                    end
+                end)
+            end
+        end
+    end)
+
+    -- 2. Connect to LocalPlayer.Idled with VirtualUser input dispatch
+    pcall(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        if lp and not _antiAfkConnection then
+            _antiAfkConnection = lp.Idled:Connect(function()
+                if not _antiAfkActive then return end
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(0, 0))
+                end)
+            end)
+        end
+    end)
+
+    -- 3. Heartbeat keepalive thread (every 60s) to continuously reset AFK timer
+    if not _antiAfkThread then
+        _antiAfkThread = task.spawn(function()
+            local VirtualUser = game:GetService("VirtualUser")
+            while _antiAfkActive do
+                task.wait(60)
+                if not _antiAfkActive then break end
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(0, 0))
+                end)
+            end
+            _antiAfkThread = nil
+        end)
+    end
+end
+
+function ProgAPI.StopAntiAFK()
+    _antiAfkActive = false
+    if _antiAfkConnection then
+        pcall(function() _antiAfkConnection:Disconnect() end)
+        _antiAfkConnection = nil
+    end
+    if _antiAfkThread then
+        pcall(function() task.cancel(_antiAfkThread) end)
+        _antiAfkThread = nil
+    end
+end
+
+--==============================================================================
+-- AUTO REJOIN ENGINE (Reconnection on any error / disconnect / kick)
+--==============================================================================
+local _autoRejoinActive = false
+local _autoRejoinDebounce = false
+local _autoRejoinConnections = {}
+
+function ProgAPI.IsAutoRejoinEnabled(): boolean
+    return _autoRejoinActive
+end
+
+function ProgAPI.TriggerRejoin(reason: string)
+    if not _autoRejoinActive or _autoRejoinDebounce then return end
+    _autoRejoinDebounce = true
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+
+    warn(string.format("[ClickerHub AutoRejoin] Disconnection detected: %s. Initiating reconnect sequence...", tostring(reason)))
+
+    -- Display reconnect notification
+    pcall(function()
+        local StarterGui = game:GetService("StarterGui")
+        StarterGui:SetCore("SendNotification", {
+            Title = "CLICKER HUB REJOIN",
+            Text = "Disconnection detected (" .. tostring(reason) .. "). Reconnecting...",
+            Duration = 6
+        })
+    end)
+
+    -- Queue the loader on teleport so the script executes automatically when loaded
+    pcall(function()
+        local queueTeleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+        if queueTeleport then
+            queueTeleport([[
+                repeat task.wait() until game:IsLoaded()
+                task.wait(1.5)
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/Atxvy/-CLICKER-HUB-/main/%5BAUTOPROG%5D/Main.lua?t=" .. tostring(os.time())))()
+                end)
+            ]])
+        end
+    end)
+
+    -- Reconnect execution loop
+    task.spawn(function()
+        local TeleportService = game:GetService("TeleportService")
+        local placeId = game.PlaceId
+        local jobId = game.JobId
+
+        task.wait(2)
+
+        -- First attempt: Reconnect to same instance (if server is still alive)
+        if jobId and #jobId > 0 then
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(placeId, jobId, lp)
+            end)
+        end
+
+        task.wait(3.5)
+
+        -- Fallback loop: Teleport to placeId
+        while true do
+            pcall(function()
+                TeleportService:Teleport(placeId, lp)
+            end)
+            task.wait(5)
+        end
+    end)
+end
+
+function ProgAPI.StartAutoRejoin()
+    if _autoRejoinActive then return end
+    _autoRejoinActive = true
+
+    local GuiService = game:GetService("GuiService")
+    local CoreGui = game:GetService("CoreGui")
+
+    -- 1. GuiService ErrorMessageChanged listener
+    pcall(function()
+        local conn = GuiService.ErrorMessageChanged:Connect(function(msg)
+            if not _autoRejoinActive then return end
+            if msg and #msg > 0 then
+                ProgAPI.TriggerRejoin("GuiService Error: " .. tostring(msg))
+            end
+        end)
+        table.insert(_autoRejoinConnections, conn)
+    end)
+
+    -- 2. CoreGui RobloxPromptGui promptOverlay listener
+    pcall(function()
+        local promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+        if promptGui then
+            local promptOverlay = promptGui:FindFirstChild("promptOverlay")
+            if promptOverlay then
+                local conn = promptOverlay.ChildAdded:Connect(function(child)
+                    if not _autoRejoinActive then return end
+                    if child.Name == "ErrorPrompt" or child:FindFirstChild("MessageArea") then
+                        ProgAPI.TriggerRejoin("PromptOverlay ErrorPrompt")
+                    end
+                end)
+                table.insert(_autoRejoinConnections, conn)
+
+                -- Check if error prompt is already active
+                if promptOverlay:FindFirstChild("ErrorPrompt") then
+                    ProgAPI.TriggerRejoin("Pre-existing ErrorPrompt")
+                end
+            end
+        end
+    end)
+
+    -- 3. Watchdog loop checking error code
+    local watchdogThread = task.spawn(function()
+        while _autoRejoinActive do
+            task.wait(3)
+            if not _autoRejoinActive then break end
+            pcall(function()
+                local errCode = GuiService:GetErrorCode()
+                if errCode and errCode.Value ~= 0 then
+                    ProgAPI.TriggerRejoin("GuiService ErrorCode " .. tostring(errCode.Value))
+                end
+            end)
+        end
+    end)
+    table.insert(_autoRejoinConnections, {
+        Disconnect = function()
+            pcall(task.cancel, watchdogThread)
+        end
+    })
+end
+
+function ProgAPI.StopAutoRejoin()
+    _autoRejoinActive = false
+    _autoRejoinDebounce = false
+    for _, conn in ipairs(_autoRejoinConnections) do
+        pcall(function()
+            if conn.Disconnect then
+                conn:Disconnect()
+            end
+        end)
+    end
+    table.clear(_autoRejoinConnections)
+end
+
 return ProgAPI
