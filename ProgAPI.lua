@@ -153,16 +153,18 @@ ProgAPI.WebhookEnabled = true
 
 function ProgAPI.DetectGlobalWebhook(): string?
     local candidates = {
-        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        (getgenv and type(getgenv) == "function" and pcall(getgenv) and getgenv()) or nil,
         _G,
         shared,
+        (getfenv and pcall(getfenv, 0) and getfenv(0)) or nil,
+        (getfenv and pcall(getfenv, 1) and getfenv(1)) or nil,
     }
     local keys = {"Webhook", "WebhookUrl", "webhook", "webhookurl", "WEBHOOK", "WEBHOOK_URL", "Webhook_Url"}
     for _, env in ipairs(candidates) do
         if type(env) == "table" then
             for _, k in ipairs(keys) do
-                local val = rawget(env, k) or env[k]
-                if type(val) == "string" and val:match("%S") then
+                local ok, val = pcall(function() return rawget(env, k) or env[k] end)
+                if ok and type(val) == "string" and val:match("%S") then
                     local clean = val:gsub("^%s+", ""):gsub("%s+$", "")
                     if clean ~= "" then
                         return clean
@@ -182,9 +184,11 @@ end
 
 function ProgAPI.DetectGlobalDisableRender(): boolean?
     local candidates = {
-        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        (getgenv and type(getgenv) == "function" and pcall(getgenv) and getgenv()) or nil,
         _G,
         shared,
+        (getfenv and pcall(getfenv, 0) and getfenv(0)) or nil,
+        (getfenv and pcall(getfenv, 1) and getfenv(1)) or nil,
     }
     local keys = {
         "DisableRender", "disableRender", "disablerender", "DISABLE_RENDER",
@@ -194,8 +198,8 @@ function ProgAPI.DetectGlobalDisableRender(): boolean?
     for _, env in ipairs(candidates) do
         if type(env) == "table" then
             for _, k in ipairs(keys) do
-                local val = rawget(env, k) or env[k]
-                if type(val) == "boolean" then
+                local ok, val = pcall(function() return rawget(env, k) or env[k] end)
+                if ok and type(val) == "boolean" then
                     return val
                 end
             end

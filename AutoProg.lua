@@ -57,9 +57,11 @@ local function shouldIgnoreCurrentPlayer(): boolean
     local myUserId = lp.UserId
 
     local candidates = {
-        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        (getgenv and type(getgenv) == "function" and pcall(getgenv) and getgenv()) or nil,
         _G,
         shared,
+        (getfenv and pcall(getfenv, 0) and getfenv(0)) or nil,
+        (getfenv and pcall(getfenv, 1) and getfenv(1)) or nil,
     }
     local keys = {
         "IgnorePlayer", "IgnorePlayers", "ignorePlayer", "ignorePlayers",
@@ -69,8 +71,8 @@ local function shouldIgnoreCurrentPlayer(): boolean
     for _, env in ipairs(candidates) do
         if type(env) == "table" then
             for _, k in ipairs(keys) do
-                local val = rawget(env, k) or env[k]
-                if val ~= nil then
+                local ok, val = pcall(function() return rawget(env, k) or env[k] end)
+                if ok and val ~= nil then
                     if type(val) == "table" then
                         for _, entry in pairs(val) do
                             if type(entry) == "string" then
