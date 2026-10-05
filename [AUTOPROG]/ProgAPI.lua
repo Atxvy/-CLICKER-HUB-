@@ -4231,24 +4231,65 @@ function ProgAPI.GetNextUnindexedEgg(
     unlockRainbow: boolean?,
     unlockDM: boolean?
 )
+    if ignoreMythicAndAbove == nil then ignoreMythicAndAbove = true end
+    if unlockNormal == nil then unlockNormal = true end
+    if unlockGold == nil then unlockGold = true end
+    if unlockRainbow == nil then unlockRainbow = true end
+    if unlockDM == nil then unlockDM = false end
+
     local st = rawget(_G, "State")
     local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
     local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
-    if totalStats and totalStats.TotalIndexed >= targetTotal then
+    local curIndexed = (totalStats and totalStats.TotalIndexed) or 0
+    if curIndexed >= targetTotal then
         return nil, nil -- Target reached! All done!
     end
 
-    for _, e in ipairs(REAL_PROGRESSION_EGGS) do
-        local prog = ProgAPI.GetEggIndexProgress(
-            e.name,
-            ignoreMythicAndAbove,
-            unlockNormal,
-            unlockGold,
-            unlockRainbow,
-            unlockDM
-        )
-        if not prog.IsComplete then
-            return e, prog
+    -- =========================================================================
+    -- PASS 1 (PRIMARY): Normal & Gold across ALL worlds up to Legendary
+    -- User rule: "Normal > Gold. After all world got all possible gold for
+    -- legendary, then rainbow starts."
+    -- We do NOT craft or wait for Rainbows while any progression egg in any
+    -- world still has missing Normal or Golden pets!
+    -- =========================================================================
+    if unlockNormal or unlockGold then
+        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+            local prog = ProgAPI.GetEggIndexProgress(
+                e.name,
+                ignoreMythicAndAbove,
+                unlockNormal,
+                unlockGold,
+                false, -- unlockRainbow is strictly FALSE during Pass 1!
+                unlockDM
+            )
+            if not prog.IsComplete then
+                prog.IndexStage = "GoldPriority"
+                return e, prog
+            end
+        end
+    end
+
+    -- =========================================================================
+    -- PASS 2 (FALLBACK FILLER): Easy Rainbows (Common/Rare) to reach 250
+    -- Activates ONLY AFTER all worlds have 100% of Normal & Gold complete!
+    -- =========================================================================
+    local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+    local cookingCount = (rainbowStatus and rainbowStatus.TotalCooking) or 0
+
+    if unlockRainbow and (curIndexed + cookingCount) < targetTotal then
+        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+            local prog = ProgAPI.GetEggIndexProgress(
+                e.name,
+                ignoreMythicAndAbove,
+                unlockNormal,
+                unlockGold,
+                true, -- unlockRainbow is TRUE during Pass 2
+                unlockDM
+            )
+            if not prog.IsComplete then
+                prog.IndexStage = "RainbowFiller"
+                return e, prog
+            end
         end
     end
 
@@ -4411,12 +4452,14 @@ function ProgAPI.StepAutoIndex(
         return true, "All progression eggs / target index goals complete! Phase 4 complete."
     end
 
+    local isGoldPriority = (eggProg.IndexStage == "GoldPriority")
     local pData = ProgAPI.GetPlayerData()
     local clicks = pData.Clicks or 0
 
     -- Check if player can afford egg
     if clicks < nextEgg.cost then
-        return false, string.format("[Phase 4: Auto Index] Saving clicks for %s (%s / %s)",
+        return false, string.format("[Phase 4: %s] Saving clicks for %s (%s / %s)",
+            isGoldPriority and "Gold Priority" or "Rainbow Filler",
             tostring(nextEgg.name),
             ProgAPI.FormatNumber(clicks),
             ProgAPI.FormatNumber(nextEgg.cost)
@@ -4444,22 +4487,24 @@ function ProgAPI.StepAutoIndex(
         ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
     end)
 
-    -- Auto craft golden pets FIRST (Gold is prioritized!)
+    -- Auto craft golden pets FIRST (Normal > Gold priority)
     if unlockGold then
         pcall(ProgAPI.CraftGoldenPets)
     end
 
-    -- Auto craft rainbow pets if rainbow index is enabled and needed (phase4IndexMode = true)
-    if unlockRainbow then
+    -- Rainbow crafting: ONLY executed if in RainbowFiller stage (Pass 2, all worlds already have gold)
+    if not isGoldPriority and unlockRainbow then
         pcall(function()
             ProgAPI.CraftRainbowPets(true)
         end)
-        pcall(ProgAPI.ClaimRainbowPets)
     end
+    -- Always claim ready rainbow crafts in background
+    pcall(ProgAPI.ClaimRainbowPets)
 
     -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
+    -- In GoldPriority stage, pass false for rainbow so extra gold pets are deleted and don't clutter bag
     pcall(function()
-        ProgAPI.CleanIndexedFodder(unlockGold, unlockRainbow)
+        ProgAPI.CleanIndexedFodder(unlockGold, not isGoldPriority and unlockRainbow)
     end)
 
     local missingNames = {}
@@ -4474,22 +4519,32 @@ function ProgAPI.StepAutoIndex(
         end
         queuedStr = string.format(" [Queued 🌈: %s]", table.concat(qNames, ", "))
     end
-    local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "All Active Goals Queued/Done"
+    local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "All Active Goals Done"
 
     local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
     local curTotal = (totalStats and totalStats.TotalIndexed) or 0
     local rbStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
     local cooking = (rbStatus and rbStatus.TotalCooking) or 0
 
-    return false, string.format("[Phase 4: Auto Index (%d+%d/250)] %s (%d/%d): Missing %s%s",
-        curTotal,
-        cooking,
-        tostring(eggProg.DisplayName),
-        eggProg.CompletedPetsCount,
-        eggProg.TargetPetsCount,
-        missingStr,
-        queuedStr
-    )
+    if isGoldPriority then
+        return false, string.format("[Phase 4: Gold Priority (%d/250)] %s (%d/%d): Missing %s",
+            curTotal,
+            tostring(eggProg.DisplayName),
+            eggProg.CompletedPetsCount,
+            eggProg.TargetPetsCount,
+            missingStr
+        )
+    else
+        return false, string.format("[Phase 4: Rainbow Filler (%d+%d/250)] %s (%d/%d): Missing %s%s",
+            curTotal,
+            cooking,
+            tostring(eggProg.DisplayName),
+            eggProg.CompletedPetsCount,
+            eggProg.TargetPetsCount,
+            missingStr,
+            queuedStr
+        )
+    end
 end
 
 --==============================================================================
