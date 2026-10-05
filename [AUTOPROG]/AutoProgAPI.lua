@@ -2042,14 +2042,12 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?, includeLegendary: b
         if not isEquipped and not isLocked and isGolden and not isExclusive then
             local petDef = Directory.Pets and Directory.Pets[p.id]
             local rarity = (petDef and petDef.Rarity) or "Basic"
-            local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common" or rarity == "Epic")
-                or (includeLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)))
+            local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
             if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
-                if includeLegendary == true then
-                    isEasyRarity = Constants.RarityOrder[rarity] <= 4
-                else
-                    isEasyRarity = (Constants.RarityOrder[rarity] <= 3) and (rarity ~= "Legendary")
-                end
+                isEasyRarity = (Constants.RarityOrder[rarity] <= 2)
+            end
+            if includeLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)) then
+                isEasyRarity = true
             end
 
             local allow = true
@@ -4645,8 +4643,8 @@ function ProgAPI.GetEggIndexProgress(
         local isGoldEligible = (rOrder <= 3 and rarity ~= "Legendary")
             or (includeGoldLegendary == true and (rarity == "Legendary" or rOrder == 4))
 
-        -- Rainbow: Common, Rare, Epic always eligible when rainbow is checked. Legendary is eligible ONLY if includeRainbowLegendary == true!
-        local isRainbowEligible = (rOrder <= 3 and rarity ~= "Legendary")
+        -- Rainbow: Basic and Rare ONLY! (rOrder <= 2, Common/Basic and Rare). Legendary ONLY if includeRainbowLegendary == true.
+        local isRainbowEligible = (rOrder <= 2 and rarity ~= "Epic" and rarity ~= "Legendary")
             or (includeRainbowLegendary == true and (rarity == "Legendary" or rOrder == 4))
 
         local missingVariants = {}
@@ -4756,74 +4754,28 @@ function ProgAPI.GetNextUnindexedEgg(
     end
 
     -- =========================================================================
-    -- STAGE 2: GOLD LEGENDARY PRIORITY (IF STILL < 250)
-    -- User rule: "End if index is not yet 250: Gold Legendary First"
-    -- Instant 100% craft at Golden Machine without 30-minute queue waiting!
-    -- =========================================================================
-    if unlockGold and curIndexed < targetTotal then
-        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
-            local prog = ProgAPI.GetEggIndexProgress(
-                e.name,
-                ignoreMythicAndAbove,
-                false, -- Normal already 100% complete across all worlds
-                unlockGold,
-                false, -- No rainbow yet
-                unlockDM,
-                true,  -- includeGoldLegendary = true!
-                false
-            )
-            if not prog.IsComplete then
-                prog.IndexStage = "Stage 2: Gold Legendary Priority"
-                prog.StageCode = 2
-                return e, prog
-            end
-        end
-    end
-
-    -- =========================================================================
-    -- STAGE 3: RAINBOW FALLBACK (IF STILL < 250)
-    -- User rule: "then Rainbow after"
-    -- 3A: Easy Rainbows (Common, Rare, Epic)
-    -- 3B: Rainbow Legendary (if still under 250)
+    -- STAGE 2: RAINBOW PRIORITY (BASIC & RARE ONLY)
+    -- User rule: "after all normal until legendary is done auto gold until epic is done
+    -- then start auto rainbow until only in basic and rare only"
     -- =========================================================================
     local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
     local cookingCount = (rainbowStatus and rainbowStatus.TotalCooking) or 0
 
     if unlockRainbow and (curIndexed + cookingCount) < targetTotal then
-        -- 3A: Easy Rainbows (Common, Rare, Epic)
         for _, e in ipairs(REAL_PROGRESSION_EGGS) do
             local prog = ProgAPI.GetEggIndexProgress(
                 e.name,
                 ignoreMythicAndAbove,
-                false,
-                false,
-                true,  -- unlockRainbow = true
+                false, -- Normal already 100% complete across all worlds
+                false, -- Gold already 100% complete across all worlds
+                true,  -- unlockRainbow = true (Basic & Rare ONLY)
                 unlockDM,
-                false,
-                false  -- includeRainbowLegendary = false
+                false, -- includeGoldLegendary = false
+                false  -- includeRainbowLegendary = false (Basic & Rare ONLY!)
             )
             if not prog.IsComplete then
-                prog.IndexStage = "Stage 3A: Rainbow Easy (Common..Epic)"
-                prog.StageCode = 3
-                return e, prog
-            end
-        end
-
-        -- 3B: Rainbow Legendary (if still under 250)
-        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
-            local prog = ProgAPI.GetEggIndexProgress(
-                e.name,
-                ignoreMythicAndAbove,
-                false,
-                false,
-                true,  -- unlockRainbow = true
-                unlockDM,
-                false,
-                true   -- includeRainbowLegendary = true!
-            )
-            if not prog.IsComplete then
-                prog.IndexStage = "Stage 3B: Rainbow Legendary"
-                prog.StageCode = 4
+                prog.IndexStage = "Stage 2: Rainbow (Basic & Rare Only)"
+                prog.StageCode = 2
                 return e, prog
             end
         end
@@ -4920,9 +4872,9 @@ function ProgAPI.CleanIndexedFodder(
                     isGoldEligible = true
                 end
 
-                local isRainbowEligible = (rarity == "Basic" or rarity == "Rare" or rarity == "Common" or rarity == "Epic") and (rarity ~= "Legendary")
+                local isRainbowEligible = (rarity == "Basic" or rarity == "Rare" or rarity == "Common") and (rarity ~= "Epic" and rarity ~= "Legendary")
                 if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
-                    isRainbowEligible = (Constants.RarityOrder[rarity] <= 3) and (rarity ~= "Legendary")
+                    isRainbowEligible = (Constants.RarityOrder[rarity] <= 2) and (rarity ~= "Epic" and rarity ~= "Legendary")
                 end
                 if includeRainbowLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)) then
                     isRainbowEligible = true
@@ -5004,8 +4956,8 @@ function ProgAPI.StepAutoIndex(
     end
 
     local stageCode = eggProg.StageCode or 1
-    local isRainbowStage = (stageCode >= 3)
-    local includeRainLeg = (stageCode == 4)
+    local isRainbowStage = (stageCode == 2)
+    local includeRainLeg = false
     local pData = ProgAPI.GetPlayerData()
     local clicks = pData.Clicks or 0
 
@@ -5105,10 +5057,10 @@ function ProgAPI.StepAutoIndex(
         pcall(ProgAPI.CraftGoldenPets)
     end
 
-    -- Rainbow crafting: ONLY executed during Stage 3 (Rainbow stage)
+    -- Rainbow crafting: ONLY executed during Stage 2 (Rainbow stage, Basic & Rare ONLY)
     if isRainbowStage and unlockRainbow then
         pcall(function()
-            ProgAPI.CraftRainbowPets(true, includeRainLeg)
+            ProgAPI.CraftRainbowPets(true, false)
         end)
     end
     -- Always claim ready rainbow crafts in background
@@ -5116,8 +5068,7 @@ function ProgAPI.StepAutoIndex(
 
     -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
     pcall(function()
-        local includeGoldLeg = (stageCode >= 2)
-        ProgAPI.CleanIndexedFodder(unlockGold, isRainbowStage and unlockRainbow, includeGoldLeg, includeRainLeg)
+        ProgAPI.CleanIndexedFodder(unlockGold, isRainbowStage and unlockRainbow, false, false)
     end)
 
     local missingNames = {}
@@ -5242,10 +5193,17 @@ updateBlackScreenTelemetry = function()
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
     if not blackScreenGui or not blackScreenGui.Parent or not blackScreenGui.Enabled then
-        local found = (pg and pg:FindFirstChild("ClickerHub_BlackScreen"))
-            or (gethui and pcall(gethui) and gethui():FindFirstChild("ClickerHub_BlackScreen"))
-            or (game:GetService("CoreGui") and pcall(function() return game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen") end) and game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen"))
-            or _G.__ProgAPI_BlackScreenGui
+        local found = nil
+        pcall(function()
+            local cg = game:GetService("CoreGui")
+            if cg then found = cg:FindFirstChild("ClickerHub_BlackScreen") end
+        end)
+        if not found and pg then
+            found = pg:FindFirstChild("ClickerHub_BlackScreen")
+        end
+        if not found and _G.__ProgAPI_BlackScreenGui then
+            found = _G.__ProgAPI_BlackScreenGui
+        end
         if found and found.Enabled and found.Parent then
             blackScreenGui = found
         else
@@ -5469,10 +5427,16 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         if not blackScreenGui or not blackScreenGui.Parent then
             local parentTarget = nil
             pcall(function()
-                if gethui and type(gethui) == "function" then
-                    parentTarget = gethui()
-                elseif game:GetService("CoreGui") then
-                    parentTarget = game:GetService("CoreGui")
+                local cg = game:GetService("CoreGui")
+                if cg and cg:IsA("CoreGui") then
+                    parentTarget = cg
+                elseif gethui and type(gethui) == "function" then
+                    local h = gethui()
+                    if h and h:IsA("ScreenGui") then
+                        parentTarget = h.Parent or pg
+                    else
+                        parentTarget = h
+                    end
                 end
             end)
             if not parentTarget then
@@ -5755,6 +5719,9 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                 -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered
                 pcall(function()
                     if blackScreenGui then
+                        if parentTarget and blackScreenGui.Parent ~= parentTarget then
+                            blackScreenGui.Parent = parentTarget
+                        end
                         blackScreenGui.Enabled = true
                         blackScreenGui.DisplayOrder = 2147483647
                     end

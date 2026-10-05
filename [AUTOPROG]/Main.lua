@@ -179,6 +179,14 @@ if State.AutoAcceptTrade == nil then
     State.AutoAcceptTrade = true
     Configs.Set("AutoAcceptTrade", true)
 end
+if State.BlackScreen == nil then
+    State.BlackScreen = true
+    Configs.Set("BlackScreen", true)
+end
+if State.IndexUnlockRainbow == nil or State.IndexUnlockRainbow == false then
+    State.IndexUnlockRainbow = true
+    Configs.Set("IndexUnlockRainbow", true)
+end
 
 -- Automatically detect and apply global Webhook variable if passed before loader
 pcall(function()
@@ -875,6 +883,7 @@ AutoProgAPI.OnBlackScreenToggled = function(val)
         pcall(function() blackScreenToggleObj:SetValue(val) end)
     end
 end
+ProgAPI.OnBlackScreenToggled = AutoProgAPI.OnBlackScreenToggled
 
 MiscTab:AddToggle("RemoveMapsToggle", {
     Title = "Remove Maps (FPS & Memory Booster)",
@@ -1044,7 +1053,7 @@ task.spawn(function()
     pcall(AutoProgAPI.ClaimDaily)
     pcall(AutoProgAPI.ClaimAllChests)
     pcall(AutoProgAPI.EquipBest)
-    if State.BlackScreen then pcall(AutoProgAPI.SetBlackScreen, true) end
+    if State.BlackScreen ~= false then pcall(AutoProgAPI.SetBlackScreen, true) end
     if State.RemoveMaps then pcall(AutoProgAPI.SetRemoveMaps, true) end
     if State.OptimizeGameSettings ~= false then pcall(AutoProgAPI.SetDisableInGameSettings, true) end
 end)

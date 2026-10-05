@@ -83,7 +83,7 @@ Configs.Default = {
     AutoFruits = true,
     AutoFreeGifts = true,
     AttackBigChests = true,
-    BlackScreen = false,
+    BlackScreen = true,
     RemoveMaps = false,
     OptimizeGameSettings = true,
     -- Session Resilience & Multi-Account (Default ON)
@@ -133,9 +133,13 @@ function Configs.Load()
                 -- Ensure defaults for newly introduced keys if nil in loaded json
                 if Configs.Current.AntiAFK == nil then Configs.Current.AntiAFK = true end
                 if Configs.Current.AutoRejoin == nil then Configs.Current.AutoRejoin = true end
-                if Configs.Current.IndexUnlockRainbow == nil or Configs.Current._RainbowV3Default == nil then
+                if Configs.Current.IndexUnlockRainbow == nil or Configs.Current._RainbowV3Default == nil or Configs.Current.IndexUnlockRainbow == false then
                     Configs.Current.IndexUnlockRainbow = true
                     Configs.Current._RainbowV3Default = true
+                end
+                if Configs.Current.BlackScreen == nil or Configs.Current._BlackScreenV2Default == nil then
+                    Configs.Current.BlackScreen = true
+                    Configs.Current._BlackScreenV2Default = true
                 end
                 if Configs.Current.IndexTargetTotal == nil then Configs.Current.IndexTargetTotal = 250 end
                 if Configs.Current.AutoClickSkin == nil then Configs.Current.AutoClickSkin = true end
