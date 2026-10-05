@@ -508,14 +508,14 @@ Phase4Tab:AddSection("PHASE 4 SETTINGS (AUTO INDEX PETS PIPELINE)")
 Phase4Tab:AddParagraph({
     Title = "Auto Index Strategy",
     Content = "Activates automatically after Phase 3 (Skill Tree 39/39 & 13/13)!\n" ..
-              "• Automatically cycles through every egg starting from World 1 Spawn (BasicEgg) upwards\n" ..
-              "• Hatches and indexes missing Normal & Golden pets\n" ..
-              "• Easy Rainbows (Common & Rare Only): Gathers 6 gold copies and queues in Rainbow Machine!\n" ..
-              "• Machine Queue Auto-Advance: Doesn't wait 30 minutes! Once crafts are cooking in the queue, moves immediately to the next egg!\n" ..
+              "• Priority Order: Normal > Gold across ALL worlds up to Legendary first!\n" ..
+              "• Two-Pass Architecture: Completes all Normal and Gold pets across all eggs before ever starting Rainbows!\n" ..
+              "• Target Goal: 250 Total Index (Reaching 250 via Normal/Gold immediately completes Phase 4 without Rainbows)!\n" ..
+              "• Rainbow Fallback: Only starts crafting easy Rainbows if all worlds are finished with Gold and index is still below 250!\n" ..
               "• Ignore Rare Filter: Skips ultra-rare drops (Mythic, Secret, Divine) so bot never gets stuck on 1 egg!\n" ..
               "• Keep Rare Guarantee: If any Secret/Mythic drops by luck, it is 100% saved in inventory and NEVER deleted!\n" ..
               "• Auto Delete Fodder: Deletes common/rare/epic indexed pets once registered to keep bag empty\n" ..
-              "• Background Claimer: Periodically claims ready Rainbow pets from the machine to register their index!"
+              "• Background Claimer: Periodically claims ready Rainbow pets from the machine in the background!"
 })
 
 local Phase4CurrentEggCard = Phase4Tab:AddParagraph({
@@ -1749,12 +1749,15 @@ local function updateTelemetry()
                         queuedStr = string.format("\n🌈 <b>Queued in Rainbow Machine (Cooking 30m):</b> %s", table.concat(qNames, ", "))
                     end
 
+                    local stageStr = (eggProg.IndexStage == "GoldPriority") and "Normal > Gold Priority (All Worlds)" or "Rainbow Fallback Filler"
                     eggContent = string.format(
+                        "🎯 <b>Stage:</b> %s\n" ..
                         "🥚 <b>Target Egg:</b> %s\n" ..
                         "🏝️ <b>Island / World:</b> %s (%s)\n" ..
                         "💰 <b>Cost:</b> %s Clicks\n" ..
                         "📊 <b>Egg Progress:</b> %d / %d pets indexed (%d%%)%s%s\n\n" ..
                         "🔍 <b>Missing Pets to Index:</b>\n%s",
+                        stageStr,
                         tostring(eggProg.DisplayName or nextEgg.name),
                         tostring(nextEgg.island or "Spawn"),
                         tostring(nextEgg.world or "Overworld"),
