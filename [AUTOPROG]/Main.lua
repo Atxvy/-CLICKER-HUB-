@@ -175,6 +175,10 @@ if State.IndexTargetTotal == nil then
     State.IndexTargetTotal = 250
     Configs.Set("IndexTargetTotal", 250)
 end
+if State.AutoAcceptTrade == nil then
+    State.AutoAcceptTrade = true
+    Configs.Set("AutoAcceptTrade", true)
+end
 _G.State = State
 _G.ProgAPI = ProgAPI
 _G.AutoProgAPI = AutoProgAPI
@@ -188,6 +192,9 @@ if State.AntiAFK ~= false then
 end
 if State.AutoRejoin ~= false then
     pcall(AutoProgAPI.StartAutoRejoin)
+end
+if State.AutoAcceptTrade ~= false then
+    pcall(AutoProgAPI.InitAutoTradeListener)
 end
 
 --==============================================================================
@@ -594,14 +601,82 @@ Phase4Tab:AddToggle("IndexAutoDeleteFodderToggle", {
 })
 
 --==============================================================================
--- 6. PHASE 5: MATRIX MYTHICS TAB
+-- 6. PHASE 5: CLICK SKIN TAB
 --==============================================================================
-local Phase5Tab = Window:AddTab({ Title = "Phase 5: Matrix Mythics", Icon = "🧬" })
+local Phase5Tab = Window:AddTab({ Title = "Phase 5: Click Skin", Icon = "🟣" })
 
-Phase5Tab:AddSection("PHASE 5 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase5Tab:AddSection("PHASE 5 SETTINGS (ULTIMATE CLICK SKIN PIPELINE)")
 Phase5Tab:AddParagraph({
     Title = "Phase 5 Strategy",
-    Content = "Activates automatically after Phase 4 (Auto Index) is complete (or disabled)!\n" ..
+    Content = "Activates automatically after Phase 4 (250 Pets Indexed)!\n" ..
+              "• Buys the purple 'Ultimate' Click Skin (Requires 250 Pets)\n" ..
+              "• Saves up 100 Qa Gems (1e17) before rerolling\n" ..
+              "• Automatically rerolls until BOTH stats are rolled:\n" ..
+              "    - +3 Egg Hatch (Max Flat Roll)\n" ..
+              "    - +15% Hatch Speed (Target >= 15%)\n" ..
+              "• If only +3 Egg or only +15% Speed is rolled, keeps rerolling!\n" ..
+              "• Replaces & equips once both target goals are satisfied\n" ..
+              "• Once complete, advances directly to Phase 6: Matrix Mythics!"
+})
+
+Phase5Tab:AddToggle("AutoClickSkinToggle", {
+    Title = "Auto Ultimate Click Skin",
+    Description = "Enables Phase 5 Click Skin pipeline (save 100Qa gems & reroll +3 Egg, +15% Speed)",
+    Default = State.AutoClickSkin ~= false,
+    Callback = function(val) State.AutoClickSkin = val; Configs.Set("AutoClickSkin", val) end
+})
+
+Phase5Tab:AddSlider("ClickSkinTargetEggHatchSlider", {
+    Title = "Target Egg Hatch Passive",
+    Description = "Desired Egg Hatch passive bonus (+1 to +3)",
+    Default = (State.ClickSkinTargetEggHatch ~= nil) and State.ClickSkinTargetEggHatch or 3,
+    Min = 1,
+    Max = 3,
+    Rounding = 0,
+    Callback = function(val) State.ClickSkinTargetEggHatch = val; Configs.Set("ClickSkinTargetEggHatch", val) end
+})
+
+Phase5Tab:AddSlider("ClickSkinTargetHatchSpeedSlider", {
+    Title = "Target Hatch Speed Boost (%)",
+    Description = "Desired Hatch Speed boost percentage (e.g. 15% to 18%)",
+    Default = (State.ClickSkinTargetHatchSpeed ~= nil) and State.ClickSkinTargetHatchSpeed or 15,
+    Min = 5,
+    Max = 18,
+    Rounding = 0,
+    Callback = function(val) State.ClickSkinTargetHatchSpeed = val; Configs.Set("ClickSkinTargetHatchSpeed", val) end
+})
+
+Phase5Tab:AddSlider("ClickSkinGemsThresholdSlider", {
+    Title = "Gems Saving Threshold (Qa)",
+    Description = "Saves up this amount of Qa Gems before rerolling (Default: 100 Qa = 1e17)",
+    Default = (State.ClickSkinGemsThreshold ~= nil) and State.ClickSkinGemsThreshold or 100,
+    Min = 10,
+    Max = 500,
+    Rounding = 0,
+    Callback = function(val) State.ClickSkinGemsThreshold = val; Configs.Set("ClickSkinGemsThreshold", val) end
+})
+
+Phase5Tab:AddToggle("PauseRebirthToggle_P5", {
+    Title = "Rebirth at Max Milestone Only",
+    Description = "Waits until no more Next Rebirth button, then rebirths to the max affordable milestone",
+    Default = (State.PauseRebirthPhase5 ~= nil) and State.PauseRebirthPhase5 or true,
+    Callback = function(val) State.PauseRebirthPhase5 = val; Configs.Set("PauseRebirthPhase5", val) end
+})
+
+local Phase5SkinCard = Phase5Tab:AddParagraph({
+    Title = "Live Skin Status",
+    Content = "Loading click skin telemetry..."
+})
+
+--==============================================================================
+-- 7. PHASE 6: MATRIX MYTHICS TAB
+--==============================================================================
+local Phase6Tab = Window:AddTab({ Title = "Phase 6: Matrix Mythics", Icon = "🧬" })
+
+Phase6Tab:AddSection("PHASE 6 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase6Tab:AddParagraph({
+    Title = "Phase 6 Strategy",
+    Content = "Activates automatically after Phase 5 (Ultimate Click Skin) is complete (or disabled)!\n" ..
               "• Auto Open Matrix Egg (highest endgame egg in Tech World)\n" ..
               "• Rebirth at Max Milestone Only (preserves clicks for Matrix Egg)\n" ..
               "• Mythic Pet Filter: Deletes all non-mythic pets (Common/Rare/Epic/Legendary) and weak pets\n" ..
@@ -609,53 +684,58 @@ Phase5Tab:AddParagraph({
               "• Equips best pets as Rainbow Mythics are created, replacing old pets until team is 100% Rainbow Mythics!"
 })
 
-Phase5Tab:AddToggle("AutoMatrixEggToggle_P5", {
+Phase6Tab:AddToggle("AutoMatrixEggToggle_P6", {
     Title = "Auto Open Matrix Egg",
     Description = "Continuously hatches Matrix Egg on Matrix Island in Tech World",
-    Default = State.AutoMatrixEgg,
+    Default = State.AutoMatrixEgg ~= false,
     Callback = function(val) State.AutoMatrixEgg = val; Configs.Set("AutoMatrixEgg", val) end
 })
 
-Phase5Tab:AddToggle("AutoMythicFilterToggle_P5", {
+Phase6Tab:AddToggle("AutoMythicFilterToggle_P6", {
     Title = "Keep Mythic & Above (Delete Non-Mythic)",
     Description = "Strictly keeps Mythic, Secret, Mega, Divine, and Exclusive pets; deletes Common, Rare, Epic, Legendary",
-    Default = State.AutoMythicFilter,
+    Default = State.AutoMythicFilter ~= false,
     Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
 })
 
-Phase5Tab:AddToggle("AutoCraftMythicsToggle_P5", {
+Phase6Tab:AddToggle("AutoCraftMythicsToggle_P6", {
     Title = "Auto Craft Golden & Rainbow Mythics",
     Description = "Automatically crafts Golden and Rainbow versions of Mythic pets",
-    Default = State.AutoCraftMythics,
+    Default = State.AutoCraftMythics ~= false,
     Callback = function(val) State.AutoCraftMythics = val; Configs.Set("AutoCraftMythics", val) end
 })
 
-Phase5Tab:AddToggle("AutoReplaceTeamToggle_P5", {
+Phase6Tab:AddToggle("AutoReplaceTeamToggle_P6", {
     Title = "Auto Replace Team with Rainbow Mythics",
     Description = "Equips best pets as Rainbow Mythics are forged, replacing weaker old pets",
-    Default = State.AutoReplaceTeam,
+    Default = State.AutoReplaceTeam ~= false,
     Callback = function(val) State.AutoReplaceTeam = val; Configs.Set("AutoReplaceTeam", val) end
 })
 
-Phase5Tab:AddToggle("PauseRebirthToggle_P5", {
+Phase6Tab:AddToggle("PauseRebirthToggle_P6", {
     Title = "Rebirth at Max Milestone Only",
     Description = "Waits until no more Next Rebirth button, then rebirths to the max affordable milestone",
-    Default = (State.PauseRebirthPhase5 ~= nil) and State.PauseRebirthPhase5 or (State.PauseRebirthPhase4 ~= nil and State.PauseRebirthPhase4 or State.PauseRebirthPhase3),
-    Callback = function(val) State.PauseRebirthPhase5 = val; Configs.Set("PauseRebirthPhase5", val) end
+    Default = (State.PauseRebirthPhase6 ~= nil) and State.PauseRebirthPhase6 or (State.PauseRebirthPhase5 ~= nil and State.PauseRebirthPhase5 or true),
+    Callback = function(val) State.PauseRebirthPhase6 = val; Configs.Set("PauseRebirthPhase6", val) end
 })
 
-Phase5Tab:AddToggle("AutoRainbowClaimToggle_P5", {
+Phase6Tab:AddToggle("AutoRainbowClaimToggle_P6", {
     Title = "Auto Claim Rainbow Pets",
     Description = "Automatically collects finished pets from the Rainbow Machine",
-    Default = State.AutoRainbowClaim,
+    Default = State.AutoRainbowClaim ~= false,
     Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
 })
 
-Phase5Tab:AddToggle("AutoMagmaSkinToggle_P5", {
+Phase6Tab:AddToggle("AutoMagmaSkinToggle_P6", {
     Title = "10 Qi Rebirth Goal & Magma Click Skin",
     Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
     Default = State.AutoMagmaSkin,
     Callback = function(val) State.AutoMagmaSkin = val; Configs.Set("AutoMagmaSkin", val) end
+})
+
+local Phase6MythicCard = Phase6Tab:AddParagraph({
+    Title = "Live Matrix Mythic Team Status",
+    Content = "Loading team status..."
 })
 
 --==============================================================================
@@ -880,6 +960,23 @@ MiscTab:AddToggle("AutoRejoinToggle", {
     end
 })
 
+MiscTab:AddSection("AUTOMATIC TRADING")
+MiscTab:AddToggle("AutoAcceptTradeToggle", {
+    Title = "Auto Accept Trade",
+    Description = "Automatically accepts incoming trade requests, waits for the other player to ready, and confirms after the countdown",
+    Default = State.AutoAcceptTrade ~= false,
+    Callback = function(val)
+        State.AutoAcceptTrade = val
+        Configs.Set("AutoAcceptTrade", val)
+        if val then
+            AutoProgAPI.InitAutoTradeListener()
+            Window:Notify({ Title = "Auto Trade", Content = "Auto Accept Trade enabled!", Duration = 2.5 })
+        else
+            Window:Notify({ Title = "Auto Trade", Content = "Auto Accept Trade disabled.", Duration = 2.5 })
+        end
+    end
+})
+
 MiscTab:AddParagraph({
     Title = "Active Account Profile (Isolated Storage)",
     Content = string.format("User: %s (ID: %d)\nProfile Folder: %s\nConfig Path: %s",
@@ -924,13 +1021,23 @@ end)
 task.spawn(function()
     task.wait(1.8)
     pcall(function()
-        if AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5() then
+        if AutoProgAPI.IsPhase6 and AutoProgAPI.IsPhase6() then
             local pData = AutoProgAPI.GetPlayerData()
             local curWorld = pData.CurrentWorld or "Overworld"
             if curWorld ~= "Techworld" and curWorld ~= "Space" then
                 AutoProgAPI.TeleportToWorld("Techworld")
                 task.wait(0.5)
                 AutoProgAPI.TeleportToEgg("MatrixEgg")
+            end
+            return
+        end
+
+        if AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5() then
+            local pData = AutoProgAPI.GetPlayerData()
+            local curWorld = pData.CurrentWorld or "Overworld"
+            if curWorld ~= "Techworld" and curWorld ~= "Space" then
+                AutoProgAPI.TeleportToWorld("Techworld")
+                task.wait(0.5)
             end
             return
         end
@@ -1009,7 +1116,7 @@ end))
 
 -- THREAD 2: DEDICATED CONTINUOUS REBIRTH ENGINE
 -- Phase 1, 2, 3, 4: Rebirth as long as affordable (RebirthBestAffordable)
--- Phase 5: Max Rebirth only (RebirthMaxTarget)
+-- Phase 5 & 6: Max Rebirth only (RebirthMaxTarget)
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
@@ -1020,9 +1127,10 @@ table.insert(threads, task.spawn(function()
         if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
 
+            local isP6 = AutoProgAPI.IsPhase6 and AutoProgAPI.IsPhase6()
             local isP5 = AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5()
-            if isP5 then
-                -- Phase 5: Rebirth at MAX milestone only
+            if isP6 or isP5 then
+                -- Phase 5 & 6: Rebirth at MAX milestone only
                 pcall(AutoProgAPI.RebirthMaxTarget)
             else
                 -- Phase 1, 2, 3, 4: Rebirth as long as they can afford it
@@ -1263,27 +1371,28 @@ table.insert(threads, task.spawn(function()
             -- Rule: Never start skill tree until all islands owned & team upgraded!
             -- =====================================================================
             if not allIslandsUnlocked and lockedIsland ~= nil then
-                currentPhaseText = string.format("🌟 PHASE 1: ISLAND SPEEDRUN (%s)", lockedIsland.name)
+                local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
+                currentPhaseText = string.format("🌟 PHASE 1: ISLAND SPEEDRUN (%s - %s)", furthest, lockedIsland.name)
 
                 -- Auto pick starter pet if new player
                 pcall(AutoProgAPI.CheckAndSelectStarterPet)
 
-                local bestEgg = AutoProgAPI.GetBestAffordableEgg()
-                local canAffordBestEgg = (bestEgg ~= nil) and (pData.Clicks >= bestEgg.cost)
-                local isSafeEgg = bestEgg and (bestEgg.name ~= "BasicEgg" or pData.CurrentIsland == "Spawn")
-                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and (not isAllGold) and canAffordBestEgg and isSafeEgg
-
-                -- 1. Auto Teleport to furthest unlocked island (For best click multiplier when not hatching!)
-                if not shouldHatch and (now - lastTeleportTick > 3) then
+                -- 1. Strictly stay on furthest unlocked island! (Never leave best unlocked island!)
+                if pData.CurrentIsland ~= furthest and (now - lastTeleportTick > 2) then
                     lastTeleportTick = now
-                    local furthest = AutoProgAPI.GetFurthestUnlockedIsland()
-                    if pData.CurrentIsland ~= furthest then
-                        AutoProgAPI.TeleportToIsland(furthest)
-                    end
+                    AutoProgAPI.TeleportToIsland(furthest)
+                    pData = AutoProgAPI.GetPlayerData()
                 end
 
+                -- In Phase 1: Only look for affordable eggs located strictly ON the furthest unlocked island!
+                local bestEgg = AutoProgAPI.GetBestAffordableEgg(furthest)
+                local canAffordBestEgg = (bestEgg ~= nil) and (pData.Clicks >= bestEgg.cost)
+                local isSafeEgg = bestEgg and (bestEgg.island == furthest)
+                local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
+                local shouldHatch = (State.AutoBestEggs or State.AutoGold) and (not isAllGold) and canAffordBestEgg and isSafeEgg and not isNearUnlock
+
                 if not shouldHatch and lockedIsland and pData.Clicks < lockedIsland.cost then
-                    currentActivity = string.format("[Phase 1] Speedrunning Clicks for %s (%s / %s)", lockedIsland.name, AutoProgAPI.FormatNumber(pData.Clicks), AutoProgAPI.FormatNumber(lockedIsland.cost))
+                    currentActivity = string.format("[Phase 1] Speedrunning Clicks for %s on %s (%s / %s)", lockedIsland.name, furthest, AutoProgAPI.FormatNumber(pData.Clicks), AutoProgAPI.FormatNumber(lockedIsland.cost))
                 end
 
                 -- 2. Auto buy island as soon as clicks requirement is met
@@ -1301,33 +1410,21 @@ table.insert(threads, task.spawn(function()
                             pcall(AutoProgAPI.EquipBest)
                             pData = AutoProgAPI.GetPlayerData()
                             lockedIsland = AutoProgAPI.GetNextLockedIsland()
+                            furthest = AutoProgAPI.GetFurthestUnlockedIsland()
+                            AutoProgAPI.TeleportToIsland(furthest)
                         end
                     end
                 end
 
-                -- 3. Auto buy egg for pets & auto gold pets
-                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(bestEgg and bestEgg.name)) or 2.5
+                -- 3. Auto buy egg for pets & auto gold pets strictly on furthest island
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(bestEgg and bestEgg.name)) or 1.5
                 if (State.AutoBestEggs or State.AutoGold) and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
                     lastEggHatchTick = now
-                    local isNearUnlock = lockedIsland and (pData.Clicks >= lockedIsland.cost * 0.75)
 
-                    -- If team is not yet all gold, hatch best affordable egg!
-                    if not isAllGold and canAffordBestEgg and isSafeEgg then
+                    -- If team is not yet all gold, hatch best affordable egg strictly on furthest island!
+                    if not isAllGold and canAffordBestEgg and isSafeEgg and not isNearUnlock then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
-                        isEggHatching = true
-                        lastEggHatchStartTick = now
-                        task.spawn(function()
-                            pcall(function()
-                                AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
-                                pcall(AutoProgAPI.CraftGoldenPets)
-                                pcall(AutoProgAPI.EquipBest)
-                            end)
-                            isEggHatching = false
-                        end)
-                    elseif not isNearUnlock and State.AutoBestEggs and canAffordBestEgg and isSafeEgg then
-                        local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
-                        currentActivity = string.format("[Phase 1] Hatching %dx %s on %s", hatchAmount, bestEgg.name, bestEgg.island)
                         isEggHatching = true
                         lastEggHatchStartTick = now
                         task.spawn(function()
@@ -1358,7 +1455,7 @@ table.insert(threads, task.spawn(function()
                 local qInfo = AutoProgAPI.GetSecretQuestInfo and AutoProgAPI.GetSecretQuestInfo()
 
                 -- Quest in progress: hatch BasicEgg paced at player hatch speed
-                local p2Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("BasicEgg")) or 0.5
+                local p2Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("BasicEgg")) or 1.5
                 if State.AutoSecretQuest ~= false and not isEggHatching and (now - lastEggHatchTick >= p2Delay) then
                     lastEggHatchTick = now
                     isEggHatching = true
@@ -1402,7 +1499,7 @@ table.insert(threads, task.spawn(function()
                     State.IndexUnlockDarkMatter == true
                 )
 
-                local p4Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(nextEgg and nextEgg.name)) or 0.35
+                local p4Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(nextEgg and nextEgg.name)) or 1.5
                 if not isEggHatching and (now - lastEggHatchTick >= p4Delay) then
                     lastEggHatchTick = now
                     isEggHatching = true
@@ -1425,18 +1522,32 @@ table.insert(threads, task.spawn(function()
                 end
 
             -- =====================================================================
-            -- PHASE 5: ENDGAME MATRIX MYTHIC PIPELINE
+            -- PHASE 5: ULTIMATE CLICK SKIN PIPELINE
             -- Condition: All 17 islands unlocked, Secret Quest done, Skill Tree done (39/39),
-            -- and Phase 4 complete (or disabled)!
+            -- Phase 4 complete, and AutoClickSkin enabled and ClickSkin goal NOT yet met!
+            -- =====================================================================
+            elseif State.AutoClickSkin and AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5() then
+                currentPhaseText = "🟣 PHASE 5: ULTIMATE CLICK SKIN"
+                local okStep, stepIsDone, stepMsg = pcall(function()
+                    return AutoProgAPI.StepClickSkinPipeline()
+                end)
+                if okStep and stepMsg and type(stepMsg) == "string" then
+                    currentActivity = stepMsg
+                end
+
+            -- =====================================================================
+            -- PHASE 6: ENDGAME MATRIX MYTHIC PIPELINE
+            -- Condition: All 17 islands unlocked, Secret Quest done, Skill Tree done (39/39),
+            -- and Phase 5 complete (or disabled)!
             -- =====================================================================
             else
-                currentPhaseText = "🧬 PHASE 5: MATRIX MYTHIC PIPELINE"
+                currentPhaseText = "🧬 PHASE 6: MATRIX MYTHIC PIPELINE"
 
                 local curWorld = pData.CurrentWorld or "Overworld"
                 if AutoProgAPI.IsInMinigame() or (curWorld ~= "Techworld" and curWorld ~= "Space") then
                     AutoProgAPI.ExitMinigame()
                     task.wait(0.3)
-                    currentActivity = "[Phase 5: Matrix] Teleporting to Tech World..."
+                    currentActivity = "[Phase 6: Matrix] Teleporting to Tech World..."
                     AutoProgAPI.TeleportToWorld("Techworld")
                     task.wait(0.5)
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
@@ -1446,14 +1557,14 @@ table.insert(threads, task.spawn(function()
 
                 local curIsland = pData.CurrentIsland or ""
                 if curIsland ~= "Matrix" then
-                    currentActivity = "[Phase 5: Matrix] Teleporting to Matrix Island..."
+                    currentActivity = "[Phase 6: Matrix] Teleporting to Matrix Island..."
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
                     task.wait(0.5)
                     return
                 end
 
                 local isAllRainbowMythic, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
-                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("MatrixEgg")) or 1.9
+                local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed("MatrixEgg")) or 1.5
 
                 -- 1. Auto Open Matrix Egg (runs non-blocking in task.spawn without client animations)
                 if State.AutoMatrixEgg and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
@@ -1468,14 +1579,14 @@ table.insert(threads, task.spawn(function()
                         hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         task.wait(0.08)
                     elseif dist > 20 then
-                        currentActivity = "[Phase 5: Matrix] Teleporting to Matrix Egg in Tech World..."
+                        currentActivity = "[Phase 6: Matrix] Teleporting to Matrix Egg in Tech World..."
                         AutoProgAPI.TeleportToEgg("MatrixEgg")
                         task.wait(0.3)
                     end
 
                     if pData.Clicks >= matrixCost then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
-                        currentActivity = string.format("[Phase 5: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
+                        currentActivity = string.format("[Phase 6: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
                         isEggHatching = true
                         lastEggHatchStartTick = now
                         task.spawn(function()
@@ -1510,7 +1621,7 @@ table.insert(threads, task.spawn(function()
                         if dist > 16 and targetPart and hrp then
                             hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         end
-                        currentActivity = string.format("[Phase 5: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
+                        currentActivity = string.format("[Phase 6: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
                 end
 
@@ -1527,7 +1638,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 if isAllRainbowMythic then
-                    currentActivity = string.format("🌟 [Phase 5: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
+                    currentActivity = string.format("🌟 [Phase 6: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
                 end
 
                 -- 10 Qi Rebirth Goal & Magma Click Skin
@@ -1601,10 +1712,15 @@ local function updateTelemetry()
         local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
         local idxStr = totalStats and string.format("%d Pets (Norm: %d, Gold: %d)", totalStats.TotalIndexed or 0, totalStats.IndexedNormal or 0, totalStats.IndexedGolden or 0) or "N/A"
 
+        local skStatus = ProgAPI.GetClickSkinStatus and ProgAPI.GetClickSkinStatus()
+        local skinStr = skStatus and (skStatus.GoalMet and string.format("Ultimate (+%d Egg, +%.1f%% Speed) ✅", skStatus.EquippedEggHatch, skStatus.EquippedHatchSpeed) or string.format("Rerolling (+%d Egg, +%.1f%% Speed)", skStatus.EquippedEggHatch, skStatus.EquippedHatchSpeed)) or "N/A"
+
+        local hatchSpeedStr = (ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed()) or "1.5s"
+
         -- 2. Statistical Progression Telemetry Card
         local cardTitle = "Progression Telemetry"
         local cardContent = string.format(
-            "⚡ <b>Clicks:</b> %s  |  <b>Rebirths:</b> %s\n" ..
+            "⚡ <b>Clicks:</b> %s  |  <b>Rebirths:</b> %s  |  <b>Hatch Speed:</b> %s\n" ..
             "💎 <b>Gems:</b> %s  |  <b>Coins:</b> %s  |  <b>Tech Coins:</b> %s\n" ..
             "🚀 <b>Prestige:</b> %s\n" ..
             "🏝️ <b>Islands:</b> %s\n" ..
@@ -1612,9 +1728,11 @@ local function updateTelemetry()
             "🌳 <b>Skill Tree:</b> %s\n" ..
             "🗝️ <b>??? Quest:</b> %s\n" ..
             "📖 <b>Auto Index:</b> %s\n" ..
+            "🟣 <b>Click Skin:</b> %s\n" ..
             "🔥 <b>Magma Skin:</b> %s",
             ProgAPI.FormatNumber(pData.Clicks or 0),
             ProgAPI.FormatNumber(pData.Rebirths or 0),
+            tostring(hatchSpeedStr),
             ProgAPI.FormatNumber(pData.Gems or 0),
             ProgAPI.FormatNumber(pData.Coins or 0),
             ProgAPI.FormatNumber(pData.SpaceCoins or 0),
@@ -1624,6 +1742,7 @@ local function updateTelemetry()
             tostring(stStr),
             tostring(questStr),
             tostring(idxStr),
+            tostring(skinStr),
             tostring(magmaStr)
         )
 
@@ -1749,7 +1868,7 @@ local function updateTelemetry()
                         queuedStr = string.format("\n🌈 <b>Queued in Rainbow Machine (Cooking 30m):</b> %s", table.concat(qNames, ", "))
                     end
 
-                    local stageStr = (eggProg.IndexStage == "GoldPriority") and "Normal > Gold Priority (All Worlds)" or "Rainbow Fallback Filler"
+                    local stageStr = eggProg.IndexStage or "Index Progression"
                     eggContent = string.format(
                         "🎯 <b>Stage:</b> %s\n" ..
                         "🥚 <b>Target Egg:</b> %s\n" ..
@@ -1827,6 +1946,70 @@ local function updateTelemetry()
             end
         end
 
+        if Phase5SkinCard then
+            local skStatus = AutoProgAPI.GetClickSkinStatus and AutoProgAPI.GetClickSkinStatus()
+            local skContent = ""
+            if skStatus then
+                local eqGoalStr = skStatus.EquippedGoalMet and "✅ (TARGET MET)" or "⏳ (REROLLING)"
+                local penStr = "None"
+                if skStatus.Pending then
+                    penStr = string.format("+%d Egg, +%.1f%% Speed (%s)", skStatus.PendingEggHatch, skStatus.PendingHatchSpeed, skStatus.PendingGoalMet and "✅ MET" or "❌ Skip")
+                end
+                local gemStr = string.format("%s / %s (%s)", AutoProgAPI.FormatNumber(skStatus.CurrentGems), AutoProgAPI.FormatNumber(skStatus.GemsThreshold), skStatus.GemsThresholdMet and "✅ Ready" or "⏳ Saving")
+                skContent = string.format(
+                    "🟣 <b>Target Skin:</b> Ultimate (Purple, Requires 250 Pets)\n" ..
+                    "🎯 <b>Target Stats:</b> +%d Egg Hatch & +%.1f%% Hatch Speed\n\n" ..
+                    "👑 <b>Equipped Skin:</b> %s (%s)\n" ..
+                    "  • Passives: +%d Egg Hatch\n" ..
+                    "  • Boosts: +%.1f%% Hatch Speed\n\n" ..
+                    "🎲 <b>Pending Roll:</b> %s\n" ..
+                    "💎 <b>Gems Status:</b> %s\n" ..
+                    "🏁 <b>Phase 5 Status:</b> %s",
+                    (State and tonumber(State.ClickSkinTargetEggHatch)) or 3,
+                    (State and tonumber(State.ClickSkinTargetHatchSpeed)) or 15,
+                    tostring(skStatus.EquippedTier),
+                    eqGoalStr,
+                    skStatus.EquippedEggHatch,
+                    skStatus.EquippedHatchSpeed,
+                    penStr,
+                    gemStr,
+                    skStatus.GoalMet and "🎉 COMPLETE -> PHASE 6 ACTIVE" or (skStatus.GemsThresholdMet and "REROLLING..." or "SAVING GEMS")
+                )
+            else
+                skContent = "Click Skin telemetry initializing..."
+            end
+            Phase5SkinCard:Set({
+                Title = "Live Skin Status",
+                Content = skContent
+            })
+            if Phase5SkinCard.TitleLabel then pcall(function() Phase5SkinCard.TitleLabel.Text = "Live Skin Status" end) end
+            if Phase5SkinCard.BodyLabel then pcall(function() Phase5SkinCard.BodyLabel.Text = skContent end) end
+        end
+
+        if Phase6MythicCard then
+            local isAllRainbow, mythicCount, totalSlots = false, 0, 0
+            if AutoProgAPI.IsEquippedTeamAllRainbowMythic then
+                isAllRainbow, mythicCount, totalSlots = AutoProgAPI.IsEquippedTeamAllRainbowMythic()
+            end
+            local mContent = string.format(
+                "🧬 <b>Target Egg:</b> Matrix Egg (Tech World)\n" ..
+                "🌈 <b>Full Rainbow Mythic Team:</b> %s (%d / %d slots)\n" ..
+                "🗑️ <b>Mythic Pet Filter:</b> %s (Deletes non-mythics)\n" ..
+                "⚒️ <b>Auto Golden & Rainbow Crafting:</b> %s",
+                isAllRainbow and "✅ 100% COMPLETE" or "IN PROGRESS",
+                mythicCount or 0,
+                totalSlots or 0,
+                State.AutoMythicFilter ~= false and "ACTIVE" or "OFF",
+                State.AutoCraftMythics ~= false and "ACTIVE" or "OFF"
+            )
+            Phase6MythicCard:Set({
+                Title = "Live Matrix Mythic Team Status",
+                Content = mContent
+            })
+            if Phase6MythicCard.TitleLabel then pcall(function() Phase6MythicCard.TitleLabel.Text = "Live Matrix Mythic Team Status" end) end
+            if Phase6MythicCard.BodyLabel then pcall(function() Phase6MythicCard.BodyLabel.Text = mContent end) end
+        end
+
         if State.BlackScreen and AutoProgAPI and AutoProgAPI.UpdateBlackScreenTelemetry then
             pcall(AutoProgAPI.UpdateBlackScreenTelemetry)
         end
@@ -1874,6 +2057,17 @@ table.insert(threads, task.spawn(function()
         local ok, err = pcall(updateTelemetry)
         if not ok then
             warn("[AutoProg] updateTelemetry error:", err)
+        end
+    end
+end))
+
+-- THREAD 16: DEDICATED AUTO ACCEPT TRADE ENGINE
+table.insert(threads, task.spawn(function()
+    while isRunning do
+        task.wait(0.2)
+        if not isRunning then break end
+        if State.AutoAcceptTrade ~= false and AutoProgAPI and AutoProgAPI.StepAutoTrade then
+            pcall(AutoProgAPI.StepAutoTrade)
         end
     end
 end))
