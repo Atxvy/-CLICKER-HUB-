@@ -1181,6 +1181,7 @@ local eggData = {}
 for _, e in ipairs(REAL_PROGRESSION_EGGS) do
     eggData[e.name] = { cost = e.cost, island = e.island, name = e.name }
 end
+ProgAPI.ProgressionEggs = REAL_PROGRESSION_EGGS
 
 -- Dynamically incorporate / update any live eggs from Directory.Eggs
 pcall(function()
@@ -1432,13 +1433,29 @@ function ProgAPI.GetEndgameEgg()
 end
 
 function ProgAPI.TeleportToEgg(eggName: string): boolean
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    -- Check if character is ALREADY close to the egg (prevents rubberbanding / teleport loops)
+    local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+    if targetPart and (hrp.Position - targetPart.Position).Magnitude <= 18 then
+        return true
+    end
+    if eggName == "MatrixEgg" and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 18 then
+        return true
+    end
+
     local eggMeta = eggData[eggName]
     local island = eggMeta and eggMeta.island or "Spawn"
     local meta = islandMetaLookup[island]
     local targetWorld = (meta and meta.world) or "Overworld"
 
-    -- 1. Exit any active minigame (DominusArea, Raids, etc.)
-    ProgAPI.ExitMinigame()
+    -- 1. Exit any active minigame if active
+    if ProgAPI.IsInMinigame and ProgAPI.IsInMinigame() then
+        ProgAPI.ExitMinigame()
+        task.wait(0.3)
+    end
 
     -- 2. Switch world if needed (e.g. Overworld <-> Techworld)
     local stats = Stats.Local(true) or {}
@@ -1448,14 +1465,18 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
         task.wait(0.6)
     end
 
-    -- 3. Teleport to the target island
-    ProgAPI.TeleportToIsland(island)
-    task.wait(0.35)
+    -- 3. Teleport to the target island ONLY IF not already on that island!
+    stats = Stats.Local(true) or {}
+    local curIsland = stats.CurrentIsland or ""
+    if curIsland ~= island then
+        ProgAPI.TeleportToIsland(island)
+        task.wait(0.35)
+    end
 
     -- 4. Find the egg model and stand directly on it (with streaming retry)
-    local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+    char = LocalPlayer.Character
+    hrp = char and char:FindFirstChild("HumanoidRootPart")
 
     if not targetPart or not hrp then
         for _ = 1, 5 do
@@ -1874,6 +1895,23 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
     local obtained = stats.ObtainedPets or {}
     local activeOrQueued = ProgAPI.GetActiveAndQueuedRainbowPetIds()
 
+    local currentTotalIndexed = 0
+    local totalCooking = 0
+    local targetTotal = 250
+    if phase4IndexMode then
+        local st = rawget(_G, "State")
+        targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+        local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+        currentTotalIndexed = (totalStats and totalStats.TotalIndexed) or 0
+        local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+        totalCooking = (rainbowStatus and rainbowStatus.TotalCooking) or 0
+
+        -- User requirement: 250 Total Index goal. If already met or accounted for by queued rainbows, stop crafting!
+        if (currentTotalIndexed + totalCooking) >= targetTotal then
+            return 0
+        end
+    end
+
     local groups = {}
     for guid, p in pairs(pets) do
         local isEquipped = equipped[guid] ~= nil
@@ -1893,6 +1931,9 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
             if phase4IndexMode then
                 if not isEasyRarity then
                     allow = false
+                elseif obtained[p.id .. "_Golden"] ~= true then
+                    -- User requirement: Prioritize Gold first! Must have Gold indexed before crafting Rainbow!
+                    allow = false
                 elseif obtained[p.id .. "_Rainbow"] == true then
                     allow = false
                 elseif activeOrQueued[tostring(p.id)] == true then
@@ -1910,6 +1951,10 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
 
     local craftedCount = 0
     for _, g in pairs(groups) do
+        if phase4IndexMode and (currentTotalIndexed + totalCooking) >= targetTotal then
+            break
+        end
+
         while #g.guids >= 6 do
             local batch = {}
             for i = 1, 6 do
@@ -1924,6 +1969,7 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
             end)
             if ok and (res == true or type(res) == "table" or res == "Queued") then
                 craftedCount = craftedCount + 1
+                totalCooking = totalCooking + 1
                 activeOrQueued[tostring(g.id)] = true
                 task.wait(0.2)
                 if phase4IndexMode then
@@ -3686,6 +3732,14 @@ function ProgAPI.IsPhase4(): boolean
     if not ProgAPI.IsSkillTreeMaxed() then return false end
     local st = rawget(_G, "State")
     if st and st.AutoIndexPets == false then return false end
+
+    -- Check if IndexTargetTotal goal (default 250) has been reached
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    if totalStats and totalStats.TotalIndexed >= targetTotal then
+        return false -- Target reached! Phase 4 complete!
+    end
+
     local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
     local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
     local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
@@ -3700,6 +3754,14 @@ function ProgAPI.IsPhase5(): boolean
     if not ProgAPI.IsSkillTreeMaxed() then return false end
     local st = rawget(_G, "State")
     if st and st.AutoIndexPets == false then return true end
+
+    -- Check if IndexTargetTotal goal (default 250) has been reached
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    if totalStats and totalStats.TotalIndexed >= targetTotal then
+        return true -- Target reached! Phase 5 active!
+    end
+
     local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
     local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
     local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
@@ -4019,10 +4081,34 @@ function ProgAPI.GetEggIndexProgress(
             TargetPetsCount = 0,
             CompletedPetsCount = 0,
             MissingPets = {},
+            QueuedRainbows = {},
             SkippedRareCount = 0,
             SkippedRares = {}
         }
     end
+
+    local st = rawget(_G, "State")
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    local currentTotalIndexed = (totalStats and totalStats.TotalIndexed) or 0
+    if currentTotalIndexed >= targetTotal then
+        return {
+            EggName = eggName,
+            DisplayName = eggDef.Name or eggName,
+            IsComplete = true,
+            TargetPetsCount = 0,
+            CompletedPetsCount = 0,
+            MissingPets = {},
+            QueuedRainbows = {},
+            SkippedRareCount = 0,
+            SkippedRares = {}
+        }
+    end
+
+    local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+    local totalCookingRainbows = (rainbowStatus and rainbowStatus.TotalCooking) or 0
+    -- Rainbow is optional filler towards 250 index goal: only required if totalIndexed + cooking < targetTotal
+    local needRainbowForTarget = unlockRainbow and ((currentTotalIndexed + totalCookingRainbows) < targetTotal)
 
     local targetPets = {}
     local skippedRares = {}
@@ -4088,8 +4174,8 @@ function ProgAPI.GetEggIndexProgress(
             table.insert(missingVariants, "Golden")
         end
 
-        -- Rainbow variant check: ONLY required if unlockRainbow is true AND pet is an easy rarity (Common/Rare)
-        if unlockRainbow and isEasyRarity then
+        -- Rainbow variant check: ONLY required if unlockRainbow is true, target 250 not reached, and pet is an easy rarity (Common/Rare)
+        if needRainbowForTarget and isEasyRarity then
             if obtained[pId .. "_Rainbow"] ~= true then
                 if activeOrQueuedRainbow[pId] == true then
                     -- Already in Rainbow Machine (cooking 30-min craft or waiting in queue)!
@@ -4145,6 +4231,13 @@ function ProgAPI.GetNextUnindexedEgg(
     unlockRainbow: boolean?,
     unlockDM: boolean?
 )
+    local st = rawget(_G, "State")
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    if totalStats and totalStats.TotalIndexed >= targetTotal then
+        return nil, nil -- Target reached! All done!
+    end
+
     for _, e in ipairs(REAL_PROGRESSION_EGGS) do
         local prog = ProgAPI.GetEggIndexProgress(
             e.name,
@@ -4169,6 +4262,13 @@ function ProgAPI.IsIndexComplete(
     unlockRainbow: boolean?,
     unlockDM: boolean?
 ): boolean
+    local st = rawget(_G, "State")
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    if totalStats and totalStats.TotalIndexed >= targetTotal then
+        return true -- Target reached!
+    end
+
     local egg = ProgAPI.GetNextUnindexedEgg(
         ignoreMythicAndAbove,
         unlockNormal,
@@ -4191,6 +4291,14 @@ function ProgAPI.CleanIndexedFodder(
     local equipped = stats.EquippedPets or {}
     local obtained = stats.ObtainedPets or {}
     local activeOrQueuedRainbow = ProgAPI.GetActiveAndQueuedRainbowPetIds and ProgAPI.GetActiveAndQueuedRainbowPetIds() or {}
+
+    local st = rawget(_G, "State")
+    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    local currentTotalIndexed = (totalStats and totalStats.TotalIndexed) or 0
+    local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+    local totalCookingRainbows = (rainbowStatus and rainbowStatus.TotalCooking) or 0
+    local needRainbowForTarget = unlockRainbow and ((currentTotalIndexed + totalCookingRainbows) < targetTotal)
 
     -- Count unequipped copies per petId to avoid deleting crafting ingredients
     local normalCounts = {}
@@ -4245,7 +4353,7 @@ function ProgAPI.CleanIndexedFodder(
 
                 -- If Rainbow index is needed for easy rarity (Common/Rare) and not yet indexed and not yet queued:
                 -- preserve up to 6 golden copies to start a 100% 30-min craft!
-                if unlockRainbow and isEasyRarity and not hasRainbowIndex and not isRainbowQueued and isGold then
+                if needRainbowForTarget and isEasyRarity and not hasRainbowIndex and not isRainbowQueued and isGold then
                     preservedForRainbow[pid] = (preservedForRainbow[pid] or 0) + 1
                     if preservedForRainbow[pid] <= 6 then
                         shouldKeep = true
@@ -4256,7 +4364,7 @@ function ProgAPI.CleanIndexedFodder(
                 if not shouldKeep then
                     local normalSatisfied = (not unlockNormal) or hasNormalIndex
                     local goldSatisfied = (not unlockGold) or hasGoldIndex
-                    local rainbowSatisfied = (not unlockRainbow) or (not isEasyRarity) or hasRainbowIndex or isRainbowQueued
+                    local rainbowSatisfied = (not needRainbowForTarget) or (not isEasyRarity) or hasRainbowIndex or isRainbowQueued
 
                     if normalSatisfied and goldSatisfied and rainbowSatisfied then
                         table.insert(toDelete, guid)
@@ -4300,7 +4408,7 @@ function ProgAPI.StepAutoIndex(
     )
 
     if not nextEgg or not eggProg then
-        return true, "All progression eggs 100% indexed! Phase 4 complete."
+        return true, "All progression eggs / target index goals complete! Phase 4 complete."
     end
 
     local pData = ProgAPI.GetPlayerData()
@@ -4315,8 +4423,20 @@ function ProgAPI.StepAutoIndex(
         )
     end
 
-    -- Teleport to the egg if not already there
-    ProgAPI.TeleportToEgg(nextEgg.name)
+    -- Teleport to the egg ONLY IF not already close (prevents stutter/rubberbanding back and forth)
+    local eggModel, targetPart = ProgAPI.FindEggModel(nextEgg.name)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local isNearby = false
+    if hrp and targetPart and (hrp.Position - targetPart.Position).Magnitude <= 18 then
+        isNearby = true
+    elseif hrp and nextEgg.name == "MatrixEgg" and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 18 then
+        isNearby = true
+    end
+
+    if not isNearby then
+        ProgAPI.TeleportToEgg(nextEgg.name)
+    end
 
     -- Multi-hatch according to player hatch rate
     local hatchAmount = ProgAPI.GetMaxEggOpenAmount(nextEgg.name)
@@ -4324,12 +4444,12 @@ function ProgAPI.StepAutoIndex(
         ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
     end)
 
-    -- Auto craft golden pets if gold index is enabled
+    -- Auto craft golden pets FIRST (Gold is prioritized!)
     if unlockGold then
         pcall(ProgAPI.CraftGoldenPets)
     end
 
-    -- Auto craft rainbow pets if rainbow index is enabled (pass true for Phase 4 easy index mode!)
+    -- Auto craft rainbow pets if rainbow index is enabled and needed (phase4IndexMode = true)
     if unlockRainbow then
         pcall(function()
             ProgAPI.CraftRainbowPets(true)
@@ -4356,7 +4476,14 @@ function ProgAPI.StepAutoIndex(
     end
     local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "All Active Goals Queued/Done"
 
-    return false, string.format("[Phase 4: Auto Index] %s (%d/%d): Missing %s%s",
+    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+    local curTotal = (totalStats and totalStats.TotalIndexed) or 0
+    local rbStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+    local cooking = (rbStatus and rbStatus.TotalCooking) or 0
+
+    return false, string.format("[Phase 4: Auto Index (%d+%d/250)] %s (%d/%d): Missing %s%s",
+        curTotal,
+        cooking,
         tostring(eggProg.DisplayName),
         eggProg.CompletedPetsCount,
         eggProg.TargetPetsCount,
