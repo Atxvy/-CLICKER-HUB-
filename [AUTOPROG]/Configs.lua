@@ -64,14 +64,21 @@ Configs.Default = {
     IndexUnlockDarkMatter = false,
     IndexIgnoreMythicAndAbove = true,
     IndexAutoDeleteFodder = true,
-    -- Phase 5: Endgame Matrix Mythics
+    -- Phase 5: Ultimate Click Skin (Purple Skin, +3 Egg Hatch & +15% Speed)
+    AutoClickSkin = true,
+    ClickSkinTier = "Ultimate",
+    ClickSkinTargetEggHatch = 3,
+    ClickSkinTargetHatchSpeed = 15,
+    ClickSkinGemsThreshold = 100, -- 100 Qa Gems (1e17)
+    PauseRebirthPhase5 = true,
+    -- Phase 6: Endgame Matrix Mythics
     AutoMatrixEgg = true,
     AutoMythicFilter = true,
     AutoCraftMythics = true,
     AutoReplaceTeam = true,
+    PauseRebirthPhase6 = true,
     PauseRebirthPhase3 = true,
     PauseRebirthPhase4 = true,
-    PauseRebirthPhase5 = true,
     AutoPotions = true,
     AutoFruits = true,
     AutoFreeGifts = true,
@@ -82,6 +89,7 @@ Configs.Default = {
     -- Session Resilience & Multi-Account (Default ON)
     AntiAFK = true,
     AutoRejoin = true,
+    AutoAcceptTrade = true,
     WalkSpeed = 16,
     JumpPower = 50,
     WebhookUrl = "",
@@ -130,6 +138,14 @@ function Configs.Load()
                     Configs.Current._RainbowV3Default = true
                 end
                 if Configs.Current.IndexTargetTotal == nil then Configs.Current.IndexTargetTotal = 250 end
+                if Configs.Current.AutoClickSkin == nil then Configs.Current.AutoClickSkin = true end
+                if Configs.Current.ClickSkinTier == nil then Configs.Current.ClickSkinTier = "Ultimate" end
+                if Configs.Current.ClickSkinTargetEggHatch == nil then Configs.Current.ClickSkinTargetEggHatch = 3 end
+                if Configs.Current.ClickSkinTargetHatchSpeed == nil then Configs.Current.ClickSkinTargetHatchSpeed = 15 end
+                if Configs.Current.ClickSkinGemsThreshold == nil then Configs.Current.ClickSkinGemsThreshold = 100 end
+                if Configs.Current.PauseRebirthPhase5 == nil then Configs.Current.PauseRebirthPhase5 = true end
+                if Configs.Current.PauseRebirthPhase6 == nil then Configs.Current.PauseRebirthPhase6 = true end
+                if Configs.Current.AutoAcceptTrade == nil then Configs.Current.AutoAcceptTrade = true end
 
                 -- If loaded from legacy config, save into new isolated path immediately
                 if targetPath == LEGACY_CONFIG_PATH and not isfile(CONFIG_PATH) then
