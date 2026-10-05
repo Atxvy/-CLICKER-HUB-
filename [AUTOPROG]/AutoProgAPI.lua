@@ -5341,21 +5341,24 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             end
         end
 
-        -- Strictly auto-decline incoming trade requests during Black Screen
+        -- Auto-decline incoming trade requests during Black Screen ONLY if AutoAcceptTrade is disabled
         if not blackScreenTradeConn then
             pcall(function()
                 local TradeFrontend = require(Client:WaitForChild("TradeFrontend", 2))
                 if TradeFrontend and TradeFrontend.TradeRequestReceived then
                     blackScreenTradeConn = TradeFrontend.TradeRequestReceived:Connect(function(otherPlayer)
-                        pcall(function()
-                            TradeFrontend.TradeRequestDecision(otherPlayer, false)
-                        end)
-                        pcall(function()
-                            local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
-                            if Trading then
-                                Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
-                            end
-                        end)
+                        local st = rawget(_G, "State")
+                        if st and st.AutoAcceptTrade == false then
+                            pcall(function()
+                                TradeFrontend.TradeRequestDecision(otherPlayer, false)
+                            end)
+                            pcall(function()
+                                local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
+                                if Trading then
+                                    Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
+                                end
+                            end)
+                        end
                     end)
                 end
             end)
@@ -5887,20 +5890,23 @@ end
 -- Automatically disable egg animations upon initialization
 pcall(ProgAPI.DisableEggAnimation)
 
--- Automatically auto-decline incoming trade requests to prevent interference
+-- Auto-decline incoming trade requests ONLY if AutoAcceptTrade is explicitly disabled
 pcall(function()
     local TradeFrontend = require(Client:WaitForChild("TradeFrontend", 2))
     if TradeFrontend and TradeFrontend.TradeRequestReceived then
         TradeFrontend.TradeRequestReceived:Connect(function(otherPlayer)
-            pcall(function()
-                TradeFrontend.TradeRequestDecision(otherPlayer, false)
-            end)
-            pcall(function()
-                local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
-                if Trading then
-                    Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
-                end
-            end)
+            local st = rawget(_G, "State")
+            if st and st.AutoAcceptTrade == false then
+                pcall(function()
+                    TradeFrontend.TradeRequestDecision(otherPlayer, false)
+                end)
+                pcall(function()
+                    local Trading = Channels.Trading or (Network and Network.Channel("Trading"))
+                    if Trading then
+                        Trading:InvokeServer("TradeRequestDecision", otherPlayer, false)
+                    end
+                end)
+            end
         end)
     end
 end)
@@ -6243,6 +6249,7 @@ end
 --==============================================================================
 
 local _autoTradeListenerConnected = false
+local _acceptedTradeRequesters = {} -- [requester] = tick()
 local _lastTradeActionTick = 0
 local _lastTradeSettingTick = 0
 
@@ -6260,54 +6267,86 @@ function ProgAPI.InitAutoTradeListener()
         local rep = game:GetService("ReplicatedStorage")
         local lib = rep:WaitForChild("Library", 5)
         local client = lib and lib:WaitForChild("Client", 5)
-        local tradeFrontendMod = client and client:WaitForChild("TradeFrontend", 5)
+        if not client then return end
+
+        -- 1. Hook Client.UI.Message.New: Instantly return 1 (Accept) for trade requests so no modal popup blocks or times out
+        local messageMod = client:FindFirstChild("UI") and client.UI:FindFirstChild("Message")
+        if messageMod then
+            local Message = require(messageMod)
+            if Message and Message.New and not Message._autoTradeHooked then
+                local origMsgNew = Message.New
+                Message.New = function(title, buttons, ...)
+                    local st = rawget(_G, "State")
+                    if st and st.AutoAcceptTrade ~= false then
+                        local titleStr = tostring(title or ""):lower()
+                        if titleStr:find("trade request") or titleStr:find("trade") or titleStr:find("sent you") then
+                            return 1 -- Option 1 = "Accept"
+                        end
+                    end
+                    return origMsgNew(title, buttons, ...)
+                end
+                Message._autoTradeHooked = true
+            end
+        end
+
+        local tradeFrontendMod = client:FindFirstChild("TradeFrontend") or client:WaitForChild("TradeFrontend", 5)
         if tradeFrontendMod then
             local TradeFrontend = require(tradeFrontendMod)
             if TradeFrontend then
-                -- 1. Hook TradeRequestDecision: Whenever AutoAcceptTrade is active, FORCE decision = 1 (Accept)!
-                -- This prevents the game's Trade List script from sending 'false' (decline) when Message.New closes!
+                -- 2. Hook TradeRequestDecision: Whenever AutoAcceptTrade is active, FORCE decision = 1 (Accept) and debounce duplicates
                 if TradeFrontend.TradeRequestDecision and not TradeFrontend._autoTradeHooked then
                     local origDecision = TradeFrontend.TradeRequestDecision
                     TradeFrontend.TradeRequestDecision = function(requester, decision)
                         local st = rawget(_G, "State")
                         if st and st.AutoAcceptTrade ~= false then
-                            decision = 1 -- 1 = Accept in Clicker Simulator TradeFrontend
+                            if decision == false or decision == 2 or decision == nil then
+                                decision = 1 -- 1 = Accept in Clicker Simulator TradeFrontend
+                            end
+                            local now = tick()
+                            if requester and _acceptedTradeRequesters[requester] and (now - _acceptedTradeRequesters[requester] < 3) then
+                                return true -- Already accepted, avoid duplicate server invocation
+                            end
+                            if requester then
+                                _acceptedTradeRequesters[requester] = now
+                            end
                         end
                         return origDecision(requester, decision)
                     end
                     TradeFrontend._autoTradeHooked = true
                 end
 
-                -- 2. Hook TradeRequestReceived
+                -- 3. Hook TradeRequestReceived: Instantly accept on the first call
                 if TradeFrontend.TradeRequestReceived then
                     TradeFrontend.TradeRequestReceived:Connect(function(requester)
                         local st = rawget(_G, "State")
                         if st and st.AutoAcceptTrade ~= false then
                             task.spawn(function()
-                                task.wait(0.08)
-                                -- Automatically accept/dismiss Message GUI prompt if present
-                                local msgGui = LocalPlayer.PlayerGui:FindFirstChild("Message")
-                                if msgGui and msgGui.Enabled then
-                                    local frame = msgGui:FindFirstChild("Frame")
-                                    local buttons = frame and frame:FindFirstChild("Buttons")
-                                    if buttons then
-                                        for _, b in ipairs(buttons:GetChildren()) do
-                                            local titleLbl = b:FindFirstChild("Title", true)
-                                            local mainBtn = b:FindFirstChild("Main") or b:FindFirstChildWhichIsA("GuiButton", true)
-                                            if titleLbl and titleLbl.Text == "Accept" and mainBtn then
-                                                pcall(function()
+                                -- Accept trade directly via TradeRequestDecision
+                                pcall(function()
+                                    TradeFrontend.TradeRequestDecision(requester, 1)
+                                end)
+                                -- Dismiss/accept any leftover Message GUI prompt if present
+                                task.wait(0.04)
+                                pcall(function()
+                                    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+                                    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+                                    local msgGui = pg and pg:FindFirstChild("Message")
+                                    if msgGui and msgGui.Enabled then
+                                        local frame = msgGui:FindFirstChild("Frame")
+                                        local buttons = frame and frame:FindFirstChild("Buttons")
+                                        if buttons then
+                                            for _, b in ipairs(buttons:GetChildren()) do
+                                                local titleLbl = b:FindFirstChild("Title", true)
+                                                local mainBtn = b:FindFirstChild("Main") or b:FindFirstChildWhichIsA("GuiButton", true)
+                                                if titleLbl and titleLbl.Text == "Accept" and mainBtn then
                                                     if firesignal then
                                                         firesignal(mainBtn.Activated)
                                                         firesignal(mainBtn.MouseButton1Click)
                                                     end
-                                                end)
+                                                end
                                             end
                                         end
                                     end
-                                end
-                                -- Accept trade directly via TradeRequestDecision
-                                pcall(function()
-                                    TradeFrontend.TradeRequestDecision(requester, 1)
                                 end)
                             end)
                         end
