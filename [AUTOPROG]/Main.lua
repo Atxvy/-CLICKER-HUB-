@@ -179,6 +179,38 @@ if State.AutoAcceptTrade == nil then
     State.AutoAcceptTrade = true
     Configs.Set("AutoAcceptTrade", true)
 end
+
+-- Automatically detect and apply global Webhook variable if passed before loader
+pcall(function()
+    local candidates = {
+        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        _G,
+        shared,
+    }
+    local keys = {"Webhook", "WebhookUrl", "webhook", "webhookurl", "WEBHOOK", "WEBHOOK_URL", "Webhook_Url"}
+    for _, env in ipairs(candidates) do
+        if type(env) == "table" then
+            for _, k in ipairs(keys) do
+                local val = rawget(env, k) or env[k]
+                if type(val) == "string" and val:match("%S") then
+                    local clean = val:gsub("^%s+", ""):gsub("%s+$", "")
+                    if clean ~= "" then
+                        State.WebhookUrl = clean
+                        State.WebhookEnabled = true
+                        Configs.Set("WebhookUrl", clean)
+                        Configs.Set("WebhookEnabled", true)
+                        ProgAPI.WebhookUrl = clean
+                        ProgAPI.WebhookEnabled = true
+                        AutoProgAPI.WebhookUrl = clean
+                        AutoProgAPI.WebhookEnabled = true
+                        return
+                    end
+                end
+            end
+        end
+    end
+end)
+
 _G.State = State
 _G.ProgAPI = ProgAPI
 _G.AutoProgAPI = AutoProgAPI

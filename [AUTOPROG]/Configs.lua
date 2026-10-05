@@ -156,6 +156,31 @@ function Configs.Load()
                 Configs.Save()
             end
         end
+        -- Automatically detect and apply user-defined global Webhook (e.g. Webhook = "..." before script execution)
+        pcall(function()
+            local candidates = {
+                (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+                _G,
+                shared,
+            }
+            local keys = {"Webhook", "WebhookUrl", "webhook", "webhookurl", "WEBHOOK", "WEBHOOK_URL", "Webhook_Url"}
+            for _, env in ipairs(candidates) do
+                if type(env) == "table" then
+                    for _, k in ipairs(keys) do
+                        local val = rawget(env, k) or env[k]
+                        if type(val) == "string" and val:match("%S") then
+                            local clean = val:gsub("^%s+", ""):gsub("%s+$", "")
+                            if clean ~= "" then
+                                Configs.Current.WebhookUrl = clean
+                                Configs.Current.WebhookEnabled = true
+                                Configs.Save()
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+        end)
     end)
     return Configs.Current
 end

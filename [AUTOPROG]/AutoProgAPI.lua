@@ -150,6 +150,36 @@ end
 ProgAPI.SessionStats = _G.__ProgAPI_SessionStats
 ProgAPI.WebhookUrl = ""
 ProgAPI.WebhookEnabled = true
+
+function ProgAPI.DetectGlobalWebhook(): string?
+    local candidates = {
+        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        _G,
+        shared,
+    }
+    local keys = {"Webhook", "WebhookUrl", "webhook", "webhookurl", "WEBHOOK", "WEBHOOK_URL", "Webhook_Url"}
+    for _, env in ipairs(candidates) do
+        if type(env) == "table" then
+            for _, k in ipairs(keys) do
+                local val = rawget(env, k) or env[k]
+                if type(val) == "string" and val:match("%S") then
+                    local clean = val:gsub("^%s+", ""):gsub("%s+$", "")
+                    if clean ~= "" then
+                        return clean
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local detectedWebhook = ProgAPI.DetectGlobalWebhook()
+if detectedWebhook then
+    ProgAPI.WebhookUrl = detectedWebhook
+    ProgAPI.WebhookEnabled = true
+end
+
 ProgAPI.CurrentActivity = "Auto Progression Active"
 ProgAPI.CurrentPhase = "Evaluating..."
 ProgAPI.SelectedEgg = "MatrixEgg"
@@ -5212,7 +5242,10 @@ updateBlackScreenTelemetry = function()
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
     if not blackScreenGui or not blackScreenGui.Parent or not blackScreenGui.Enabled then
-        local found = (pg and pg:FindFirstChild("ClickerHub_BlackScreen")) or _G.__ProgAPI_BlackScreenGui
+        local found = (pg and pg:FindFirstChild("ClickerHub_BlackScreen"))
+            or (gethui and pcall(gethui) and gethui():FindFirstChild("ClickerHub_BlackScreen"))
+            or (game:GetService("CoreGui") and pcall(function() return game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen") end) and game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen"))
+            or _G.__ProgAPI_BlackScreenGui
         if found and found.Enabled and found.Parent then
             blackScreenGui = found
         else
@@ -5224,83 +5257,152 @@ updateBlackScreenTelemetry = function()
     if not labels then return end
 
     local pData = ProgAPI.GetPlayerData()
-    local curPets = 0
-    local maxPets = 0
-    pcall(function()
-        local Pets = require(Client:WaitForChild("Pets", 2))
-        if Pets and Pets.GetInventoryCount then
-            curPets = Pets.GetInventoryCount()
-        end
-        if Pets and Pets.GetEffectiveMaxInventoryPets then
-            maxPets = Pets.GetEffectiveMaxInventoryPets()
-        end
-    end)
+    local StatsMod = nil
+    pcall(function() StatsMod = require(Client:WaitForChild("Stats", 2)) end)
+    local stats = (StatsMod and StatsMod.Local(true)) or {}
+    local Currency = nil
+    pcall(function() Currency = require(Client:WaitForChild("Currency", 2)) end)
 
+    -- 1. Status & Phase determination
+    local statusText = "Running | World Progression"
+    if ProgAPI.IsPhase6 and ProgAPI.IsPhase6() then
+        statusText = "Running | Endgame Matrix Mythics"
+    elseif ProgAPI.IsPhase5 and ProgAPI.IsPhase5() then
+        statusText = "Running | Ultimate Click Skin"
+    elseif ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+        statusText = "Running | Pet Collection"
+    elseif ProgAPI.IsPhase3 and ProgAPI.IsPhase3() then
+        statusText = "Running | Endgame Skill Tree"
+    elseif ProgAPI.IsPhase2 and ProgAPI.IsPhase2() then
+        statusText = "Running | ??? Secret Area Quest"
+    end
+
+    -- 2. Current Activity
     local eggName = ProgAPI.SelectedEgg or "MatrixEgg"
     if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
         local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
-        if nextEgg then eggName = nextEgg.name end
+        if nextEgg and nextEgg.name then eggName = nextEgg.name end
     end
     local eggData = Directory.Eggs and Directory.Eggs[eggName]
     local eggDispName = (eggData and (eggData.Name or eggData.DisplayName)) or eggName
-    local eggCost = 0
-    local eggCurr = (eggData and eggData.Info and eggData.Info.Currency) or "Clicks"
-    pcall(function()
-        if EggsFrontend and EggsFrontend.GetEggCost then
-            eggCost = EggsFrontend.GetEggCost(eggName)
+
+    local curActivity = tostring(ProgAPI.CurrentActivity or ("Hatching " .. eggDispName))
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
+        if nextEgg and nextEgg.petId then
+            local pName = nextEgg.petId
+            local pMeta = Directory.Pets and Directory.Pets[pName]
+            if pMeta and pMeta.Name then pName = pMeta.Name end
+            curActivity = string.format("Getting %s %s", nextEgg.targetType or "Normal", pName)
         end
+    end
+
+    -- 3. Currencies (Coins, Tech Coins, Gems, Clicks, Tokens)
+    local coins = 0
+    pcall(function() coins = (Currency and Currency.Get and Currency.Get("Coins")) or stats.Coins or 0 end)
+    local techCoins = 0
+    pcall(function() techCoins = (Currency and Currency.Get and (Currency.Get("TechCoins") or Currency.Get("Tech Coins"))) or stats.TechCoins or 0 end)
+    local tokens = 0
+    pcall(function() tokens = (Currency and Currency.Get and (Currency.Get("Tokens") or Currency.Get("ClickTokens"))) or stats.Tokens or stats.ClickTokens or stats.BoothTokensRaised or 0 end)
+
+    -- 4. Rebirths & Prestige
+    local prestiges = stats.Prestiges or 0
+    local rebStr = string.format("%s / %d/2", ProgAPI.FormatNumber(pData.Rebirths or 0), prestiges)
+
+    -- 5. World / Island
+    local worldIslandStr = string.format("%s / %s", tostring(pData.CurrentWorld or "Overworld"), tostring(pData.CurrentIsland or "Spawn"))
+
+    -- 6. Pet Collection
+    local idx = (ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()) or {}
+    local maxPetCount = idx.ProgressionUniquePets or 269
+    local petCollStr = string.format("Normal %d/%d | Golden %d/%d | Rainbow %d/%d",
+        idx.IndexedNormal or 0, maxPetCount,
+        idx.IndexedGolden or 0, maxPetCount,
+        idx.IndexedRainbow or 0, maxPetCount
+    )
+
+    -- 7. Collection Target
+    local collTargetStr = "Progression Target: Active"
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
+        if nextEgg and nextEgg.petId then
+            local pName = nextEgg.petId
+            local pMeta = Directory.Pets and Directory.Pets[pName]
+            if pMeta and pMeta.Name then pName = pMeta.Name end
+            local nDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Normal"]) and "Completed" or "Doing"
+            local gDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Golden"]) and "Completed" or (nDone == "Completed" and "Doing" or "Pending")
+            local rDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Rainbow"]) and "Completed" or (gDone == "Completed" and "Doing" or "Pending")
+            collTargetStr = string.format("%s | Normal: %s | Golden: %s | Rainbow: %s", pName, nDone, gDone, rDone)
+        else
+            local targetTotal = (_G.State and _G.State.IndexTargetTotal) or 250
+            collTargetStr = string.format("Target: 250 Index | Total: %d/%d", idx.TotalIndexed or 0, targetTotal)
+        end
+    elseif ProgAPI.IsPhase6 and ProgAPI.IsPhase6() then
+        local isFullRainbow, rbCount, totalEquipped = false, 0, 0
+        if ProgAPI.IsEquippedTeamAllRainbowMythic then
+            isFullRainbow, rbCount, totalEquipped = ProgAPI.IsEquippedTeamAllRainbowMythic()
+        end
+        collTargetStr = string.format("Rainbow Matrix Mythics: %d/%d Equipped", rbCount, totalEquipped)
+    elseif ProgAPI.IsPhase2 and ProgAPI.IsPhase2() then
+        collTargetStr = "Dominus Gateway Quest | Objective in progress"
+    else
+        collTargetStr = string.format("World %d | Highest Island: %s", pData.FurthestWorld or 1, tostring(pData.CurrentIsland or "Spawn"))
+    end
+
+    -- 8. Pet Inventory
+    local curPets = 0
+    local maxPets = 200
+    pcall(function()
+        local Pets = require(Client:WaitForChild("Pets", 2))
+        if Pets and Pets.GetInventoryCount then curPets = Pets.GetInventoryCount() end
+        if Pets and Pets.GetEffectiveMaxInventoryPets then maxPets = Pets.GetEffectiveMaxInventoryPets() end
     end)
+    local petInvStr = string.format("%d / %d", curPets, maxPets)
 
-    local luckMult = ProgAPI.GetCurrentEggLuckMultiplier()
-    local chancesText = "N/A"
+    -- 9. Skill Tree
+    local treeCount = 0
+    for _, v in pairs(stats.SkillTree or {}) do
+        if v == true then treeCount = treeCount + 1 end
+    end
+    local dominusArea = stats.DominusAreaUnlocked == true
+    local skillTreeStr = string.format("%d/52 | Secret area: %s", treeCount, dominusArea and "Unlocked" or "Locked")
+
+    -- 10. Apply all labels
     pcall(function()
-        chancesText = ProgAPI.GetEggDropChancesSummary(eggName)
-    end)
-
-    pcall(function()
-        if labels.Clicks then labels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks) end
-        if labels.Rebirths then labels.Rebirths.Text = ProgAPI.FormatNumber(pData.Rebirths) end
-        if labels.Gems then labels.Gems.Text = ProgAPI.FormatNumber(pData.Gems) end
-        if labels.World then labels.World.Text = tostring(pData.CurrentWorld or "Overworld") end
-        if labels.Island then labels.Island.Text = tostring(pData.CurrentIsland or "Spawn") end
-        if labels.PetInv then labels.PetInv.Text = string.format("%d / %d", curPets, maxPets) end
-        if labels.SelectedEgg then
-            labels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
-        end
-        if labels.EggLuck then
-            local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "1.5s"
-            labels.EggLuck.Text = string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(luckMult), speedText)
-        end
-        if labels.Activity then labels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
-        if labels.Chances then labels.Chances.Text = chancesText end
-
-        if labels.EggsHatched then labels.EggsHatched.Text = tostring(ProgAPI.SessionStats.Eggs) end
-        if labels.Mythicals then labels.Mythicals.Text = tostring(ProgAPI.SessionStats.Mythicals) end
-        if labels.Secrets then labels.Secrets.Text = tostring(ProgAPI.SessionStats.Secrets) end
-        if labels.Megas then labels.Megas.Text = tostring(ProgAPI.SessionStats.Megas) end
+        if labels.Status then labels.Status.Text = statusText end
+        if labels.Activity then labels.Activity.Text = curActivity end
         if labels.SessionTime then labels.SessionTime.Text = ProgAPI.FormatSessionTime() end
+        if labels.Clicks then labels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks or 0) end
+        if labels.Gems then labels.Gems.Text = ProgAPI.FormatNumber(pData.Gems or 0) end
+        if labels.CoinsTechCoins then
+            labels.CoinsTechCoins.Text = string.format("%s / %s", ProgAPI.FormatNumber(coins), ProgAPI.FormatNumber(techCoins))
+        end
+        if labels.RebirthsPrestige then labels.RebirthsPrestige.Text = rebStr end
+        if labels.WorldIsland then labels.WorldIsland.Text = worldIslandStr end
+        if labels.CurrentEgg then labels.CurrentEgg.Text = eggDispName end
+        if labels.PetCollection then labels.PetCollection.Text = petCollStr end
+        if labels.CollectionTarget then labels.CollectionTarget.Text = collTargetStr end
+        if labels.PetInventory then labels.PetInventory.Text = petInvStr end
+        if labels.SkillTree then labels.SkillTree.Text = skillTreeStr end
 
-        if _G.__ProgAPI_BlackScreenWebhookBox and not _G.__ProgAPI_BlackScreenWebhookBox:IsFocused() then
-            local curUrl = ProgAPI.WebhookUrl or ""
-            if _G.__ProgAPI_BlackScreenWebhookBox.Text ~= curUrl and curUrl ~= "" then
-                _G.__ProgAPI_BlackScreenWebhookBox.Text = curUrl
-            end
+        if labels.FooterLeft then
+            local tradeState = (_G.State and _G.State.AutoAcceptTrade ~= false) and "Auto Accept" or "Disabled"
+            labels.FooterLeft.Text = string.format("%s | Trade: %s | Tokens: %s", lp.Name, tradeState, ProgAPI.FormatNumber(tokens))
         end
     end)
 end
 ProgAPI.UpdateBlackScreenTelemetry = updateBlackScreenTelemetry
 
 function ProgAPI.SetBlackScreen(enabled: boolean)
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    local RunService = game:GetService("RunService")
+
     pcall(function()
-        local RunService = game:GetService("RunService")
         if RunService and RunService.Set3dRenderingEnabled then
             RunService:Set3dRenderingEnabled(not enabled)
         end
     end)
-
-    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
-    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
-    local targetParent = pg
 
     if enabled then
         -- Suppress and listen for all ScreenGuis in PlayerGui
@@ -5365,12 +5467,32 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         if not blackScreenGui or not blackScreenGui.Parent then
-            if not pg then return end
-
+            local parentTarget = nil
             pcall(function()
-                for _, ch in ipairs(pg:GetChildren()) do
-                    if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                        ch:Destroy()
+                if gethui and type(gethui) == "function" then
+                    parentTarget = gethui()
+                elseif game:GetService("CoreGui") then
+                    parentTarget = game:GetService("CoreGui")
+                end
+            end)
+            if not parentTarget then
+                parentTarget = pg
+            end
+
+            -- Clean up old instance
+            pcall(function()
+                if parentTarget then
+                    for _, ch in ipairs(parentTarget:GetChildren()) do
+                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                            ch:Destroy()
+                        end
+                    end
+                end
+                if pg and parentTarget ~= pg then
+                    for _, ch in ipairs(pg:GetChildren()) do
+                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
+                            ch:Destroy()
+                        end
                     end
                 end
             end)
@@ -5383,248 +5505,229 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             blackScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
             _G.__ProgAPI_BlackScreenGui = blackScreenGui
 
+            -- Opaque pure black backdrop covering entire screen + huge margin to prevent any light leaking
             local bg = Instance.new("Frame")
             bg.Name = "BlackBackground"
-            bg.Size = UDim2.new(1, 0, 1, 0)
-            bg.Position = UDim2.new(0, 0, 0, 0)
+            bg.Size = UDim2.new(1, 4000, 1, 4000)
+            bg.Position = UDim2.new(0, -2000, 0, -2000)
             bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             bg.BackgroundTransparency = 0
             bg.BorderSizePixel = 0
             bg.Active = true
+            bg.ZIndex = 1
             bg.Parent = blackScreenGui
 
-            local card = Instance.new("Frame")
-            card.Name = "CardFrame"
-            card.Size = UDim2.new(0, 470, 0, 555)
-            card.AnchorPoint = Vector2.new(0.5, 0.5)
-            card.Position = UDim2.new(0.5, 0, 0.5, 0)
-            card.BackgroundColor3 = Color3.fromRGB(11, 14, 21)
-            card.BorderSizePixel = 0
-            card.Parent = bg
+            -- Main Dashboard Container (centered, 760px wide, 560px high)
+            local main = Instance.new("Frame")
+            main.Name = "MainContent"
+            main.Size = UDim2.new(0, 760, 0, 560)
+            main.AnchorPoint = Vector2.new(0.5, 0.5)
+            main.Position = UDim2.new(0.5, 0, 0.5, 0)
+            main.BackgroundTransparency = 1
+            main.ZIndex = 2
+            main.Parent = blackScreenGui
 
-            local cardCorner = Instance.new("UICorner")
-            cardCorner.CornerRadius = UDim.new(0, 14)
-            cardCorner.Parent = card
+            -- Dynamic UIScale to ensure it fits any window / resolution cleanly without cut-off
+            local uiScale = Instance.new("UIScale")
+            uiScale.Parent = main
+            local function updateScale()
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local vp = cam.ViewportSize
+                    local scaleX = (vp.X * 0.92) / 760
+                    local scaleY = (vp.Y * 0.92) / 560
+                    local s = math.min(1, scaleX, scaleY)
+                    uiScale.Scale = math.clamp(s, 0.4, 1.0)
+                end
+            end
+            updateScale()
+            if workspace.CurrentCamera then
+                workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+            end
+            workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+                local cam = workspace.CurrentCamera
+                if cam then
+                    updateScale()
+                    cam:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+                end
+            end)
 
-            local cardStroke = Instance.new("UIStroke")
-            cardStroke.Color = Color3.fromRGB(37, 99, 235)
-            cardStroke.Thickness = 1.5
-            cardStroke.Transparency = 0
-            cardStroke.Parent = card
-
+            -- Header: Title & Subtitle
             local title = Instance.new("TextLabel")
-            title.Text = "CLICKER HUB • CLICKER SIMULATOR"
-            title.Font = Enum.Font.GothamBold
-            title.TextSize = 17
-            title.TextColor3 = Color3.fromRGB(255, 255, 255)
-            title.Position = UDim2.new(0, 22, 0, 18)
-            title.Size = UDim2.new(1, -44, 0, 22)
-            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Name = "Title"
+            title.Text = "CLICKER HUB"
+            title.Font = Enum.Font.GothamBlack
+            title.TextSize = 34
+            title.TextColor3 = Color3.fromRGB(245, 245, 250)
+            title.Size = UDim2.new(1, 0, 0, 36)
+            title.Position = UDim2.new(0, 0, 0, 6)
+            title.TextXAlignment = Enum.TextXAlignment.Center
             title.BackgroundTransparency = 1
-            title.Parent = card
+            title.Parent = main
 
             local sub = Instance.new("TextLabel")
-            sub.Text = "3D rendering disabled • Session statistics"
-            sub.Font = Enum.Font.Gotham
-            sub.TextSize = 12
-            sub.TextColor3 = Color3.fromRGB(115, 135, 165)
-            sub.Position = UDim2.new(0, 22, 0, 42)
-            sub.Size = UDim2.new(1, -44, 0, 16)
-            sub.TextXAlignment = Enum.TextXAlignment.Left
+            sub.Name = "Subtitle"
+            sub.Text = "CLICKER SIMULATOR / KAITUN"
+            sub.Font = Enum.Font.GothamBold
+            sub.TextSize = 11
+            sub.TextColor3 = Color3.fromRGB(115, 120, 130)
+            sub.Size = UDim2.new(1, 0, 0, 16)
+            sub.Position = UDim2.new(0, 0, 0, 44)
+            sub.TextXAlignment = Enum.TextXAlignment.Center
             sub.BackgroundTransparency = 1
-            sub.Parent = card
+            sub.Parent = main
 
-            local divider = Instance.new("Frame")
-            divider.Position = UDim2.new(0, 22, 0, 66)
-            divider.Size = UDim2.new(1, -44, 0, 1)
-            divider.BackgroundColor3 = Color3.fromRGB(25, 33, 48)
-            divider.BorderSizePixel = 0
-            divider.Parent = card
+            local rowsContainer = Instance.new("Frame")
+            rowsContainer.Name = "RowsList"
+            rowsContainer.Size = UDim2.new(1, 0, 0, 455)
+            rowsContainer.Position = UDim2.new(0, 0, 0, 68)
+            rowsContainer.BackgroundTransparency = 1
+            rowsContainer.Parent = main
 
-            local container = Instance.new("Frame")
-            container.Name = "RowsContainer"
-            container.Position = UDim2.new(0, 22, 0, 76)
-            container.Size = UDim2.new(1, -44, 0, 380)
-            container.BackgroundTransparency = 1
-            container.Parent = card
+            local function addCapsuleRow(labelText, defaultVal, yPos, key)
+                local row = Instance.new("Frame")
+                row.Name = "Row_" .. (key or labelText)
+                row.Size = UDim2.new(1, 0, 0, 30)
+                row.Position = UDim2.new(0, 0, 0, yPos)
+                row.BackgroundColor3 = Color3.fromRGB(18, 19, 23)
+                row.BorderSizePixel = 0
+                row.Parent = rowsContainer
 
-            local function addRow(lblText, defaultVal, yPos, key)
-                local rowFrame = Instance.new("Frame")
-                rowFrame.Size = UDim2.new(1, 0, 0, 20)
-                rowFrame.Position = UDim2.new(0, 0, 0, yPos)
-                rowFrame.BackgroundTransparency = 1
-                rowFrame.Parent = container
+                local rowCorner = Instance.new("UICorner")
+                rowCorner.CornerRadius = UDim.new(0, 6)
+                rowCorner.Parent = row
+
+                local rowStroke = Instance.new("UIStroke")
+                rowStroke.Color = Color3.fromRGB(36, 38, 46)
+                rowStroke.Thickness = 1
+                rowStroke.Transparency = 0
+                rowStroke.Parent = row
 
                 local lbl = Instance.new("TextLabel")
-                lbl.Text = lblText
-                lbl.Font = Enum.Font.RobotoMono
-                lbl.TextSize = 12.5
-                lbl.TextColor3 = Color3.fromRGB(235, 240, 250)
+                lbl.Name = "Label"
+                lbl.Text = labelText
+                lbl.Font = Enum.Font.GothamMedium
+                lbl.TextSize = 13
+                lbl.TextColor3 = Color3.fromRGB(155, 160, 170)
                 lbl.TextXAlignment = Enum.TextXAlignment.Left
-                lbl.Size = UDim2.new(0, 175, 1, 0)
+                lbl.Position = UDim2.new(0, 16, 0, 0)
+                lbl.Size = UDim2.new(0.3, 0, 1, 0)
                 lbl.BackgroundTransparency = 1
-                lbl.Parent = rowFrame
+                lbl.Parent = row
 
                 local val = Instance.new("TextLabel")
-                val.Name = "Value_" .. (key or lblText)
-                val.Text = defaultVal
-                val.Font = Enum.Font.RobotoMono
-                val.TextSize = 12.5
-                val.TextColor3 = Color3.fromRGB(215, 220, 235)
-                val.TextXAlignment = Enum.TextXAlignment.Left
-                val.Position = UDim2.new(0, 178, 0, 0)
-                val.Size = UDim2.new(1, -178, 1, 0)
+                val.Name = "Value"
+                val.Text = defaultVal or "..."
+                val.Font = Enum.Font.GothamBold
+                val.TextSize = 13
+                val.TextColor3 = Color3.fromRGB(240, 245, 255)
+                val.TextXAlignment = Enum.TextXAlignment.Right
+                val.Position = UDim2.new(0.3, 16, 0, 0)
+                val.Size = UDim2.new(0.7, -32, 1, 0)
                 val.TextTruncate = Enum.TextTruncate.AtEnd
                 val.BackgroundTransparency = 1
-                val.Parent = rowFrame
+                val.Parent = row
 
                 return val
             end
 
-            -- Live initial data pre-fetch so UI renders with actual numbers instantly
-            local pData = ProgAPI.GetPlayerData()
-            local initPets = 0
-            local initMaxPets = 0
-            pcall(function()
-                local Pets = require(Client:WaitForChild("Pets", 2))
-                if Pets and Pets.GetInventoryCount then initPets = Pets.GetInventoryCount() end
-                if Pets and Pets.GetEffectiveMaxInventoryPets then initMaxPets = Pets.GetEffectiveMaxInventoryPets() end
-            end)
-
-            local initEgg = ProgAPI.SelectedEgg or "MatrixEgg"
-            local initEggData = Directory.Eggs and Directory.Eggs[initEgg]
-            local initEggDisp = (initEggData and (initEggData.Name or initEggData.DisplayName)) or initEgg
-            local initEggCost = 0
-            local initEggCurr = (initEggData and initEggData.Info and initEggData.Info.Currency) or "Clicks"
-            pcall(function()
-                if EggsFrontend and EggsFrontend.GetEggCost then initEggCost = EggsFrontend.GetEggCost(initEgg) end
-            end)
-
-            local initLuck = ProgAPI.GetCurrentEggLuckMultiplier()
-            local initChances = ProgAPI.GetEggDropChancesSummary(initEgg)
-
+            -- Build the 13 exact rows matching the reference dashboard
             blackScreenRowLabels = {}
-            blackScreenRowLabels.Clicks = addRow("Clicks", ProgAPI.FormatNumber(pData.Clicks), 0, "Clicks")
-            blackScreenRowLabels.Rebirths = addRow("Rebirths", ProgAPI.FormatNumber(pData.Rebirths), 20, "Rebirths")
-            blackScreenRowLabels.Gems = addRow("Gems", ProgAPI.FormatNumber(pData.Gems), 40, "Gems")
-            blackScreenRowLabels.World = addRow("World", tostring(pData.CurrentWorld or "Overworld"), 60, "World")
-            blackScreenRowLabels.Island = addRow("Island", tostring(pData.CurrentIsland or "Spawn"), 80, "Island")
-            blackScreenRowLabels.PetInv = addRow("Pet Inventory", string.format("%d / %d", initPets, initMaxPets), 100, "PetInv")
-            blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", string.format("%s (%s %s)", initEggDisp, ProgAPI.FormatNumber(initEggCost), initEggCurr), 120, "SelectedEgg")
-            local initSpeed = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "1.5s"
-            blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(initLuck), initSpeed), 140, "EggLuck")
+            -- Section 1: Session Status & Time (3 rows, spacing 34px)
+            blackScreenRowLabels.Status = addCapsuleRow("Status", "Running | Pet Collection", 0, "Status")
+            blackScreenRowLabels.Activity = addCapsuleRow("Activity", "Getting Rainbow Nebula Wyvern", 34, "Activity")
+            blackScreenRowLabels.SessionTime = addCapsuleRow("Session Time", "00:00:15", 68, "SessionTime")
 
-            blackScreenRowLabels.Activity = addRow("Current Activity", tostring(ProgAPI.CurrentActivity or "Auto Farm Active"), 168, "Activity")
-            blackScreenRowLabels.Chances = addRow("Top Drop Chances", initChances, 188, "Chances")
+            -- Section 2: Progression Stats & Balances (12px gap -> starts at 114px, spacing 34px)
+            blackScreenRowLabels.Clicks = addCapsuleRow("Clicks", "0", 114, "Clicks")
+            blackScreenRowLabels.Gems = addCapsuleRow("Gems", "0", 148, "Gems")
+            blackScreenRowLabels.CoinsTechCoins = addCapsuleRow("Coins / Tech Coins", "0 / 0", 182, "CoinsTechCoins")
+            blackScreenRowLabels.RebirthsPrestige = addCapsuleRow("Rebirths / Prestige", "0 / 0/2", 216, "RebirthsPrestige")
+            blackScreenRowLabels.WorldIsland = addCapsuleRow("World / Island", "Spawn / Spawn", 250, "WorldIsland")
+            blackScreenRowLabels.CurrentEgg = addCapsuleRow("Current Egg", "MatrixEgg", 284, "CurrentEgg")
+            blackScreenRowLabels.PetCollection = addCapsuleRow("Pet Collection", "Normal 0/0 | Golden 0/0 | Rainbow 0/0", 318, "PetCollection")
+            blackScreenRowLabels.CollectionTarget = addCapsuleRow("Collection Target", "Progression Target", 352, "CollectionTarget")
+            blackScreenRowLabels.PetInventory = addCapsuleRow("Pet Inventory", "0 / 200", 386, "PetInventory")
+            blackScreenRowLabels.SkillTree = addCapsuleRow("Skill Tree", "0/52 | Secret area: Locked", 420, "SkillTree")
 
-            blackScreenRowLabels.EggsHatched = addRow("Eggs Hatched (Session)", tostring(ProgAPI.SessionStats.Eggs), 216, "EggsHatched")
-            blackScreenRowLabels.Mythicals = addRow("Mythicals (Session)", tostring(ProgAPI.SessionStats.Mythicals), 236, "Mythicals")
-            blackScreenRowLabels.Secrets = addRow("Secrets (Session)", tostring(ProgAPI.SessionStats.Secrets), 256, "Secrets")
-            blackScreenRowLabels.Megas = addRow("Megas (Session)", tostring(ProgAPI.SessionStats.Megas), 276, "Megas")
-            blackScreenRowLabels.SessionTime = addRow("Session Time", ProgAPI.FormatSessionTime(), 296, "SessionTime")
+            -- Bottom Footer (at 528px, height 32px)
+            local footerFrame = Instance.new("Frame")
+            footerFrame.Name = "Footer"
+            footerFrame.Size = UDim2.new(1, 0, 0, 32)
+            footerFrame.Position = UDim2.new(0, 0, 0, 528)
+            footerFrame.BackgroundTransparency = 1
+            footerFrame.Parent = main
 
-            _G.__ProgAPI_BlackScreenLabels = blackScreenRowLabels
+            local footerLeft = Instance.new("TextLabel")
+            footerLeft.Name = "FooterLeft"
+            footerLeft.Text = string.format("%s | Trade: Auto Accept | Tokens: 0", lp.Name)
+            footerLeft.Font = Enum.Font.GothamMedium
+            footerLeft.TextSize = 12
+            footerLeft.TextColor3 = Color3.fromRGB(115, 120, 130)
+            footerLeft.TextXAlignment = Enum.TextXAlignment.Left
+            footerLeft.Size = UDim2.new(0.65, 0, 1, 0)
+            footerLeft.Position = UDim2.new(0, 0, 0, 0)
+            footerLeft.BackgroundTransparency = 1
+            footerLeft.Parent = footerFrame
+            blackScreenRowLabels.FooterLeft = footerLeft
 
-            local webhookFrame = Instance.new("Frame")
-            webhookFrame.Name = "WebhookFrame"
-            webhookFrame.Position = UDim2.new(0, 22, 0, 404)
-            webhookFrame.Size = UDim2.new(1, -44, 0, 52)
-            webhookFrame.BackgroundColor3 = Color3.fromRGB(15, 20, 30)
-            webhookFrame.BorderSizePixel = 0
-            webhookFrame.Parent = card
-
-            local wfCorner = Instance.new("UICorner")
-            wfCorner.CornerRadius = UDim.new(0, 8)
-            wfCorner.Parent = webhookFrame
-
-            local wfStroke = Instance.new("UIStroke")
-            wfStroke.Color = Color3.fromRGB(37, 99, 235)
-            wfStroke.Thickness = 1
-            wfStroke.Transparency = 0.5
-            wfStroke.Parent = webhookFrame
-
-            local wfTitle = Instance.new("TextLabel")
-            wfTitle.Text = "DISCORD WEBHOOK (SECRET+ HATCH ALERTS)"
-            wfTitle.Font = Enum.Font.GothamBold
-            wfTitle.TextSize = 10
-            wfTitle.TextColor3 = Color3.fromRGB(120, 140, 175)
-            wfTitle.Position = UDim2.new(0, 10, 0, 5)
-            wfTitle.Size = UDim2.new(1, -20, 0, 14)
-            wfTitle.TextXAlignment = Enum.TextXAlignment.Left
-            wfTitle.BackgroundTransparency = 1
-            wfTitle.Parent = webhookFrame
-
-            local webhookBox = Instance.new("TextBox")
-            webhookBox.Name = "WebhookInput"
-            webhookBox.Position = UDim2.new(0, 10, 0, 22)
-            webhookBox.Size = UDim2.new(1, -20, 0, 24)
-            webhookBox.BackgroundTransparency = 1
-            webhookBox.Font = Enum.Font.RobotoMono
-            webhookBox.TextSize = 11.5
-            webhookBox.TextColor3 = Color3.fromRGB(240, 245, 255)
-            webhookBox.PlaceholderColor3 = Color3.fromRGB(100, 115, 140)
-            webhookBox.PlaceholderText = "Paste Discord Webhook URL here..."
-            webhookBox.Text = ProgAPI.WebhookUrl or ""
-            webhookBox.ClearTextOnFocus = false
-            webhookBox.TextXAlignment = Enum.TextXAlignment.Left
-            webhookBox.TextTruncate = Enum.TextTruncate.AtEnd
-            webhookBox.Parent = webhookFrame
-
-            local function saveWebhook(text)
-                local clean = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-                ProgAPI.WebhookUrl = clean
-                pcall(function()
-                    local Configs = loadfile and isfile and isfile("[AUTOPROG]/Configs.lua") and loadfile("[AUTOPROG]/Configs.lua")()
-                    if Configs and Configs.Set then
-                        Configs.Set("WebhookUrl", clean)
-                        Configs.Save()
-                    end
-                end)
-                pcall(function()
-                    if _G.State then _G.State.WebhookUrl = clean end
-                end)
-            end
-
-            webhookBox.FocusLost:Connect(function()
-                saveWebhook(webhookBox.Text)
-            end)
-
-            _G.__ProgAPI_BlackScreenWebhookBox = webhookBox
-
-            local restoreBtn = Instance.new("TextButton")
-            restoreBtn.Name = "DisableBtn"
-            restoreBtn.Position = UDim2.new(0, 22, 0, 466)
-            restoreBtn.Size = UDim2.new(1, -44, 0, 40)
-            restoreBtn.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
-            restoreBtn.BorderSizePixel = 0
-            restoreBtn.Text = "Disable Black Screen"
-            restoreBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            restoreBtn.TextSize = 14
-            restoreBtn.Font = Enum.Font.GothamBold
-            restoreBtn.AutoButtonColor = true
-            restoreBtn.Parent = card
+            local disableBtn = Instance.new("TextButton")
+            disableBtn.Name = "DisableBtn"
+            disableBtn.Size = UDim2.new(0, 160, 0, 32)
+            disableBtn.Position = UDim2.new(1, -196, 0, 0)
+            disableBtn.BackgroundColor3 = Color3.fromRGB(26, 28, 34)
+            disableBtn.BorderSizePixel = 0
+            disableBtn.Text = "Disable Black Screen"
+            disableBtn.TextColor3 = Color3.fromRGB(235, 240, 250)
+            disableBtn.TextSize = 12
+            disableBtn.Font = Enum.Font.GothamBold
+            disableBtn.AutoButtonColor = true
+            disableBtn.Parent = footerFrame
 
             local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 10)
-            btnCorner.Parent = restoreBtn
+            btnCorner.CornerRadius = UDim.new(0, 6)
+            btnCorner.Parent = disableBtn
 
-            restoreBtn.MouseButton1Click:Connect(function()
+            local btnStroke = Instance.new("UIStroke")
+            btnStroke.Color = Color3.fromRGB(48, 52, 62)
+            btnStroke.Thickness = 1
+            btnStroke.Parent = disableBtn
+
+            local logoBadge = Instance.new("Frame")
+            logoBadge.Name = "LogoBadge"
+            logoBadge.Size = UDim2.new(0, 30, 0, 30)
+            logoBadge.Position = UDim2.new(1, -30, 0, 1)
+            logoBadge.BackgroundColor3 = Color3.fromRGB(24, 26, 32)
+            logoBadge.BorderSizePixel = 0
+            logoBadge.Parent = footerFrame
+
+            local badgeCorner = Instance.new("UICorner")
+            badgeCorner.CornerRadius = UDim.new(0, 6)
+            badgeCorner.Parent = logoBadge
+
+            local badgeStroke = Instance.new("UIStroke")
+            badgeStroke.Color = Color3.fromRGB(50, 55, 68)
+            badgeStroke.Thickness = 1
+            badgeStroke.Parent = logoBadge
+
+            local badgeText = Instance.new("TextLabel")
+            badgeText.Name = "BadgeText"
+            badgeText.Size = UDim2.new(1, 0, 1, 0)
+            badgeText.Text = "CH"
+            badgeText.Font = Enum.Font.GothamBlack
+            badgeText.TextSize = 13
+            badgeText.TextColor3 = Color3.fromRGB(0, 180, 255)
+            badgeText.BackgroundTransparency = 1
+            badgeText.Parent = logoBadge
+
+            disableBtn.MouseButton1Click:Connect(function()
                 ProgAPI.SetBlackScreen(false)
             end)
 
-            local hint = Instance.new("TextLabel")
-            hint.Position = UDim2.new(0, 22, 0, 514)
-            hint.Size = UDim2.new(1, -44, 0, 18)
-            hint.BackgroundTransparency = 1
-            hint.Text = "Click button above or press RightControl to restore"
-            hint.TextColor3 = Color3.fromRGB(115, 130, 155)
-            hint.TextSize = 11
-            hint.Font = Enum.Font.Gotham
-            hint.TextXAlignment = Enum.TextXAlignment.Center
-            hint.Parent = card
+            _G.__ProgAPI_BlackScreenLabels = blackScreenRowLabels
 
             pcall(function()
-                blackScreenGui.Parent = pg
+                blackScreenGui.Parent = parentTarget
             end)
         end
 
@@ -5644,24 +5747,20 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             while _G.__ProgAPI_IsBlackScreenRunning and blackScreenGui and blackScreenGui.Enabled and blackScreenGui.Parent do
                 -- 1. Continuously enforce 3D rendering disabled while black screen is active
                 pcall(function()
-                    local RunService = game:GetService("RunService")
                     if RunService and RunService.Set3dRenderingEnabled then
                         RunService:Set3dRenderingEnabled(false)
                     end
                 end)
 
-                -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered in PlayerGui
+                -- 2. Ensure blackScreenGui exists, is enabled, and is top-layered
                 pcall(function()
                     if blackScreenGui then
                         blackScreenGui.Enabled = true
                         blackScreenGui.DisplayOrder = 2147483647
-                        if pg and blackScreenGui.Parent ~= pg then
-                            blackScreenGui.Parent = pg
-                        end
                     end
                 end)
 
-                -- 3. Continuously suppress all other game ScreenGuis and popups
+                -- 3. Continuously suppress game ScreenGuis in PlayerGui
                 pcall(function()
                     if pg then
                         for _, ch in ipairs(pg:GetChildren()) do
@@ -5672,8 +5771,10 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                                 pcall(function() ch.Enabled = false end)
                             end
                         end
-                        local trading = pg:FindFirstChild("Trading")
-                        if trading and trading.Enabled then trading.Enabled = false end
+                        if (_G.State and _G.State.AutoAcceptTrade == false) then
+                            local trading = pg:FindFirstChild("Trading")
+                            if trading and trading.Enabled then trading.Enabled = false end
+                        end
                         local msg = pg:FindFirstChild("Message")
                         if msg and msg.Enabled then msg.Enabled = false end
                         local prompt = pg:FindFirstChild("InputPrompt")
@@ -5682,7 +5783,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
                 end)
 
                 pcall(updateBlackScreenTelemetry)
-                task.wait(0.5)
+                task.wait(0.2)
             end
         end)
         _G.__ProgAPI_BlackScreenRefreshTask = blackScreenRefreshTask
@@ -5734,6 +5835,14 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         pcall(function()
+            local parentTarget = (gethui and pcall(gethui) and gethui()) or game:GetService("CoreGui") or pg
+            if parentTarget then
+                for _, ch in ipairs(parentTarget:GetChildren()) do
+                    if ch.Name == "ClickerHub_BlackScreen" then
+                        ch:Destroy()
+                    end
+                end
+            end
             if pg then
                 for _, ch in ipairs(pg:GetChildren()) do
                     if ch.Name == "ClickerHub_BlackScreen" then
