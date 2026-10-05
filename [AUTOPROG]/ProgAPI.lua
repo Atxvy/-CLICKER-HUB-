@@ -3387,7 +3387,7 @@ function ProgAPI.GetSecretQuestInfo()
     local hatchDone = hatchProg >= hatchReq
 
     local allQuestsDone = clickDone and featherDone and goldenDone and hatchDone
-    local isComplete = isDoorUnlocked or (isClaimed and allQuestsDone)
+    local isComplete = isDoorUnlocked
 
     local currentStep = "Completed"
     if isDoorUnlocked then
@@ -3409,6 +3409,7 @@ function ProgAPI.GetSecretQuestInfo()
     return {
         IsClaimed = isClaimed,
         IsDoorUnlocked = isDoorUnlocked,
+        DoorUnlocked = isDoorUnlocked,
         AllQuestsDone = allQuestsDone,
         IsComplete = isComplete,
         CurrentStep = currentStep,
@@ -3421,9 +3422,7 @@ end
 
 function ProgAPI.IsSecretQuestComplete(): boolean
     local stats = Stats.Local(true) or {}
-    if stats.DominusAreaUnlocked == true then return true end
-    local info = ProgAPI.GetSecretQuestInfo()
-    return info.IsDoorUnlocked or (info.IsClaimed and info.AllQuestsDone)
+    return stats.DominusAreaUnlocked == true
 end
 
 --==============================================================================
@@ -3634,6 +3633,10 @@ function ProgAPI.IsPhase5(): boolean
 end
 
 function ProgAPI.TeleportToSpawnDoor(): boolean
+    if ProgAPI.IsInMinigame and ProgAPI.IsInMinigame() then
+        ProgAPI.ExitMinigame()
+        task.wait(0.3)
+    end
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
     if curWorld ~= "Overworld" then
@@ -3738,19 +3741,24 @@ end
 function ProgAPI.UnlockSecretDoor(): (boolean, string)
     if not Channels.Quest then return false, "No Quest channel" end
 
+    -- 1. Ensure character is physically at Spawn Door in Overworld (exiting any minigame)
     ProgAPI.TeleportToSpawnDoor()
-    task.wait(0.2)
+    task.wait(0.3)
 
+    -- 2. Claim all 4 secret quest objectives
     for _, qId in ipairs({"secret_click_1", "secret_feathers", "secret_craft_golden", "secret_hatch_eggs"}) do
         pcall(function()
             Channels.Quest:InvokeServer("Claim", qId, 1)
         end)
     end
+    task.wait(0.15)
 
+    -- 3. Invoke questline unlock remote to trigger door unlock
     local ok, res, msg = pcall(function()
         return Channels.Quest:InvokeServer("ClaimSecretAreaQuestline")
     end)
 
+    -- 4. Trigger proximity prompt on door interact if available
     local door = workspace:FindFirstChild("_MAP")
         and workspace._MAP:FindFirstChild("Islands")
         and workspace._MAP.Islands:FindFirstChild("Spawn")
@@ -3762,13 +3770,20 @@ function ProgAPI.UnlockSecretDoor(): (boolean, string)
         pcall(function() fireproximityprompt(prompt) end)
     end
 
-    -- Enter Dominus Area minigame
-    ProgAPI.EnterDominusArea()
+    task.wait(0.5)
 
-    if ok and (res == true or res == "Unlocked" or res == "Claimed") then
-        return true, tostring(msg or "Door Unlocked & Entered Dominus Area")
+    -- 5. Verify if door is confirmed unlocked in player stats or server response
+    local stats = Stats.Local(true) or {}
+    local isUnlocked = (stats.DominusAreaUnlocked == true) or (ok and (res == true or res == "Unlocked" or msg == "Unlocked"))
+
+    if isUnlocked then
+        task.wait(0.5)
+        -- Door is unlocked! Now safely enter Dominus Area
+        ProgAPI.EnterDominusArea()
+        return true, "Spawn Door Unlocked! Entering Dominus Area."
     end
-    return true, tostring(msg or res or "Door Handled")
+
+    return false, tostring(msg or res or "Unlocking Spawn Door...")
 end
 
 function ProgAPI.StepSecretQuest(): (boolean, string)
@@ -3824,7 +3839,7 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
     -- 6. All 4 quests are done, but door not unlocked yet: TP to door & unlock!
     if not questInfo.IsDoorUnlocked then
         local okDoor, msgDoor = ProgAPI.UnlockSecretDoor()
-        return okDoor, "[Phase 2: ???] Unlocking Door & Entering: " .. tostring(msgDoor)
+        return okDoor, "[Phase 2: ???] " .. tostring(msgDoor)
     end
 
     return true, "Dominus Secret Area Unlocked! Ready for Phase 3 Skill Tree."
@@ -5005,5 +5020,94 @@ pcall(function()
         end)
     end
 end)
+
+--==============================================================================
+-- THE BANK UTILITY ENGINE
+-- Bypasses FFlags restriction and allows viewing, depositing, and withdrawing
+-- from The Bank without client script auto-closing.
+--==============================================================================
+
+function ProgAPI.IsBankOpen(): boolean
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    local bankGui = pg and pg:FindFirstChild("Bank")
+    local frame = bankGui and bankGui:FindFirstChild("Frame")
+    return bankGui ~= nil and bankGui.Enabled == true and frame ~= nil and frame.Visible == true
+end
+
+function ProgAPI.OpenBank(): (boolean, string)
+    local ClientFolder = Client or (Library and Library:FindFirstChild("Client"))
+    if not ClientFolder then return false, "Client library not found" end
+
+    -- 1. Enable FFlags for Banks so the client script doesn't force-close it
+    pcall(function()
+        local FFlags = require(ClientFolder:WaitForChild("FFlags", 5))
+        if FFlags and debug and debug.getupvalues then
+            local upvals = debug.getupvalues(FFlags.Get)
+            if upvals and upvals[1] and upvals[1]["Banks"] then
+                upvals[1]["Banks"].Value = true
+                if upvals[1]["BanksUpgrading"] then upvals[1]["BanksUpgrading"].Value = true end
+                if upvals[1]["BanksWithdrawingOthersTokens"] then upvals[1]["BanksWithdrawingOthersTokens"].Value = true end
+            end
+            if FFlags.Changed and FFlags.Changed.Fire then
+                pcall(function() FFlags.Changed:Fire("Banks") end)
+            end
+        end
+    end)
+
+    -- 2. Open via GUI module
+    pcall(function()
+        local GUI = require(ClientFolder:WaitForChild("GUI", 5))
+        if GUI and GUI.Open then
+            GUI.Open("Bank")
+        end
+    end)
+
+    -- 3. Ensure ScreenGui is enabled and Frame is visible
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    local bankGui = pg and pg:FindFirstChild("Bank")
+    if bankGui then
+        bankGui.Enabled = true
+        local frame = bankGui:FindFirstChild("Frame")
+        if frame then
+            frame.Visible = true
+        end
+        return true, "The Bank opened successfully!"
+    end
+
+    return false, "Bank ScreenGui not found in PlayerGui"
+end
+
+function ProgAPI.CloseBank(): (boolean, string)
+    pcall(function()
+        local ClientFolder = Client or (Library and Library:FindFirstChild("Client"))
+        if ClientFolder then
+            local GUI = require(ClientFolder:FindFirstChild("GUI"))
+            if GUI and GUI.Close then
+                GUI.Close("Bank")
+            end
+        end
+    end)
+    local lp = LocalPlayer or game:GetService("Players").LocalPlayer
+    local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
+    local bankGui = pg and pg:FindFirstChild("Bank")
+    if bankGui then
+        bankGui.Enabled = false
+        local frame = bankGui:FindFirstChild("Frame")
+        if frame then
+            frame.Visible = false
+        end
+    end
+    return true, "Bank closed."
+end
+
+function ProgAPI.ToggleBank(): (boolean, string)
+    if ProgAPI.IsBankOpen() then
+        return ProgAPI.CloseBank()
+    else
+        return ProgAPI.OpenBank()
+    end
+end
 
 return ProgAPI
