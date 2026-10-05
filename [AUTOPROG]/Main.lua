@@ -467,14 +467,96 @@ Phase3Tab:AddToggle("AutoPrestigeToggle_P3", {
 })
 
 --==============================================================================
--- 5. PHASE 4: MATRIX MYTHICS TAB
+-- 5. PHASE 4: AUTO INDEX PETS TAB
 --==============================================================================
-local Phase4Tab = Window:AddTab({ Title = "Phase 4: Matrix Mythics", Icon = "🧬" })
+local Phase4Tab = Window:AddTab({ Title = "Phase 4: Auto Index", Icon = "📖" })
 
-Phase4Tab:AddSection("PHASE 4 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase4Tab:AddSection("PHASE 4 SETTINGS (AUTO INDEX PETS PIPELINE)")
 Phase4Tab:AddParagraph({
-    Title = "Phase 4 Strategy",
-    Content = "Activates automatically after Phase 3 (Skill Tree 39/39 & 13/13) is 100% complete!\n" ..
+    Title = "Auto Index Strategy",
+    Content = "Activates automatically after Phase 3 (Skill Tree 39/39 & 13/13)!\n" ..
+              "• Automatically cycles through every egg starting from World 1 Spawn (BasicEgg) upwards\n" ..
+              "• Hatches and indexes missing Normal & Golden pets (and Rainbow if enabled)\n" ..
+              "• Ignore Rare Filter: Skips ultra-rare drops (Mythic, Secret, Divine) so bot never gets stuck on 1 egg!\n" ..
+              "• Keep Rare Guarantee: If any Secret/Mythic drops by luck, it is 100% saved in inventory and NEVER deleted!\n" ..
+              "• Auto Delete Fodder: Deletes common/rare/epic indexed pets once registered to keep bag empty\n" ..
+              "• Advances to next egg once all non-ignored pets in the current egg are fully indexed!"
+})
+
+local Phase4CurrentEggCard = Phase4Tab:AddParagraph({
+    Title = "Current Egg Progress",
+    Content = "Evaluating...",
+    TitleSize = 16,
+    BodySize = 13,
+})
+_G.ClickerSimulatorPhase4CurrentEggCard = Phase4CurrentEggCard
+
+local Phase4IndexStatsCard = Phase4Tab:AddParagraph({
+    Title = "Total Index Telemetry",
+    Content = "Evaluating...",
+    TitleSize = 16,
+    BodySize = 13,
+})
+_G.ClickerSimulatorPhase4IndexStatsCard = Phase4IndexStatsCard
+
+Phase4Tab:AddToggle("AutoIndexPetsToggle", {
+    Title = "Enable Phase 4: Auto Index Pets",
+    Description = "Automatically visits all progression eggs and unlocks missing pet index entries",
+    Default = State.AutoIndexPets ~= false,
+    Callback = function(val) State.AutoIndexPets = val; Configs.Set("AutoIndexPets", val) end
+})
+
+Phase4Tab:AddToggle("IndexIgnoreMythicToggle", {
+    Title = "Ignore Mythic, Secret & Higher Ups (Egg Skip)",
+    Description = "Skips ultra-rare drops when checking if an egg is complete. If hatched by luck, they are ALWAYS kept!",
+    Default = State.IndexIgnoreMythicAndAbove ~= false,
+    Callback = function(val) State.IndexIgnoreMythicAndAbove = val; Configs.Set("IndexIgnoreMythicAndAbove", val) end
+})
+
+Phase4Tab:AddToggle("IndexUnlockNormalToggle", {
+    Title = "Unlock Normal Index",
+    Description = "Hatches until all standard pets for the egg have their Normal index registered",
+    Default = State.IndexUnlockNormal ~= false,
+    Callback = function(val) State.IndexUnlockNormal = val; Configs.Set("IndexUnlockNormal", val) end
+})
+
+Phase4Tab:AddToggle("IndexUnlockGoldToggle", {
+    Title = "Unlock Gold Index",
+    Description = "Collects normal copies, auto-crafts Golden pets, and registers Golden index",
+    Default = State.IndexUnlockGold ~= false,
+    Callback = function(val) State.IndexUnlockGold = val; Configs.Set("IndexUnlockGold", val) end
+})
+
+Phase4Tab:AddToggle("IndexUnlockRainbowToggle", {
+    Title = "Unlock Rainbow Index",
+    Description = "Collects gold copies, crafts Rainbow pets, and registers Rainbow index (takes longer)",
+    Default = State.IndexUnlockRainbow == true,
+    Callback = function(val) State.IndexUnlockRainbow = val; Configs.Set("IndexUnlockRainbow", val) end
+})
+
+Phase4Tab:AddToggle("IndexUnlockDarkMatterToggle", {
+    Title = "Unlock Dark Matter Index",
+    Description = "Converts to Dark Matter to register Dark Matter index if available in game",
+    Default = State.IndexUnlockDarkMatter == true,
+    Callback = function(val) State.IndexUnlockDarkMatter = val; Configs.Set("IndexUnlockDarkMatter", val) end
+})
+
+Phase4Tab:AddToggle("IndexAutoDeleteFodderToggle", {
+    Title = "Auto Delete Indexed Fodder",
+    Description = "Deletes Common, Rare, Epic, and Legendary pets once their index is acquired (Protects Mythics/Secrets!)",
+    Default = State.IndexAutoDeleteFodder ~= false,
+    Callback = function(val) State.IndexAutoDeleteFodder = val; Configs.Set("IndexAutoDeleteFodder", val) end
+})
+
+--==============================================================================
+-- 6. PHASE 5: MATRIX MYTHICS TAB
+--==============================================================================
+local Phase5Tab = Window:AddTab({ Title = "Phase 5: Matrix Mythics", Icon = "🧬" })
+
+Phase5Tab:AddSection("PHASE 5 SETTINGS (ENDGAME MATRIX MYTHIC PIPELINE)")
+Phase5Tab:AddParagraph({
+    Title = "Phase 5 Strategy",
+    Content = "Activates automatically after Phase 4 (Auto Index) is complete (or disabled)!\n" ..
               "• Auto Open Matrix Egg (highest endgame egg in Tech World)\n" ..
               "• Rebirth at Max Milestone Only (preserves clicks for Matrix Egg)\n" ..
               "• Mythic Pet Filter: Deletes all non-mythic pets (Common/Rare/Epic/Legendary) and weak pets\n" ..
@@ -482,49 +564,49 @@ Phase4Tab:AddParagraph({
               "• Equips best pets as Rainbow Mythics are created, replacing old pets until team is 100% Rainbow Mythics!"
 })
 
-Phase4Tab:AddToggle("AutoMatrixEggToggle_P4", {
+Phase5Tab:AddToggle("AutoMatrixEggToggle_P5", {
     Title = "Auto Open Matrix Egg",
     Description = "Continuously hatches Matrix Egg on Matrix Island in Tech World",
     Default = State.AutoMatrixEgg,
     Callback = function(val) State.AutoMatrixEgg = val; Configs.Set("AutoMatrixEgg", val) end
 })
 
-Phase4Tab:AddToggle("AutoMythicFilterToggle_P4", {
+Phase5Tab:AddToggle("AutoMythicFilterToggle_P5", {
     Title = "Keep Mythic & Above (Delete Non-Mythic)",
     Description = "Strictly keeps Mythic, Secret, Mega, Divine, and Exclusive pets; deletes Common, Rare, Epic, Legendary",
     Default = State.AutoMythicFilter,
     Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
 })
 
-Phase4Tab:AddToggle("AutoCraftMythicsToggle_P4", {
+Phase5Tab:AddToggle("AutoCraftMythicsToggle_P5", {
     Title = "Auto Craft Golden & Rainbow Mythics",
     Description = "Automatically crafts Golden and Rainbow versions of Mythic pets",
     Default = State.AutoCraftMythics,
     Callback = function(val) State.AutoCraftMythics = val; Configs.Set("AutoCraftMythics", val) end
 })
 
-Phase4Tab:AddToggle("AutoReplaceTeamToggle_P4", {
+Phase5Tab:AddToggle("AutoReplaceTeamToggle_P5", {
     Title = "Auto Replace Team with Rainbow Mythics",
     Description = "Equips best pets as Rainbow Mythics are forged, replacing weaker old pets",
     Default = State.AutoReplaceTeam,
     Callback = function(val) State.AutoReplaceTeam = val; Configs.Set("AutoReplaceTeam", val) end
 })
 
-Phase4Tab:AddToggle("PauseRebirthToggle_P4", {
+Phase5Tab:AddToggle("PauseRebirthToggle_P5", {
     Title = "Rebirth at Max Milestone Only",
     Description = "Waits until no more Next Rebirth button, then rebirths to the max affordable milestone",
-    Default = (State.PauseRebirthPhase4 ~= nil) and State.PauseRebirthPhase4 or State.PauseRebirthPhase3,
-    Callback = function(val) State.PauseRebirthPhase4 = val; State.PauseRebirthPhase3 = val; Configs.Set("PauseRebirthPhase4", val) end
+    Default = (State.PauseRebirthPhase5 ~= nil) and State.PauseRebirthPhase5 or (State.PauseRebirthPhase4 ~= nil and State.PauseRebirthPhase4 or State.PauseRebirthPhase3),
+    Callback = function(val) State.PauseRebirthPhase5 = val; Configs.Set("PauseRebirthPhase5", val) end
 })
 
-Phase4Tab:AddToggle("AutoRainbowClaimToggle_P4", {
+Phase5Tab:AddToggle("AutoRainbowClaimToggle_P5", {
     Title = "Auto Claim Rainbow Pets",
     Description = "Automatically collects finished pets from the Rainbow Machine",
     Default = State.AutoRainbowClaim,
     Callback = function(val) State.AutoRainbowClaim = val; Configs.Set("AutoRainbowClaim", val) end
 })
 
-Phase4Tab:AddToggle("AutoMagmaSkinToggle_P4", {
+Phase5Tab:AddToggle("AutoMagmaSkinToggle_P5", {
     Title = "10 Qi Rebirth Goal & Magma Click Skin",
     Description = "Monitors 10 Qi Rebirth milestone and equips Magma Click Skin (+4 Egg Hatch, +20% Speed)",
     Default = State.AutoMagmaSkin,
@@ -739,13 +821,27 @@ end)
 task.spawn(function()
     task.wait(1.8)
     pcall(function()
-        if AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4() then
+        if AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5() then
             local pData = AutoProgAPI.GetPlayerData()
             local curWorld = pData.CurrentWorld or "Overworld"
             if curWorld ~= "Techworld" and curWorld ~= "Space" then
                 AutoProgAPI.TeleportToWorld("Techworld")
                 task.wait(0.5)
                 AutoProgAPI.TeleportToEgg("MatrixEgg")
+            end
+            return
+        end
+
+        if AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4() then
+            local nextEgg = AutoProgAPI.GetNextUnindexedEgg and AutoProgAPI.GetNextUnindexedEgg(
+                State.IndexIgnoreMythicAndAbove ~= false,
+                State.IndexUnlockNormal ~= false,
+                State.IndexUnlockGold ~= false,
+                State.IndexUnlockRainbow == true,
+                State.IndexUnlockDarkMatter == true
+            )
+            if nextEgg then
+                AutoProgAPI.TeleportToEgg(nextEgg.name)
             end
             return
         end
@@ -809,8 +905,8 @@ table.insert(threads, task.spawn(function()
 end))
 
 -- THREAD 2: DEDICATED CONTINUOUS REBIRTH ENGINE
--- Phase 1, 2, 3: Rebirth as long as affordable (RebirthBestAffordable)
--- Phase 4: Max Rebirth only (RebirthMaxTarget)
+-- Phase 1, 2, 3, 4: Rebirth as long as affordable (RebirthBestAffordable)
+-- Phase 5: Max Rebirth only (RebirthMaxTarget)
 table.insert(threads, task.spawn(function()
     local lastRebirthAttempt = 0
     while isRunning do
@@ -821,12 +917,12 @@ table.insert(threads, task.spawn(function()
         if now - lastRebirthAttempt > 0.25 then
             lastRebirthAttempt = now
 
-            local isP4 = AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4()
-            if isP4 then
-                -- Phase 4: Rebirth at MAX milestone only
+            local isP5 = AutoProgAPI.IsPhase5 and AutoProgAPI.IsPhase5()
+            if isP5 then
+                -- Phase 5: Rebirth at MAX milestone only
                 pcall(AutoProgAPI.RebirthMaxTarget)
             else
-                -- Phase 1, Phase 2, Phase 3: Rebirth as long as they can afford it
+                -- Phase 1, 2, 3, 4: Rebirth as long as they can afford it
                 pcall(AutoProgAPI.RebirthBestAffordable)
             end
         end
@@ -1189,23 +1285,61 @@ table.insert(threads, task.spawn(function()
                 -- Thread 13 handles breakables and skill tree purchasing.
 
             -- =====================================================================
-            -- PHASE 4: ENDGAME MATRIX MYTHIC PIPELINE
-            -- Condition: All 17 islands unlocked, Secret Quest done, AND Skill Tree 100% maxed (39/39 Coins & 13/13 Tech)!
-            -- Strategy:
-            -- 1. Auto Open Matrix Egg (highest endgame egg in Tech World)
-            -- 2. Max Rebirth Only (Thread 2 fires at Max milestone button)
-            -- 3. Mythic Only Filter: Delete all non-mythic pets & old weak pets!
-            -- 4. Auto Craft Golden Mythics & Rainbow Mythics
-            -- 5. Gradually replaces equipped team until 100% Rainbow Mythics!
+            -- PHASE 4: AUTO INDEX PETS PIPELINE
+            -- Condition: All 17 islands unlocked, Secret Quest done, Skill Tree done (39/39),
+            -- and AutoIndexPets enabled and NOT all progression eggs indexed!
+            -- =====================================================================
+            elseif State.AutoIndexPets and not (AutoProgAPI.IsIndexComplete and AutoProgAPI.IsIndexComplete(
+                State.IndexIgnoreMythicAndAbove ~= false,
+                State.IndexUnlockNormal ~= false,
+                State.IndexUnlockGold ~= false,
+                State.IndexUnlockRainbow == true,
+                State.IndexUnlockDarkMatter == true
+            )) then
+                currentPhaseText = "📖 PHASE 4: AUTO INDEX PETS"
+                local nextEgg, eggProg = AutoProgAPI.GetNextUnindexedEgg(
+                    State.IndexIgnoreMythicAndAbove ~= false,
+                    State.IndexUnlockNormal ~= false,
+                    State.IndexUnlockGold ~= false,
+                    State.IndexUnlockRainbow == true,
+                    State.IndexUnlockDarkMatter == true
+                )
+
+                local p4Delay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(nextEgg and nextEgg.name)) or 0.35
+                if not isEggHatching and (now - lastEggHatchTick >= p4Delay) then
+                    lastEggHatchTick = now
+                    isEggHatching = true
+                    lastEggHatchStartTick = now
+                    task.spawn(function()
+                        local okStep, stepIsDone, stepMsg = pcall(function()
+                            return AutoProgAPI.StepAutoIndex(
+                                State.IndexIgnoreMythicAndAbove ~= false,
+                                State.IndexUnlockNormal ~= false,
+                                State.IndexUnlockGold ~= false,
+                                State.IndexUnlockRainbow == true,
+                                State.IndexUnlockDarkMatter == true
+                            )
+                        end)
+                        if okStep and stepMsg and type(stepMsg) == "string" then
+                            currentActivity = stepMsg
+                        end
+                        isEggHatching = false
+                    end)
+                end
+
+            -- =====================================================================
+            -- PHASE 5: ENDGAME MATRIX MYTHIC PIPELINE
+            -- Condition: All 17 islands unlocked, Secret Quest done, Skill Tree done (39/39),
+            -- and Phase 4 complete (or disabled)!
             -- =====================================================================
             else
-                currentPhaseText = "🧬 PHASE 4: MATRIX MYTHIC PIPELINE"
+                currentPhaseText = "🧬 PHASE 5: MATRIX MYTHIC PIPELINE"
 
                 local curWorld = pData.CurrentWorld or "Overworld"
                 if AutoProgAPI.IsInMinigame() or (curWorld ~= "Techworld" and curWorld ~= "Space") then
                     AutoProgAPI.ExitMinigame()
                     task.wait(0.3)
-                    currentActivity = "[Phase 4: Matrix] Teleporting to Tech World..."
+                    currentActivity = "[Phase 5: Matrix] Teleporting to Tech World..."
                     AutoProgAPI.TeleportToWorld("Techworld")
                     task.wait(0.5)
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
@@ -1215,7 +1349,7 @@ table.insert(threads, task.spawn(function()
 
                 local curIsland = pData.CurrentIsland or ""
                 if curIsland ~= "Matrix" then
-                    currentActivity = "[Phase 4: Matrix] Teleporting to Matrix Island..."
+                    currentActivity = "[Phase 5: Matrix] Teleporting to Matrix Island..."
                     AutoProgAPI.TeleportToEgg("MatrixEgg")
                     task.wait(0.5)
                     return
@@ -1237,14 +1371,14 @@ table.insert(threads, task.spawn(function()
                         hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         task.wait(0.08)
                     elseif dist > 20 then
-                        currentActivity = "[Phase 4: Matrix] Teleporting to Matrix Egg in Tech World..."
+                        currentActivity = "[Phase 5: Matrix] Teleporting to Matrix Egg in Tech World..."
                         AutoProgAPI.TeleportToEgg("MatrixEgg")
                         task.wait(0.3)
                     end
 
                     if pData.Clicks >= matrixCost then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount("MatrixEgg")
-                        currentActivity = string.format("[Phase 4: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
+                        currentActivity = string.format("[Phase 5: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
                         isEggHatching = true
                         lastEggHatchStartTick = now
                         task.spawn(function()
@@ -1279,7 +1413,7 @@ table.insert(threads, task.spawn(function()
                         if dist > 16 and targetPart and hrp then
                             hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
                         end
-                        currentActivity = string.format("[Phase 4: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
+                        currentActivity = string.format("[Phase 5: Matrix] Speedrunning Clicks for Matrix Egg (%s / %s)", AutoProgAPI.FormatNumber(pData.Clicks), "25.00Sp")
                     end
                 end
 
@@ -1296,7 +1430,7 @@ table.insert(threads, task.spawn(function()
                 end
 
                 if isAllRainbowMythic then
-                    currentActivity = string.format("🌟 [Phase 4: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
+                    currentActivity = string.format("🌟 [Phase 5: Complete] Team 100%% Rainbow Mythic (%d/%d)!", mythicCount, totalSlots)
                 end
 
                 -- 10 Qi Rebirth Goal & Magma Click Skin
@@ -1367,6 +1501,9 @@ local function updateTelemetry()
         local qInfo = ProgAPI.GetSecretQuestInfo and ProgAPI.GetSecretQuestInfo()
         local questStr = qInfo and (qInfo.IsDoorUnlocked and "🔓 Dominus Door Unlocked!" or tostring(qInfo.CurrentStep)) or "N/A"
 
+        local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
+        local idxStr = totalStats and string.format("%d Pets (Norm: %d, Gold: %d)", totalStats.TotalIndexed or 0, totalStats.IndexedNormal or 0, totalStats.IndexedGolden or 0) or "N/A"
+
         -- 2. Statistical Progression Telemetry Card
         local cardTitle = "Progression Telemetry"
         local cardContent = string.format(
@@ -1377,6 +1514,7 @@ local function updateTelemetry()
             "🐾 <b>Pet Team:</b> %s\n" ..
             "🌳 <b>Skill Tree:</b> %s\n" ..
             "🗝️ <b>??? Quest:</b> %s\n" ..
+            "📖 <b>Auto Index:</b> %s\n" ..
             "🔥 <b>Magma Skin:</b> %s",
             ProgAPI.FormatNumber(pData.Clicks or 0),
             ProgAPI.FormatNumber(pData.Rebirths or 0),
@@ -1388,6 +1526,7 @@ local function updateTelemetry()
             tostring(teamStr),
             tostring(stStr),
             tostring(questStr),
+            tostring(idxStr),
             tostring(magmaStr)
         )
 
@@ -1474,6 +1613,99 @@ local function updateTelemetry()
             end
             if Phase3ProgressCard.BodyLabel then
                 pcall(function() Phase3ProgressCard.BodyLabel.Text = stContent end)
+            end
+        end
+
+        if Phase4CurrentEggCard or Phase4IndexStatsCard then
+            local nextEgg, eggProg = ProgAPI.GetNextUnindexedEgg(
+                State.IndexIgnoreMythicAndAbove ~= false,
+                State.IndexUnlockNormal ~= false,
+                State.IndexUnlockGold ~= false,
+                State.IndexUnlockRainbow == true,
+                State.IndexUnlockDarkMatter == true
+            )
+
+            if Phase4CurrentEggCard then
+                local eggContent = ""
+                if eggProg and nextEgg then
+                    local missingList = {}
+                    for _, m in ipairs(eggProg.MissingPets or {}) do
+                        table.insert(missingList, string.format("• <b>%s</b> (%s) - %s", m.Name, m.Rarity, table.concat(m.MissingVariants, ", ")))
+                    end
+                    local missingDetails = #missingList > 0 and table.concat(missingList, "\n") or "None"
+
+                    local skippedStr = ""
+                    if eggProg.SkippedRareCount and eggProg.SkippedRareCount > 0 then
+                        local sNames = {}
+                        for _, s in ipairs(eggProg.SkippedRares or {}) do
+                            table.insert(sNames, string.format("%s (%s)", s.Name, s.Rarity))
+                        end
+                        skippedStr = string.format("\n⏩ <b>Ignored Rares (Skipped):</b> %s", table.concat(sNames, ", "))
+                    end
+
+                    eggContent = string.format(
+                        "🥚 <b>Target Egg:</b> %s\n" ..
+                        "🏝️ <b>Island / World:</b> %s (%s)\n" ..
+                        "💰 <b>Cost:</b> %s Clicks\n" ..
+                        "📊 <b>Egg Progress:</b> %d / %d pets indexed (%d%%)%s\n\n" ..
+                        "🔍 <b>Missing Pets to Index:</b>\n%s",
+                        tostring(eggProg.DisplayName or nextEgg.name),
+                        tostring(nextEgg.island or "Spawn"),
+                        tostring(nextEgg.world or "Overworld"),
+                        ProgAPI.FormatNumber(nextEgg.cost or 0),
+                        eggProg.CompletedPetsCount or 0,
+                        eggProg.TargetPetsCount or 0,
+                        (eggProg.TargetPetsCount and eggProg.TargetPetsCount > 0) and math.floor(((eggProg.CompletedPetsCount or 0) / eggProg.TargetPetsCount) * 100) or 100,
+                        skippedStr,
+                        missingDetails
+                    )
+                else
+                    eggContent = "🎉 <b>ALL PROGRESSION EGGS INDEXED!</b>\nAll eligible Normal, Gold, and Rainbow variants are unlocked in the index!"
+                end
+
+                Phase4CurrentEggCard:Set({
+                    Title = "Current Egg Index Progress",
+                    Content = eggContent
+                })
+                if Phase4CurrentEggCard.TitleLabel then
+                    pcall(function() Phase4CurrentEggCard.TitleLabel.Text = "Current Egg Index Progress" end)
+                end
+                if Phase4CurrentEggCard.BodyLabel then
+                    pcall(function() Phase4CurrentEggCard.BodyLabel.Text = eggContent end)
+                end
+            end
+
+            if Phase4IndexStatsCard and totalStats then
+                local totalUnique = totalStats.ProgressionUniquePets or totalStats.TotalUniquePets or 269
+                local normPct = math.clamp(math.floor(((totalStats.IndexedNormal or 0) / math.max(1, totalUnique)) * 100), 0, 100)
+                local goldPct = math.clamp(math.floor(((totalStats.IndexedGolden or 0) / math.max(1, totalUnique)) * 100), 0, 100)
+                local rainPct = math.clamp(math.floor(((totalStats.IndexedRainbow or 0) / math.max(1, totalUnique)) * 100), 0, 100)
+
+                local statsContent = string.format(
+                    "📖 <b>Total Pets Indexed:</b> %s\n\n" ..
+                    "⚪ <b>Normal:</b> %d / %d (%d%%)\n" ..
+                    "🟡 <b>Golden:</b> %d / %d (%d%%)\n" ..
+                    "🌈 <b>Rainbow:</b> %d / %d (%d%%)\n" ..
+                    "✨ <b>Shiny:</b> %d\n" ..
+                    "🌌 <b>Total Game Pets:</b> %d entries in index",
+                    ProgAPI.FormatNumber(totalStats.TotalIndexed or 0),
+                    totalStats.IndexedNormal or 0, totalUnique, normPct,
+                    totalStats.IndexedGolden or 0, totalUnique, goldPct,
+                    totalStats.IndexedRainbow or 0, totalUnique, rainPct,
+                    totalStats.IndexedShiny or 0,
+                    totalStats.TotalUniquePets or 0
+                )
+
+                Phase4IndexStatsCard:Set({
+                    Title = "Total Index Telemetry",
+                    Content = statsContent
+                })
+                if Phase4IndexStatsCard.TitleLabel then
+                    pcall(function() Phase4IndexStatsCard.TitleLabel.Text = "Total Index Telemetry" end)
+                end
+                if Phase4IndexStatsCard.BodyLabel then
+                    pcall(function() Phase4IndexStatsCard.BodyLabel.Text = statsContent end)
+                end
             end
         end
 
