@@ -1593,17 +1593,27 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
 
-    -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn, UNLESS doing Phase 3 secret quest!
-    local isPhase3Quest = false
+    -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn, UNLESS doing Phase 2 secret quest or Phase 4 auto index!
+    local isPhase2Quest = false
     pcall(function()
         if ProgAPI.GetSecretQuestInfo then
             local q = ProgAPI.GetSecretQuestInfo()
             if not q.AllQuestsDone or not q.IsDoorUnlocked then
-                isPhase3Quest = true
+                isPhase2Quest = true
             end
         end
     end)
-    if eggName == "BasicEgg" and not isPhase3Quest and (curWorld == "Techworld" or curWorld == "Space" or ProgAPI.AreAllIslandsUnlocked() or ProgAPI.IsIslandUnlocked("Winter")) then
+    local isPhase4AutoIndex = false
+    pcall(function()
+        if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+            isPhase4AutoIndex = true
+        end
+        local st = rawget(_G, "State")
+        if st and st.AutoIndexPets then
+            isPhase4AutoIndex = true
+        end
+    end)
+    if eggName == "BasicEgg" and not isPhase2Quest and not isPhase4AutoIndex and (curWorld == "Techworld" or curWorld == "Space" or ProgAPI.AreAllIslandsUnlocked() or ProgAPI.IsIslandUnlocked("Winter")) then
         return false, "Blocked opening BasicEgg on advanced progression"
     end
 
@@ -1637,6 +1647,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
 
     -- Proactive Inventory Check & Cleaning BEFORE invoking the server!
     local isP4 = ProgAPI.IsPhase4 and ProgAPI.IsPhase4()
+    local isP5 = ProgAPI.IsPhase5 and ProgAPI.IsPhase5()
     local curInv = 0
     for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
     local maxInv = 200
@@ -1650,9 +1661,12 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     end)
 
     if curInv + amount >= maxInv - 2 then
-        if isP4 then
+        if isP5 then
             pcall(ProgAPI.CleanNonMythicPets)
             pcall(ProgAPI.CraftGoldenPets)
+        elseif isP4 then
+            pcall(ProgAPI.CraftGoldenPets)
+            pcall(ProgAPI.CleanIndexedFodder)
         else
             pcall(ProgAPI.CraftGoldenPets)
             local cleaned = ProgAPI.CleanWeakPets(true)
@@ -1675,8 +1689,11 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
 
     -- If server rejected due to full inventory, clean immediately
     if tostring(reason):lower():find("full") or tostring(res):lower():find("full") then
-        if isP4 then
+        if isP5 then
             pcall(ProgAPI.CleanNonMythicPets)
+        elseif isP4 then
+            pcall(ProgAPI.CraftGoldenPets)
+            pcall(ProgAPI.CleanIndexedFodder)
         else
             pcall(ProgAPI.CraftGoldenPets)
             pcall(function() ProgAPI.CleanWeakPets(false) end)
@@ -1966,8 +1983,11 @@ end
 
 -- Weak pet deletion: If highest unlocked island is N, delete all normal pets from world (N - 2) and below
 function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
-    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+    if ProgAPI.IsPhase5 and ProgAPI.IsPhase5() then
         return ProgAPI.CleanNonMythicPets()
+    end
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+        return ProgAPI.CleanIndexedFodder()
     end
     if protectCrafting == nil then protectCrafting = true end
     local stats = Stats.Local(true) or {}
@@ -3588,7 +3608,29 @@ end
 function ProgAPI.IsPhase4(): boolean
     if not ProgAPI.AreAllIslandsUnlocked() then return false end
     if not ProgAPI.IsSecretQuestComplete() then return false end
-    return ProgAPI.IsSkillTreeMaxed()
+    if not ProgAPI.IsSkillTreeMaxed() then return false end
+    local st = rawget(_G, "State")
+    if st and st.AutoIndexPets == false then return false end
+    local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
+    local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
+    local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
+    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or false
+    local unDM = (st and st.IndexUnlockDarkMatter ~= nil) and st.IndexUnlockDarkMatter or false
+    return not ProgAPI.IsIndexComplete(ignMyth, unNorm, unGold, unRain, unDM)
+end
+
+function ProgAPI.IsPhase5(): boolean
+    if not ProgAPI.AreAllIslandsUnlocked() then return false end
+    if not ProgAPI.IsSecretQuestComplete() then return false end
+    if not ProgAPI.IsSkillTreeMaxed() then return false end
+    local st = rawget(_G, "State")
+    if st and st.AutoIndexPets == false then return true end
+    local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
+    local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
+    local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
+    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or false
+    local unDM = (st and st.IndexUnlockDarkMatter ~= nil) and st.IndexUnlockDarkMatter or false
+    return ProgAPI.IsIndexComplete(ignMyth, unNorm, unGold, unRain, unDM)
 end
 
 function ProgAPI.TeleportToSpawnDoor(): boolean
@@ -3789,10 +3831,407 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
 end
 
 --==============================================================================
--- PHASE 4: ENDGAME MATRIX MYTHIC PIPELINE
--- Activates once Phase 3 (??? Secret Quest) is 100% complete!
+-- PHASE 4: AUTO INDEX PETS PIPELINE
+-- Cycles through all progression eggs from World 1 Spawn upwards,
+-- registering missing pets across Normal, Gold, and Rainbow variants,
+-- skips ultra-rare drops (Mythic, Secret, Divine, Exclusive) if enabled,
+-- keeps high-tier pets permanently, and deletes indexed fodder.
 --==============================================================================
--- Phase 4 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
+
+function ProgAPI.GetTotalIndexStats(): {
+    IndexedNormal: number,
+    IndexedGolden: number,
+    IndexedRainbow: number,
+    IndexedShiny: number,
+    TotalIndexed: number,
+    TotalUniquePets: number,
+    ProgressionUniquePets: number
+}
+    local stats = Stats.Local(true) or {}
+    local obtained = stats.ObtainedPets or {}
+
+    local normalCount = 0
+    local goldenCount = 0
+    local rainbowCount = 0
+    local shinyCount = 0
+    local totalIndexed = 0
+
+    for key, val in pairs(obtained) do
+        if val == true then
+            totalIndexed = totalIndexed + 1
+            if key:find("_Normal") then
+                normalCount = normalCount + 1
+            elseif key:find("_Golden") then
+                goldenCount = goldenCount + 1
+            elseif key:find("_Rainbow") then
+                rainbowCount = rainbowCount + 1
+            elseif key:find("_Shiny") then
+                shinyCount = shinyCount + 1
+            end
+        end
+    end
+
+    local totalUnique = 0
+    if Directory and Directory.Pets then
+        for _ in pairs(Directory.Pets) do
+            totalUnique = totalUnique + 1
+        end
+    end
+    if totalUnique == 0 then totalUnique = 401 end
+
+    return {
+        IndexedNormal = normalCount,
+        IndexedGolden = goldenCount,
+        IndexedRainbow = rainbowCount,
+        IndexedShiny = shinyCount,
+        TotalIndexed = totalIndexed,
+        TotalUniquePets = totalUnique,
+        ProgressionUniquePets = 269
+    }
+end
+
+function ProgAPI.IsPetIndexed(petId: string, variant: string): boolean
+    local stats = Stats.Local(true) or {}
+    local obtained = stats.ObtainedPets or {}
+    local key = petId .. "_" .. variant
+    return obtained[key] == true
+end
+
+function ProgAPI.GetEggIndexProgress(
+    eggName: string,
+    ignoreMythicAndAbove: boolean?,
+    unlockNormal: boolean?,
+    unlockGold: boolean?,
+    unlockRainbow: boolean?,
+    unlockDM: boolean?
+)
+    if ignoreMythicAndAbove == nil then ignoreMythicAndAbove = true end
+    if unlockNormal == nil then unlockNormal = true end
+    if unlockGold == nil then unlockGold = true end
+    if unlockRainbow == nil then unlockRainbow = false end
+    if unlockDM == nil then unlockDM = false end
+
+    local stats = Stats.Local(true) or {}
+    local obtained = stats.ObtainedPets or {}
+    local eggDef = nil
+    pcall(function()
+        if Directory and Directory.Eggs then
+            eggDef = Directory.Eggs[eggName]
+        end
+    end)
+
+    if not eggDef or not eggDef.Pets then
+        return {
+            EggName = eggName,
+            DisplayName = eggName,
+            IsComplete = true,
+            TargetPetsCount = 0,
+            CompletedPetsCount = 0,
+            MissingPets = {},
+            SkippedRareCount = 0,
+            SkippedRares = {}
+        }
+    end
+
+    local targetPets = {}
+    local skippedRares = {}
+
+    for _, drop in ipairs(eggDef.Pets) do
+        local petId = drop.Value or drop.Pet or drop.Id
+        if petId then
+            local petDef = nil
+            pcall(function()
+                if Directory and Directory.Pets then
+                    petDef = Directory.Pets[petId]
+                end
+            end)
+            local rarity = (petDef and petDef.Rarity) or "Unknown"
+            local petName = (petDef and (petDef.Name or petDef.Title)) or petId
+
+            local isRare = false
+            if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
+                isRare = Constants.RarityOrder[rarity] >= 5
+            else
+                local rLower = tostring(rarity):lower()
+                isRare = rLower:find("mythic") ~= nil or rLower:find("secret") ~= nil
+                    or rLower:find("divine") ~= nil or rLower:find("exclusive") ~= nil
+                    or rLower:find("mega") ~= nil or rLower:find("special") ~= nil
+            end
+
+            if isRare and ignoreMythicAndAbove then
+                table.insert(skippedRares, {
+                    PetId = petId,
+                    Name = petName,
+                    Rarity = rarity
+                })
+            else
+                table.insert(targetPets, {
+                    PetId = petId,
+                    Name = petName,
+                    Rarity = rarity
+                })
+            end
+        end
+    end
+
+    local missingList = {}
+    local completedCount = 0
+
+    for _, target in ipairs(targetPets) do
+        local pId = target.PetId
+        local missingVariants = {}
+
+        if unlockNormal and obtained[pId .. "_Normal"] ~= true then
+            table.insert(missingVariants, "Normal")
+        end
+        if unlockGold and obtained[pId .. "_Golden"] ~= true then
+            table.insert(missingVariants, "Golden")
+        end
+        if unlockRainbow and obtained[pId .. "_Rainbow"] ~= true then
+            table.insert(missingVariants, "Rainbow")
+        end
+        if unlockDM and obtained[pId .. "_DarkMatter"] ~= true then
+            table.insert(missingVariants, "DarkMatter")
+        end
+
+        if #missingVariants > 0 then
+            table.insert(missingList, {
+                PetId = pId,
+                Name = target.Name,
+                Rarity = target.Rarity,
+                MissingVariants = missingVariants
+            })
+        else
+            completedCount = completedCount + 1
+        end
+    end
+
+    local isDone = (#missingList == 0) and (#targetPets > 0)
+    local dispName = (eggDef.Name or eggDef.DisplayName) or eggName
+
+    return {
+        EggName = eggName,
+        DisplayName = dispName,
+        IsComplete = isDone,
+        TargetPetsCount = #targetPets,
+        CompletedPetsCount = completedCount,
+        MissingPets = missingList,
+        SkippedRareCount = #skippedRares,
+        SkippedRares = skippedRares
+    }
+end
+
+function ProgAPI.GetNextUnindexedEgg(
+    ignoreMythicAndAbove: boolean?,
+    unlockNormal: boolean?,
+    unlockGold: boolean?,
+    unlockRainbow: boolean?,
+    unlockDM: boolean?
+)
+    for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+        local prog = ProgAPI.GetEggIndexProgress(
+            e.name,
+            ignoreMythicAndAbove,
+            unlockNormal,
+            unlockGold,
+            unlockRainbow,
+            unlockDM
+        )
+        if not prog.IsComplete then
+            return e, prog
+        end
+    end
+
+    return nil, nil
+end
+
+function ProgAPI.IsIndexComplete(
+    ignoreMythicAndAbove: boolean?,
+    unlockNormal: boolean?,
+    unlockGold: boolean?,
+    unlockRainbow: boolean?,
+    unlockDM: boolean?
+): boolean
+    local egg = ProgAPI.GetNextUnindexedEgg(
+        ignoreMythicAndAbove,
+        unlockNormal,
+        unlockGold,
+        unlockRainbow,
+        unlockDM
+    )
+    return egg == nil
+end
+
+function ProgAPI.CleanIndexedFodder(
+    unlockGold: boolean?,
+    unlockRainbow: boolean?
+): number
+    if unlockGold == nil then unlockGold = true end
+    if unlockRainbow == nil then unlockRainbow = false end
+
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+    local obtained = stats.ObtainedPets or {}
+
+    -- Count unequipped copies per petId to avoid deleting crafting ingredients
+    local normalCounts = {}
+    local goldenCounts = {}
+    for guid, p in pairs(pets) do
+        if not equipped[guid] and not p.Locked and not p.l then
+            local pid = p.id or p.PetId
+            local isGold = (p.Variant == "Golden" or p.variant == "Golden" or p.g == true)
+            local isRainbow = (p.Variant == "Rainbow" or p.variant == "Rainbow" or p.r == true)
+            if pid and not isGold and not isRainbow then
+                normalCounts[pid] = (normalCounts[pid] or 0) + 1
+            elseif pid and isGold then
+                goldenCounts[pid] = (goldenCounts[pid] or 0) + 1
+            end
+        end
+    end
+
+    local toDelete = {}
+    local preservedForGold = {}
+    local preservedForRainbow = {}
+
+    for guid, p in pairs(pets) do
+        if not equipped[guid] and not p.Locked and not p.l then
+            -- ABSOLUTE SAFETY: Strictly NEVER delete Mythic, Secret, Divine, Mega, Special, or Exclusive pets!
+            local isMythicOrAbove = ProgAPI.IsMythicOrAbove(p)
+            if not isMythicOrAbove then
+                local pid = p.id or p.PetId
+                local isGold = (p.Variant == "Golden" or p.variant == "Golden" or p.g == true)
+                local isRainbow = (p.Variant == "Rainbow" or p.variant == "Rainbow" or p.r == true)
+
+                local hasNormalIndex = (obtained[pid .. "_Normal"] == true)
+                local hasGoldIndex = (obtained[pid .. "_Golden"] == true)
+                local hasRainbowIndex = (obtained[pid .. "_Rainbow"] == true)
+
+                local shouldKeep = false
+
+                -- If Gold index is needed and this is a normal pet, preserve up to 10 copies to craft Gold
+                if unlockGold and not hasGoldIndex and not isGold and not isRainbow then
+                    preservedForGold[pid] = (preservedForGold[pid] or 0) + 1
+                    if preservedForGold[pid] <= 10 then
+                        shouldKeep = true
+                    end
+                end
+
+                -- If Rainbow index is needed and this is a gold pet, preserve up to 5 copies to craft Rainbow
+                if unlockRainbow and not hasRainbowIndex and isGold then
+                    preservedForRainbow[pid] = (preservedForRainbow[pid] or 0) + 1
+                    if preservedForRainbow[pid] <= 5 then
+                        shouldKeep = true
+                    end
+                end
+
+                -- If this pet has already fulfilled all active index requirements, it is fodder -> safe to delete!
+                if not shouldKeep then
+                    local normalSatisfied = (not unlockNormal) or hasNormalIndex
+                    local goldSatisfied = (not unlockGold) or hasGoldIndex
+                    local rainbowSatisfied = (not unlockRainbow) or hasRainbowIndex
+
+                    if normalSatisfied and goldSatisfied and rainbowSatisfied then
+                        table.insert(toDelete, guid)
+                    end
+                end
+            end
+        end
+    end
+
+    local deletedCount = 0
+    if #toDelete > 0 and Channels.Pets then
+        for i = 1, #toDelete, 50 do
+            local batch = {}
+            for j = i, math.min(i + 49, #toDelete) do
+                table.insert(batch, toDelete[j])
+            end
+            pcall(function()
+                Channels.Pets:FireServer("DeletePetsBulk", batch)
+            end)
+            deletedCount = deletedCount + #batch
+            task.wait(0.08)
+        end
+    end
+
+    return deletedCount
+end
+
+function ProgAPI.StepAutoIndex(
+    ignoreMythicAndAbove: boolean?,
+    unlockNormal: boolean?,
+    unlockGold: boolean?,
+    unlockRainbow: boolean?,
+    unlockDM: boolean?
+): (boolean, string)
+    local nextEgg, eggProg = ProgAPI.GetNextUnindexedEgg(
+        ignoreMythicAndAbove,
+        unlockNormal,
+        unlockGold,
+        unlockRainbow,
+        unlockDM
+    )
+
+    if not nextEgg or not eggProg then
+        return true, "All progression eggs 100% indexed! Phase 4 complete."
+    end
+
+    local pData = ProgAPI.GetPlayerData()
+    local clicks = pData.Clicks or 0
+
+    -- Check if player can afford egg
+    if clicks < nextEgg.cost then
+        return false, string.format("[Phase 4: Auto Index] Saving clicks for %s (%s / %s)",
+            tostring(nextEgg.name),
+            ProgAPI.FormatNumber(clicks),
+            ProgAPI.FormatNumber(nextEgg.cost)
+        )
+    end
+
+    -- Teleport to the egg if not already there
+    ProgAPI.TeleportToEgg(nextEgg.name)
+
+    -- Multi-hatch according to player hatch rate
+    local hatchAmount = ProgAPI.GetMaxEggOpenAmount(nextEgg.name)
+    pcall(function()
+        ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
+    end)
+
+    -- Auto craft golden pets if gold index is enabled
+    if unlockGold then
+        pcall(ProgAPI.CraftGoldenPets)
+    end
+
+    -- Auto craft rainbow pets if rainbow index is enabled
+    if unlockRainbow then
+        pcall(ProgAPI.CraftRainbowPets)
+        pcall(ProgAPI.ClaimRainbowPets)
+    end
+
+    -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
+    pcall(function()
+        ProgAPI.CleanIndexedFodder(unlockGold, unlockRainbow)
+    end)
+
+    local missingNames = {}
+    for _, m in ipairs(eggProg.MissingPets) do
+        table.insert(missingNames, string.format("%s (%s)", m.Name, table.concat(m.MissingVariants, "/")))
+    end
+    local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "None"
+
+    return false, string.format("[Phase 4: Auto Index] %s (%d/%d): Missing %s",
+        tostring(eggProg.DisplayName),
+        eggProg.CompletedPetsCount,
+        eggProg.TargetPetsCount,
+        missingStr
+    )
+end
+
+--==============================================================================
+-- PHASE 5: ENDGAME MATRIX MYTHIC PIPELINE
+-- Activates once Phase 4 (Auto Index) is complete (or bypassed)!
+--==============================================================================
+-- Phase 5 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
 -- Strictly preserves Mythic, Mythical, Special, Mega, Secret, Divine, and Exclusive pets
 -- Deletes all non-mythic pets (Basic, Rare, Epic, Legendary, Stock)
 function ProgAPI.CleanNonMythicPets(): number
@@ -3903,6 +4342,10 @@ updateBlackScreenTelemetry = function()
     end)
 
     local eggName = ProgAPI.SelectedEgg or "MatrixEgg"
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
+        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
+        if nextEgg then eggName = nextEgg.name end
+    end
     local eggData = Directory.Eggs and Directory.Eggs[eggName]
     local eggDispName = (eggData and (eggData.Name or eggData.DisplayName)) or eggName
     local eggCost = 0
