@@ -165,6 +165,12 @@ local State = Configs.Load()
 if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
 if State.AntiAFK == nil then State.AntiAFK = true end
 if State.AutoRejoin == nil then State.AutoRejoin = true end
+if State.IndexUnlockRainbow == nil or State._RainbowV2Updated ~= true then
+    State.IndexUnlockRainbow = true
+    State._RainbowV2Updated = true
+    Configs.Set("IndexUnlockRainbow", true)
+    Configs.Set("_RainbowV2Updated", true)
+end
 _G.State = State
 _G.ProgAPI = ProgAPI
 _G.AutoProgAPI = AutoProgAPI
@@ -499,11 +505,13 @@ Phase4Tab:AddParagraph({
     Title = "Auto Index Strategy",
     Content = "Activates automatically after Phase 3 (Skill Tree 39/39 & 13/13)!\n" ..
               "• Automatically cycles through every egg starting from World 1 Spawn (BasicEgg) upwards\n" ..
-              "• Hatches and indexes missing Normal & Golden pets (and Rainbow if enabled)\n" ..
+              "• Hatches and indexes missing Normal & Golden pets\n" ..
+              "• Easy Rainbows (Common & Rare Only): Gathers 6 gold copies and queues in Rainbow Machine!\n" ..
+              "• Machine Queue Auto-Advance: Doesn't wait 30 minutes! Once crafts are cooking in the queue, moves immediately to the next egg!\n" ..
               "• Ignore Rare Filter: Skips ultra-rare drops (Mythic, Secret, Divine) so bot never gets stuck on 1 egg!\n" ..
               "• Keep Rare Guarantee: If any Secret/Mythic drops by luck, it is 100% saved in inventory and NEVER deleted!\n" ..
               "• Auto Delete Fodder: Deletes common/rare/epic indexed pets once registered to keep bag empty\n" ..
-              "• Advances to next egg once all non-ignored pets in the current egg are fully indexed!"
+              "• Background Claimer: Periodically claims ready Rainbow pets from the machine to register their index!"
 })
 
 local Phase4CurrentEggCard = Phase4Tab:AddParagraph({
@@ -551,9 +559,9 @@ Phase4Tab:AddToggle("IndexUnlockGoldToggle", {
 })
 
 Phase4Tab:AddToggle("IndexUnlockRainbowToggle", {
-    Title = "Unlock Rainbow Index",
-    Description = "Collects gold copies, crafts Rainbow pets, and registers Rainbow index (takes longer)",
-    Default = State.IndexUnlockRainbow == true,
+    Title = "Unlock Rainbow Index (Common & Rare Only)",
+    Description = "Collects 6 gold copies, auto-queues in Rainbow Machine, and advances to next egg while 30m craft cooks",
+    Default = State.IndexUnlockRainbow ~= false,
     Callback = function(val) State.IndexUnlockRainbow = val; Configs.Set("IndexUnlockRainbow", val) end
 })
 
@@ -918,7 +926,7 @@ task.spawn(function()
                 State.IndexIgnoreMythicAndAbove ~= false,
                 State.IndexUnlockNormal ~= false,
                 State.IndexUnlockGold ~= false,
-                State.IndexUnlockRainbow == true,
+                State.IndexUnlockRainbow ~= false,
                 State.IndexUnlockDarkMatter == true
             )
             if nextEgg then
@@ -1382,7 +1390,7 @@ table.insert(threads, task.spawn(function()
                     State.IndexIgnoreMythicAndAbove ~= false,
                     State.IndexUnlockNormal ~= false,
                     State.IndexUnlockGold ~= false,
-                    State.IndexUnlockRainbow == true,
+                    State.IndexUnlockRainbow ~= false,
                     State.IndexUnlockDarkMatter == true
                 )
 
@@ -1397,7 +1405,7 @@ table.insert(threads, task.spawn(function()
                                 State.IndexIgnoreMythicAndAbove ~= false,
                                 State.IndexUnlockNormal ~= false,
                                 State.IndexUnlockGold ~= false,
-                                State.IndexUnlockRainbow == true,
+                                State.IndexUnlockRainbow ~= false,
                                 State.IndexUnlockDarkMatter == true
                             )
                         end)
@@ -1702,7 +1710,7 @@ local function updateTelemetry()
                 State.IndexIgnoreMythicAndAbove ~= false,
                 State.IndexUnlockNormal ~= false,
                 State.IndexUnlockGold ~= false,
-                State.IndexUnlockRainbow == true,
+                State.IndexUnlockRainbow ~= false,
                 State.IndexUnlockDarkMatter == true
             )
 
@@ -1713,7 +1721,7 @@ local function updateTelemetry()
                     for _, m in ipairs(eggProg.MissingPets or {}) do
                         table.insert(missingList, string.format("• <b>%s</b> (%s) - %s", m.Name, m.Rarity, table.concat(m.MissingVariants, ", ")))
                     end
-                    local missingDetails = #missingList > 0 and table.concat(missingList, "\n") or "None"
+                    local missingDetails = #missingList > 0 and table.concat(missingList, "\n") or "None (All active requirements fulfilled or queued!)"
 
                     local skippedStr = ""
                     if eggProg.SkippedRareCount and eggProg.SkippedRareCount > 0 then
@@ -1724,11 +1732,20 @@ local function updateTelemetry()
                         skippedStr = string.format("\n⏩ <b>Ignored Rares (Skipped):</b> %s", table.concat(sNames, ", "))
                     end
 
+                    local queuedStr = ""
+                    if eggProg.QueuedRainbows and #eggProg.QueuedRainbows > 0 then
+                        local qNames = {}
+                        for _, q in ipairs(eggProg.QueuedRainbows) do
+                            table.insert(qNames, q.Name)
+                        end
+                        queuedStr = string.format("\n🌈 <b>Queued in Rainbow Machine (Cooking 30m):</b> %s", table.concat(qNames, ", "))
+                    end
+
                     eggContent = string.format(
                         "🥚 <b>Target Egg:</b> %s\n" ..
                         "🏝️ <b>Island / World:</b> %s (%s)\n" ..
                         "💰 <b>Cost:</b> %s Clicks\n" ..
-                        "📊 <b>Egg Progress:</b> %d / %d pets indexed (%d%%)%s\n\n" ..
+                        "📊 <b>Egg Progress:</b> %d / %d pets indexed (%d%%)%s%s\n\n" ..
                         "🔍 <b>Missing Pets to Index:</b>\n%s",
                         tostring(eggProg.DisplayName or nextEgg.name),
                         tostring(nextEgg.island or "Spawn"),
@@ -1738,6 +1755,7 @@ local function updateTelemetry()
                         eggProg.TargetPetsCount or 0,
                         (eggProg.TargetPetsCount and eggProg.TargetPetsCount > 0) and math.floor(((eggProg.CompletedPetsCount or 0) / eggProg.TargetPetsCount) * 100) or 100,
                         skippedStr,
+                        queuedStr,
                         missingDetails
                     )
                 else
