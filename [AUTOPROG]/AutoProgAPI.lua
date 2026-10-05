@@ -92,6 +92,8 @@ local Channels = {
     LeavingGift = Network.Channel("LeavingGift"),
     LikesGoal = Network.Channel("LikesGoal"),
     SpinWheel = Network.Channel("SpinWheel"),
+    ClickSkins = Network.Channel("ClickSkins"),
+    Trading = Network.Channel("Trading"),
 }
 
 ProgAPI.Channels = Channels
@@ -863,14 +865,14 @@ function ProgAPI.GetNextLockedIsland()
     return nil
 end
 
-function ProgAPI.TeleportToWorld(worldName: string): boolean
+function ProgAPI.TeleportToWorld(worldName: string, force: boolean?): boolean
     ProgAPI.ExitMinigame()
 
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
 
     if worldName == "Techworld" or worldName == "Tech" or worldName == "Space" then
-        if curWorld == "Techworld" or curWorld == "Space" then
+        if not force and (curWorld == "Techworld" or curWorld == "Space") then
             return true
         end
 
@@ -879,7 +881,7 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
                 return Channels.Portals:InvokeServer("TeleportToWorld", "Techworld")
             end)
             if ok and res == true then
-                task.wait(0.5)
+                task.wait(0.4)
                 return true
             end
         end
@@ -898,7 +900,7 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
         end
         return true
     elseif worldName == "Overworld" then
-        if curWorld == "Overworld" then
+        if not force and curWorld == "Overworld" then
             return true
         end
         if Channels.Portals then
@@ -908,11 +910,13 @@ function ProgAPI.TeleportToWorld(worldName: string): boolean
             pcall(function()
                 Channels.Portals:InvokeServer("TeleportToIsland", "Spawn")
             end)
+            task.wait(0.4)
         end
         return true
     end
     return false
 end
+
 
 function ProgAPI.TeleportToIsland(islandName: string): boolean
     if islandName == "DominusArea" or islandName == "Dominus" then
@@ -1323,7 +1327,7 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
     local clicks = (Currency and Currency.Get and Currency.Get("Clicks")) or (stats.Currency and stats.Currency.Clicks) or 0
     local isFullEventGold = ProgAPI.HasFullGoldEventTeam()
 
-    -- 1. If targetIsland explicitly requested, match best affordable egg on that island
+    -- 1. If targetIsland explicitly requested, match best affordable egg on that island ONLY
     if targetIsland then
         local bestEggName, bestCost = nil, 0
         for eggName, meta in pairs(eggData) do
@@ -1337,19 +1341,35 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
         if bestEggName then
             return { name = bestEggName, cost = bestCost, island = targetIsland }
         end
+        -- STRICT: If a specific island was requested, NEVER fallback to lower islands or Spawn!
+        return nil
     end
 
     -- 2. Progressive Egg Selection:
     local curWorld = stats.CurrentWorld or "Overworld"
     local allIslands = ProgAPI.AreAllIslandsUnlocked()
     local isTechWorld = (curWorld == "Techworld" or curWorld == "Space")
+    local furthest = ProgAPI.GetFurthestUnlockedIsland()
 
     local bestEggName = nil
     local bestCost = 0
 
     for eggName, meta in pairs(eggData) do
         local isEvent = (eggName == "CandyCornEgg" or eggName == "SixSevenEgg")
-        local isIslandAvailable = ProgAPI.IsIslandUnlocked(meta.island) or (meta.island == "Spawn")
+        
+        -- STRICT: If player has unlocked islands beyond Spawn, never consider normal Spawn eggs!
+        local isIslandAvailable = false
+        if meta.island == "Spawn" then
+            if isEvent then
+                isIslandAvailable = true
+            elseif furthest == "Spawn" then
+                isIslandAvailable = true
+            else
+                isIslandAvailable = false
+            end
+        else
+            isIslandAvailable = ProgAPI.IsIslandUnlocked(meta.island)
+        end
 
         -- If player is in Tech World, strictly filter to Tech World eggs! Never select Spawn/Overworld eggs!
         local isWorldAllowed = true
@@ -1376,7 +1396,7 @@ function ProgAPI.GetBestAffordableEgg(targetIsland: string?)
     end
 
     -- 3. Fallback: ONLY for brand new players on Spawn with zero unlocked islands!
-    if not bestEggName and not isTechWorld and not allIslands and not ProgAPI.IsIslandUnlocked("Winter") and clicks >= 250 then
+    if not bestEggName and not isTechWorld and not allIslands and furthest == "Spawn" and clicks >= 250 then
         bestEggName = "BasicEgg"
         bestCost = 250
     end
@@ -1432,46 +1452,59 @@ function ProgAPI.GetEndgameEgg()
     return nil
 end
 
-function ProgAPI.TeleportToEgg(eggName: string): boolean
+function ProgAPI.TeleportToEgg(eggName: string, forceWorldRemote: boolean?): boolean
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    -- Check if character is ALREADY close to the egg (prevents rubberbanding / teleport loops)
-    local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
-    if targetPart and (hrp.Position - targetPart.Position).Magnitude <= 18 then
-        return true
-    end
-    if eggName == "MatrixEgg" and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 18 then
-        return true
+    local eggMeta = eggData[eggName] or (Directory and Directory.Eggs and Directory.Eggs[eggName])
+    local island = eggMeta and (eggMeta.island or eggMeta.Island) or "Spawn"
+    local meta = islandMetaLookup[island] or (Directory and Directory.Islands and Directory.Islands[island])
+    local targetWorld = (meta and (meta.world or meta.World)) or "Overworld"
+    if island == "Base" or island == "Spaceship" or island == "Fragment" or island == "Matrix"
+        or eggName == "TechEgg" or eggName == "HolographicEgg" or eggName == "404Egg"
+        or eggName == "RedTechEgg" or eggName == "FragmentedEgg" or eggName == "MatrixEgg" then
+        targetWorld = "Techworld"
+    else
+        targetWorld = "Overworld"
     end
 
-    local eggMeta = eggData[eggName]
-    local island = eggMeta and eggMeta.island or "Spawn"
-    local meta = islandMetaLookup[island]
-    local targetWorld = (meta and meta.world) or "Overworld"
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+    local curIsland = stats.CurrentIsland or ""
+
+    -- Check if character is ALREADY close to the egg AND in the correct world AND not in minigame
+    local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+    local isNear = (targetPart and (hrp.Position - targetPart.Position).Magnitude <= 16)
+        or (eggName == "MatrixEgg" and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 16)
+
+    local inMinigame = (ProgAPI.IsInMinigame and ProgAPI.IsInMinigame())
+    if not forceWorldRemote and isNear and curWorld == targetWorld and not inMinigame then
+        return true
+    end
 
     -- 1. Exit any active minigame if active
     if ProgAPI.IsInMinigame and ProgAPI.IsInMinigame() then
         ProgAPI.ExitMinigame()
-        task.wait(0.3)
-    end
-
-    -- 2. Switch world if needed (e.g. Overworld <-> Techworld)
-    local stats = Stats.Local(true) or {}
-    local curWorld = stats.CurrentWorld or "Overworld"
-    if targetWorld ~= curWorld and Channels.Portals then
-        pcall(function() Channels.Portals:InvokeServer("TeleportToWorld", targetWorld) end)
-        task.wait(0.6)
-    end
-
-    -- 3. Teleport to the target island ONLY IF not already on that island!
-    stats = Stats.Local(true) or {}
-    local curIsland = stats.CurrentIsland or ""
-    if curIsland ~= island then
-        ProgAPI.TeleportToIsland(island)
         task.wait(0.35)
     end
+
+    -- 2. Switch world via TeleportToWorld remote FIRST if forced or worlds differ
+    stats = Stats.Local(true) or {}
+    curWorld = stats.CurrentWorld or "Overworld"
+    if forceWorldRemote or targetWorld ~= curWorld then
+        if Channels.Portals then
+            pcall(function() Channels.Portals:InvokeServer("TeleportToWorld", targetWorld) end)
+            task.wait(0.5)
+        else
+            ProgAPI.TeleportToWorld(targetWorld, true)
+            task.wait(0.5)
+        end
+    end
+
+    -- 3. Teleport to target island via server remote and client local teleport
+    ProgAPI.TeleportToIsland(island)
+    task.wait(0.3)
 
     -- 4. Find the egg model and stand directly on it (with streaming retry)
     eggModel, targetPart = ProgAPI.FindEggModel(eggName)
@@ -1479,7 +1512,7 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     hrp = char and char:FindFirstChild("HumanoidRootPart")
 
     if not targetPart or not hrp then
-        for _ = 1, 5 do
+        for _ = 1, 6 do
             task.wait(0.2)
             char = LocalPlayer.Character
             hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1497,35 +1530,64 @@ function ProgAPI.TeleportToEgg(eggName: string): boolean
     -- Fallback for MatrixEgg: known position
     if eggName == "MatrixEgg" and hrp then
         hrp.CFrame = CFrame.new(7828.7, 6196.1, 303.1)
+        task.wait(0.15)
         return true
     end
 
     return false
 end
 
--- Calculates dynamic egg hatching animation & cooldown speed matching game engine profile (4.2 / multiplier)
-function ProgAPI.GetPlayerHatchSpeed(eggName: string?): number
+-- Dynamically retrieves the exact Hatching Speed displayed on the User Profile
+-- (e.g. 1.5s, 2.7s) to guarantee 100% accurate synchronization with game engine and server cooldowns
+function ProgAPI.GetUserProfileHatchSpeed(eggName: string?): (number, string)
     eggName = eggName or ProgAPI.SelectedEgg or "MatrixEgg"
+
+    -- 1. Try reading the exact text from the User Profile GUI if available
+    local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+    local profileGui = pGui and pGui:FindFirstChild("Profile")
+    if profileGui then
+        local hs = profileGui:FindFirstChild("HatchSpeed", true)
+        if hs then
+            local val = hs:FindFirstChild("Value")
+            if val and val.Text and val.Text ~= "" then
+                local num = tonumber(val.Text:match("([%d%.]+)"))
+                if num and num > 0 then
+                    return num, string.format("%.1fs", num)
+                end
+            end
+        end
+    end
+
+    -- 2. Exact game engine formula used by Profile script: string.format("%.1fs", 4.2 / EggsFrontend.GetHatchSpeedMultiplier())
     local mult = 1
     if EggsFrontend and EggsFrontend.GetHatchSpeedMultiplier then
-        local ok, m = pcall(function() return EggsFrontend.GetHatchSpeedMultiplier(eggName) end)
+        local ok, m = pcall(function()
+            return EggsFrontend.GetHatchSpeedMultiplier(eggName)
+        end)
+        if not ok or type(m) ~= "number" or m <= 0 then
+            ok, m = pcall(function()
+                return EggsFrontend.GetHatchSpeedMultiplier()
+            end)
+        end
         if ok and type(m) == "number" and m > 0 then
             mult = m
         end
     end
-    local rawSpeed = 4.2 / mult
-    -- Use dynamic network ping buffer (~40ms / 2 server ticks) for maximum throughput without tripping cooldown
-    local pingBuffer = 0.04
-    pcall(function()
-        local p = game:GetService("Stats").Network:GetPing()
-        if p and p > 0 then pingBuffer = math.clamp(p / 1000 * 0.8, 0.02, 0.08) end
-    end)
-    return math.clamp(rawSpeed + pingBuffer, 0.15, 10.0)
+
+    local raw = 4.2 / mult
+    local formatted = string.format("%.1f", raw)
+    local speed = tonumber(formatted) or raw
+    return math.clamp(speed, 0.1, 10.0), formatted .. "s"
+end
+
+function ProgAPI.GetPlayerHatchSpeed(eggName: string?): number
+    local speed = ProgAPI.GetUserProfileHatchSpeed(eggName)
+    return speed
 end
 
 function ProgAPI.FormatHatchSpeed(eggName: string?): string
-    local speed = ProgAPI.GetPlayerHatchSpeed(eggName)
-    return string.format("%.1fs", speed)
+    local _, formatted = ProgAPI.GetUserProfileHatchSpeed(eggName)
+    return formatted
 end
 
 -- Calculates dynamic max multi-open hatch amount (1x, 3x, 8x, or higher) based on gamepasses, boosts, inventory space, and clicks
@@ -1613,6 +1675,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
 
     local stats = Stats.Local(true) or {}
     local curWorld = stats.CurrentWorld or "Overworld"
+    local curIsland = stats.CurrentIsland or ""
 
     -- Strict Safety Guard: Never open BasicEgg if in Tech World, or all islands unlocked, or past Spawn, UNLESS doing Phase 2 secret quest or Phase 4 auto index!
     local isPhase2Quest = false
@@ -1643,24 +1706,35 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     end
     if not Channels.Egg then return false, "No Egg channel" end
 
-    -- Verify character is in proximity to the egg model (server requires <= 20 studs)
+    -- Verify character is on target island/world and in proximity to the egg model
+    local eggMeta = eggData[eggName]
+    local targetIsland = eggMeta and eggMeta.island or "Spawn"
+    local meta = islandMetaLookup[targetIsland]
+    local targetWorld = (meta and meta.world) or "Overworld"
+
     local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 9999
+    local inMinigame = (ProgAPI.IsInMinigame and ProgAPI.IsInMinigame())
 
-    if not targetPart then
-        ProgAPI.TeleportToEgg(eggName)
-        task.wait(0.3)
-        eggModel, targetPart = ProgAPI.FindEggModel(eggName)
-        char = LocalPlayer.Character
-        hrp = char and char:FindFirstChild("HumanoidRootPart")
+    -- If skipTeleport is not true, ensure player is officially on the right island & world and next to the egg!
+    if not skipTeleport then
+        local needsTeleport = (not targetPart) or (dist > 16) or (curWorld ~= targetWorld) or (curIsland ~= targetIsland) or inMinigame
+        if needsTeleport then
+            ProgAPI.TeleportToEgg(eggName)
+            task.wait(0.25)
+            eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+            char = LocalPlayer.Character
+            hrp = char and char:FindFirstChild("HumanoidRootPart")
+        end
     end
 
     if hrp and targetPart then
-        local dist = (hrp.Position - targetPart.Position).Magnitude
-        if dist > 16 then
+        local currentDist = (hrp.Position - targetPart.Position).Magnitude
+        if currentDist > 16 then
             hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-            task.wait(0.08)
+            task.wait(0.12)
         end
     elseif not targetPart then
         return false, "Cannot locate egg model in workspace"
@@ -1669,6 +1743,7 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
     -- Proactive Inventory Check & Cleaning BEFORE invoking the server!
     local isP4 = ProgAPI.IsPhase4 and ProgAPI.IsPhase4()
     local isP5 = ProgAPI.IsPhase5 and ProgAPI.IsPhase5()
+    local isP6 = ProgAPI.IsPhase6 and ProgAPI.IsPhase6()
     local curInv = 0
     for _ in pairs(stats.Pets or {}) do curInv = curInv + 1 end
     local maxInv = 200
@@ -1681,13 +1756,17 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         end
     end)
 
+    local isP2GoldDone = ProgAPI.IsPhase2QuestGoldDone and ProgAPI.IsPhase2QuestGoldDone()
+
     if curInv + amount >= maxInv - 2 then
-        if isP5 then
+        if isP6 then
             pcall(ProgAPI.CleanNonMythicPets)
             pcall(ProgAPI.CraftGoldenPets)
         elseif isP4 then
             pcall(ProgAPI.CraftGoldenPets)
             pcall(ProgAPI.CleanIndexedFodder)
+        elseif isP2GoldDone then
+            pcall(ProgAPI.CleanSecretQuestPets)
         else
             pcall(ProgAPI.CraftGoldenPets)
             local cleaned = ProgAPI.CleanWeakPets(true)
@@ -1710,11 +1789,13 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
 
     -- If server rejected due to full inventory, clean immediately
     if tostring(reason):lower():find("full") or tostring(res):lower():find("full") then
-        if isP5 then
+        if isP6 then
             pcall(ProgAPI.CleanNonMythicPets)
         elseif isP4 then
             pcall(ProgAPI.CraftGoldenPets)
             pcall(ProgAPI.CleanIndexedFodder)
+        elseif isP2GoldDone then
+            pcall(ProgAPI.CleanSecretQuestPets)
         else
             pcall(ProgAPI.CraftGoldenPets)
             pcall(function() ProgAPI.CleanWeakPets(false) end)
@@ -1729,11 +1810,16 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         ProgAPI.HatchBackoffUntil = tick() + 1.2
     end
 
-    -- If server rejected due to distance, re-snap character
+    -- If server specifically rejected due to distance, gently reposition HRP right onto the egg stand
     if tostring(reason):lower():find("far") or tostring(res):lower():find("far") then
-        if hrp and targetPart then
-            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-        end
+        pcall(function()
+            local eggModel, targetPart = ProgAPI.FindEggModel(eggName)
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp and targetPart then
+                hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+            end
+        end)
     end
 
     return false, "Failed to open egg: " .. tostring(reason or res)
@@ -1768,12 +1854,19 @@ function ProgAPI.CraftGoldenPets(): number
         end
     end)
     local requiredFor100 = math.max(1, 6 - reduction)
+    local isP2GoldDone = ProgAPI.IsPhase2QuestGoldDone and ProgAPI.IsPhase2QuestGoldDone()
+    local basicEggDrops = { Dog = true, Cat = true, Bunny = true, Pig = true }
 
     local groups = {}
     for guid, p in pairs(pets) do
         local isLocked = p.Locked == true or p.l == true
         local isNormal = (p.v == nil or p.v == "Normal")
         local isExclusive = Directory.Pets and Directory.Pets[p.id] and Directory.Pets[p.id].Rarity == "Exclusive"
+
+        -- Skip crafting BasicEgg pets into Golden if Phase 2 gold objective is already done!
+        if isP2GoldDone and basicEggDrops[p.id] then
+            continue
+        end
 
         if not isLocked and isNormal and not isExclusive then
             local key = tostring(p.id) .. "_" .. tostring(p.Shiny or p.s or false)
@@ -1886,8 +1979,9 @@ function ProgAPI.GetRainbowMachineStatus(): {
 end
 
 -- Converts batches of duplicate Golden pets into Rainbow pets
--- In Phase 4 Index Mode: Only crafts easy pets (Basic & Rare), and only 1 batch per pet until queued or obtained
-function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
+-- In Phase 4 Index Mode: Only crafts easy pets (Basic & Rare & Epic), and only 1 batch per pet until queued or obtained.
+-- If includeLegendary is true (Stage 3B), also crafts Legendary batches!
+function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?, includeLegendary: boolean?): number
     if not Channels.Pets and not Channels.Crafting then return 0 end
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
@@ -1922,9 +2016,14 @@ function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
         if not isEquipped and not isLocked and isGolden and not isExclusive then
             local petDef = Directory.Pets and Directory.Pets[p.id]
             local rarity = (petDef and petDef.Rarity) or "Basic"
-            local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
+            local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common" or rarity == "Epic")
+                or (includeLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)))
             if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
-                isEasyRarity = Constants.RarityOrder[rarity] <= 2
+                if includeLegendary == true then
+                    isEasyRarity = Constants.RarityOrder[rarity] <= 4
+                else
+                    isEasyRarity = (Constants.RarityOrder[rarity] <= 3) and (rarity ~= "Legendary")
+                end
             end
 
             local allow = true
@@ -2103,13 +2202,93 @@ function ProgAPI.IsMythicOrAbove(p: any): boolean
     return false
 end
 
+-- Checks if player is in Phase 2 (??? Secret Area Quest) and has already completed Objective 3 (15 Golden Pets)
+function ProgAPI.IsPhase2QuestGoldDone(): boolean
+    local stats = Stats.Local(true) or {}
+    local isClaimed = stats.SecretAreaQuestClaimed == true
+    local isDoorUnlocked = stats.DominusAreaUnlocked == true
+    if not isClaimed or isDoorUnlocked then
+        return false
+    end
+    local quests = stats.SecretAreaQuests
+    if quests and quests.Golden and quests.Golden.Done == true then
+        return true
+    end
+    if ProgAPI.GetSecretQuestInfo then
+        local qInfo = ProgAPI.GetSecretQuestInfo()
+        if (qInfo.Golden and qInfo.Golden.Done == true) and (not qInfo.IsDoorUnlocked) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Deletes all BasicEgg / World 1 Spawn pets (Dog, Cat, Bunny, Pig - Normal, Golden, Rainbow) hatched during Phase 2 ??? Quest
+-- Strictly preserves equipped pets, locked pets, and Mythic/Special/Secret/Divine pets!
+function ProgAPI.CleanSecretQuestPets(): number
+    local stats = Stats.Local(true) or {}
+    local pets = stats.Pets or {}
+    local equipped = stats.EquippedPets or {}
+
+    local basicEggDrops = {
+        Dog = true,
+        Cat = true,
+        Bunny = true,
+        Pig = true,
+    }
+
+    local petMap = buildPetIslandMap()
+    local toDelete = {}
+    for guid, p in pairs(pets) do
+        -- Never delete currently equipped pets or locked pets!
+        if not equipped[guid] and not p.Locked and not p.l then
+            -- Strictly keep ALL Mythic, Secret, Special, Mega, Divine, Exclusive pets!
+            local isMythicOrAbove = ProgAPI.IsMythicOrAbove(p)
+            if not isMythicOrAbove then
+                -- 1. All BasicEgg drops (Dog, Cat, Bunny, Pig) - delete whether Normal, Golden, or Rainbow!
+                if basicEggDrops[p.id] then
+                    table.insert(toDelete, guid)
+                else
+                    -- 2. Any weak starter / Spawn pets (origin world 1)
+                    local petOriginWorld = petMap[p.id] or 1
+                    if petOriginWorld <= 1 then
+                        table.insert(toDelete, guid)
+                    end
+                end
+            end
+        end
+    end
+
+    local deletedCount = 0
+    if #toDelete > 0 and Channels.Pets then
+        for i = 1, #toDelete, 50 do
+            local batch = {}
+            for j = i, math.min(i + 49, #toDelete) do
+                table.insert(batch, toDelete[j])
+            end
+            pcall(function()
+                Channels.Pets:FireServer("DeletePetsBulk", batch)
+            end)
+            deletedCount = deletedCount + #batch
+            task.wait(0.08)
+        end
+    end
+    return deletedCount
+end
+
 -- Weak pet deletion: If highest unlocked island is N, delete all normal pets from world (N - 2) and below
 function ProgAPI.CleanWeakPets(protectCrafting: boolean?): number
+    if ProgAPI.IsPhase6 and ProgAPI.IsPhase6() then
+        return ProgAPI.CleanNonMythicPets()
+    end
     if ProgAPI.IsPhase5 and ProgAPI.IsPhase5() then
         return ProgAPI.CleanNonMythicPets()
     end
     if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
         return ProgAPI.CleanIndexedFodder()
+    end
+    if ProgAPI.IsPhase2QuestGoldDone and ProgAPI.IsPhase2QuestGoldDone() then
+        return ProgAPI.CleanSecretQuestPets()
     end
     if protectCrafting == nil then protectCrafting = true end
     local stats = Stats.Local(true) or {}
@@ -3720,6 +3899,189 @@ function ProgAPI.StepDominusAreaFarming(): (string, string)
     end
 end
 
+--==============================================================================
+-- PHASE 5: ULTIMATE CLICK SKIN PIPELINE
+-- Activates once Phase 4 (Auto Index >= 250) is complete!
+-- Buys/equips the purple 'Ultimate' Click Skin (requires 250 pets).
+-- Saves up 100 Qa Gems (1e17) before rerolling.
+-- Rerolls until BOTH +3 Egg Hatch AND +15% Hatch Speed are acquired.
+-- If only +3 Egg or only +15% Hatch Speed is rolled, continues rerolling.
+-- Once both are met, replaces and equips the skin.
+--==============================================================================
+
+function ProgAPI.EvaluateClickSkin(skinData: any): (boolean, number, number)
+    if not skinData or type(skinData) ~= "table" then return false, 0, 0 end
+    local eggHatchVal = 0
+    local hatchSpeedVal = 0
+
+    if skinData.Passives and type(skinData.Passives) == "table" then
+        for _, p in ipairs(skinData.Passives) do
+            if type(p) == "table" and p.Id == "EggHatch" then
+                eggHatchVal = math.max(eggHatchVal, tonumber(p.Value) or 0)
+            end
+        end
+    end
+
+    if skinData.Boosts and type(skinData.Boosts) == "table" then
+        for _, b in ipairs(skinData.Boosts) do
+            if type(b) == "table" and b.Id == "HatchSpeed" then
+                hatchSpeedVal = math.max(hatchSpeedVal, tonumber(b.Value) or 0)
+            end
+        end
+    end
+
+    local st = rawget(_G, "State")
+    local targetEggHatch = (st and tonumber(st.ClickSkinTargetEggHatch)) or 3
+    local targetHatchSpeed = (st and tonumber(st.ClickSkinTargetHatchSpeed)) or 15
+
+    local isGoalMet = (eggHatchVal >= targetEggHatch) and (hatchSpeedVal >= targetHatchSpeed)
+    return isGoalMet, eggHatchVal, hatchSpeedVal
+end
+
+function ProgAPI.GetClickSkinStatus(): table
+    local stats = Stats.Local(true) or {}
+    local clickSkins = stats.ClickSkins or {}
+    local equipped = clickSkins.Equipped
+    local pending = clickSkins.Pending
+    local currentGems = (stats.Currency and stats.Currency.Gems) or (stats.Gems) or 0
+
+    local eqMet, eqEgg, eqSpeed = ProgAPI.EvaluateClickSkin(equipped)
+    local penMet, penEgg, penSpeed = ProgAPI.EvaluateClickSkin(pending)
+
+    local st = rawget(_G, "State")
+    local targetTier = (st and st.ClickSkinTier) or "Ultimate"
+    local gemThresholdQa = (st and tonumber(st.ClickSkinGemsThreshold)) or 100
+    local gemThreshold = gemThresholdQa * 1e15 -- 100 Qa = 1e17
+
+    local isEquippedTargetTier = (equipped and equipped.Tier == targetTier) == true
+
+    return {
+        Equipped = equipped,
+        Pending = pending,
+        EquippedTier = (equipped and equipped.Tier) or "None",
+        EquippedEggHatch = eqEgg,
+        EquippedHatchSpeed = eqSpeed,
+        EquippedGoalMet = eqMet,
+        PendingTier = (pending and pending.Tier) or "None",
+        PendingId = (pending and pending.Id),
+        PendingEggHatch = penEgg,
+        PendingHatchSpeed = penSpeed,
+        PendingGoalMet = penMet,
+        CurrentGems = currentGems,
+        GemsThreshold = gemThreshold,
+        GemsThresholdMet = (currentGems >= gemThreshold),
+        GoalMet = (isEquippedTargetTier and eqMet) == true,
+    }
+end
+
+function ProgAPI.IsClickSkinGoalMet(): boolean
+    local status = ProgAPI.GetClickSkinStatus()
+    return status.GoalMet == true
+end
+
+local lastSkinRollTick = 0
+
+function ProgAPI.StepClickSkinPipeline(): (boolean, string)
+    local status = ProgAPI.GetClickSkinStatus()
+    local st = rawget(_G, "State")
+    local targetTier = (st and st.ClickSkinTier) or "Ultimate"
+
+    -- 1. If already met on equipped skin, we are done!
+    if status.GoalMet then
+        return true, string.format("🌟 [Phase 5: Complete] Ultimate Skin Active! (+%d Egg, +%.1f%% Speed)", status.EquippedEggHatch, status.EquippedHatchSpeed)
+    end
+
+    local skinCh = Channels.ClickSkins or Network.Channel("ClickSkins")
+    if not skinCh then
+        return false, "[Phase 5: Skin] ClickSkins remote channel not found"
+    end
+
+    -- 2. If Pending skin satisfies BOTH target stats (+3 Egg Hatch & +15% Hatch Speed), replace immediately!
+    if status.Pending and status.PendingGoalMet and status.PendingId then
+        local okRep = pcall(function()
+            return skinCh:InvokeServer("Replace", status.PendingId)
+        end)
+        task.wait(0.2)
+        local postStatus = ProgAPI.GetClickSkinStatus()
+        if postStatus.GoalMet then
+            return true, string.format("🎉 [Phase 5: Complete] Replaced & Equipped Ultimate Skin (+%d Egg, +%.1f%% Speed)!", postStatus.EquippedEggHatch, postStatus.EquippedHatchSpeed)
+        end
+    end
+
+    -- 3. If Equipped is not Ultimate yet, but Pending is an Ultimate skin:
+    -- Replace it once so player equips the Ultimate skin and gains base boosts!
+    if status.EquippedTier ~= targetTier and status.Pending and status.PendingTier == targetTier and status.PendingId then
+        pcall(function()
+            skinCh:InvokeServer("Replace", status.PendingId)
+        end)
+        task.wait(0.2)
+        status = ProgAPI.GetClickSkinStatus()
+        if status.GoalMet then
+            return true, string.format("🎉 [Phase 5: Complete] Equipped Ultimate Skin (+%d Egg, +%.1f%% Speed)!", status.EquippedEggHatch, status.EquippedHatchSpeed)
+        end
+    end
+
+    -- 4. Check Gems Threshold before rerolling!
+    -- Must save up to ClickSkinGemsThreshold (default 100 Qa = 1e17 Gems) before rerolling.
+    if status.CurrentGems < status.GemsThreshold then
+        local stats = Stats.Local(true) or {}
+        local curWorld = (stats and stats.CurrentWorld) or "Overworld"
+        if curWorld ~= "Techworld" and curWorld ~= "Space" then
+            ProgAPI.ExitMinigame()
+            task.wait(0.2)
+            ProgAPI.TeleportToWorld("Techworld")
+            task.wait(0.3)
+        end
+        pcall(function() ProgAPI.StepBreakablesPipeline(true) end)
+        return false, string.format("[Phase 5: Skin] Saving Gems: %s / %s (Farming Breakables)",
+            ProgAPI.FormatNumber(status.CurrentGems),
+            ProgAPI.FormatNumber(status.GemsThreshold)
+        )
+    end
+
+    -- 5. Reroll Pending skin!
+    -- Ultimate roll costs 1 Qa Gems (1e15).
+    local rollCost = 1e15
+    if status.CurrentGems < rollCost then
+        return false, string.format("[Phase 5: Skin] Need %s Gems for roll (Have: %s)",
+            ProgAPI.FormatNumber(rollCost),
+            ProgAPI.FormatNumber(status.CurrentGems)
+        )
+    end
+
+    local now = tick()
+    if now - lastSkinRollTick < 0.35 then
+        return false, "[Phase 5: Skin] Rerolling Ultimate Skin..."
+    end
+    lastSkinRollTick = now
+
+    local pendingId = status.PendingId
+    local okRoll, resRoll = pcall(function()
+        return skinCh:InvokeServer("Roll", targetTier, pendingId, false)
+    end)
+
+    task.wait(0.15)
+    local newStatus = ProgAPI.GetClickSkinStatus()
+
+    -- Check if newly rolled skin satisfies BOTH goals!
+    if newStatus.PendingGoalMet and newStatus.PendingId then
+        pcall(function()
+            skinCh:InvokeServer("Replace", newStatus.PendingId)
+        end)
+        task.wait(0.2)
+        local finalStatus = ProgAPI.GetClickSkinStatus()
+        if finalStatus.GoalMet then
+            return true, string.format("🎉 [Phase 5: Complete] Rolled Perfect Ultimate Skin (+%d Egg, +%.1f%% Speed)!", finalStatus.EquippedEggHatch, finalStatus.EquippedHatchSpeed)
+        end
+    end
+
+    return false, string.format("[Phase 5: Skin Reroll] Pending: +%d Egg, +%.1f%% Speed (Need +3 Egg & +15%% Speed) | Gems: %s",
+        newStatus.PendingEggHatch,
+        newStatus.PendingHatchSpeed,
+        ProgAPI.FormatNumber(newStatus.CurrentGems)
+    )
+end
+
 function ProgAPI.IsPhase3(): boolean
     if not ProgAPI.AreAllIslandsUnlocked() then return false end
     if not ProgAPI.IsSecretQuestComplete() then return false end
@@ -3752,22 +4114,31 @@ function ProgAPI.IsPhase5(): boolean
     if not ProgAPI.AreAllIslandsUnlocked() then return false end
     if not ProgAPI.IsSecretQuestComplete() then return false end
     if not ProgAPI.IsSkillTreeMaxed() then return false end
-    local st = rawget(_G, "State")
-    if st and st.AutoIndexPets == false then return true end
+    -- Phase 4 must be completed first!
+    if ProgAPI.IsPhase4() then return false end
 
-    -- Check if IndexTargetTotal goal (default 250) has been reached
-    local targetTotal = (st and tonumber(st.IndexTargetTotal)) or 250
-    local totalStats = ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()
-    if totalStats and totalStats.TotalIndexed >= targetTotal then
-        return true -- Target reached! Phase 5 active!
+    local st = rawget(_G, "State")
+    if st and st.AutoClickSkin == false then return false end
+
+    -- Active while ClickSkin target goal (+3 Egg Hatch & +15% Speed) has NOT been met
+    return not ProgAPI.IsClickSkinGoalMet()
+end
+
+function ProgAPI.IsPhase6(): boolean
+    if not ProgAPI.AreAllIslandsUnlocked() then return false end
+    if not ProgAPI.IsSecretQuestComplete() then return false end
+    if not ProgAPI.IsSkillTreeMaxed() then return false end
+    -- Phase 4 must be completed first!
+    if ProgAPI.IsPhase4() then return false end
+
+    local st = rawget(_G, "State")
+    -- If Phase 5 (ClickSkin) is disabled, Phase 6 activates immediately after Phase 4!
+    if st and st.AutoClickSkin == false then
+        return true
     end
 
-    local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
-    local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
-    local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
-    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or true
-    local unDM = (st and st.IndexUnlockDarkMatter ~= nil) and st.IndexUnlockDarkMatter or false
-    return ProgAPI.IsIndexComplete(ignMyth, unNorm, unGold, unRain, unDM)
+    -- If Phase 5 is enabled, Phase 6 activates once Phase 5 goal is met!
+    return ProgAPI.IsClickSkinGoalMet()
 end
 
 function ProgAPI.TeleportToSpawnDoor(): boolean
@@ -3955,6 +4326,20 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
             return true, string.format("[Phase 2: ???] Crafted %d Golden Pets (%d / %d)", crafted, questInfo.Golden.Progress, questInfo.Golden.Amount)
         else
             local eggName = "BasicEgg"
+            local stats = Stats.Local(true) or {}
+            local curWorld = stats.CurrentWorld or "Overworld"
+            local curIsland = stats.CurrentIsland or ""
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local _, targetPart = ProgAPI.FindEggModel(eggName)
+            local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 9999
+
+            -- Explicitly invoke the official server portal/island teleport remote if not already positioned at BasicEgg on Spawn!
+            if curWorld ~= "Overworld" or curIsland ~= "Spawn" or dist > 16 or (ProgAPI.IsInMinigame and ProgAPI.IsInMinigame()) then
+                ProgAPI.TeleportToEgg(eggName)
+                task.wait(0.3)
+            end
+
             local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
             ProgAPI.OpenEgg(eggName, openAmount, false)
             task.wait(0.08)
@@ -3964,13 +4349,28 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
         end
     end
 
-    -- 5. Objective 4: Hatch Eggs (2,500) - User instruction: use BasicEgg from World 1 Spawn
+    -- 5. Objective 4: Hatch Eggs (2,500) - After Gold is Done!
+    -- User rule: Auto delete pets after gold is done so it does not clump up inventory!
     if not questInfo.Hatch.Done then
         local eggName = "BasicEgg"
+        local stats = Stats.Local(true) or {}
+        local curWorld = stats.CurrentWorld or "Overworld"
+        local curIsland = stats.CurrentIsland or ""
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local _, targetPart = ProgAPI.FindEggModel(eggName)
+        local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 9999
+
+        -- Explicitly invoke the official server portal/island teleport remote if not already positioned at BasicEgg on Spawn!
+        if curWorld ~= "Overworld" or curIsland ~= "Spawn" or dist > 16 or (ProgAPI.IsInMinigame and ProgAPI.IsInMinigame()) then
+            ProgAPI.TeleportToEgg(eggName)
+            task.wait(0.3)
+        end
+
         local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
         ProgAPI.OpenEgg(eggName, openAmount, false)
-        pcall(ProgAPI.CraftGoldenPets)
-        pcall(ProgAPI.CleanWeakPets)
+        -- Auto delete all BasicEgg pets (Dog, Cat, Bunny, Pig - Normal & Golden) immediately
+        pcall(ProgAPI.CleanSecretQuestPets)
         return true, string.format("[Phase 2: ???] Hatching %s at Spawn (%s / %s)", eggName, ProgAPI.FormatNumber(questInfo.Hatch.Progress), ProgAPI.FormatNumber(questInfo.Hatch.Amount))
     end
 
@@ -4056,13 +4456,17 @@ function ProgAPI.GetEggIndexProgress(
     unlockNormal: boolean?,
     unlockGold: boolean?,
     unlockRainbow: boolean?,
-    unlockDM: boolean?
+    unlockDM: boolean?,
+    includeGoldLegendary: boolean?,
+    includeRainbowLegendary: boolean?
 )
     if ignoreMythicAndAbove == nil then ignoreMythicAndAbove = true end
     if unlockNormal == nil then unlockNormal = true end
     if unlockGold == nil then unlockGold = true end
     if unlockRainbow == nil then unlockRainbow = false end
     if unlockDM == nil then unlockDM = false end
+    if includeGoldLegendary == nil then includeGoldLegendary = false end
+    if includeRainbowLegendary == nil then includeRainbowLegendary = false end
 
     local stats = Stats.Local(true) or {}
     local obtained = stats.ObtainedPets or {}
@@ -4158,24 +4562,32 @@ function ProgAPI.GetEggIndexProgress(
 
     for _, target in ipairs(targetPets) do
         local pId = target.PetId
-        local rarity = target.Rarity
-        local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
-        if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
-            isEasyRarity = Constants.RarityOrder[rarity] <= 2
-        end
+        local rarity = target.Rarity or "Unknown"
+        local rOrder = (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity]) or 1
+
+        -- Normal: Common, Rare, Epic, Legendary (order <= 4)
+        local isNormalEligible = rOrder <= 4
+
+        -- Gold: Common, Rare, Epic always eligible. Legendary is eligible ONLY in Stage 2 (includeGoldLegendary == true)!
+        local isGoldEligible = (rOrder <= 3 and rarity ~= "Legendary")
+            or (includeGoldLegendary == true and (rarity == "Legendary" or rOrder == 4))
+
+        -- Rainbow: Common, Rare, Epic always eligible when rainbow is checked. Legendary is eligible ONLY if includeRainbowLegendary == true!
+        local isRainbowEligible = (rOrder <= 3 and rarity ~= "Legendary")
+            or (includeRainbowLegendary == true and (rarity == "Legendary" or rOrder == 4))
 
         local missingVariants = {}
         local isQueuedRainbow = false
 
-        if unlockNormal and obtained[pId .. "_Normal"] ~= true then
+        if unlockNormal and isNormalEligible and obtained[pId .. "_Normal"] ~= true then
             table.insert(missingVariants, "Normal")
         end
-        if unlockGold and obtained[pId .. "_Golden"] ~= true then
+        if unlockGold and isGoldEligible and obtained[pId .. "_Golden"] ~= true then
             table.insert(missingVariants, "Golden")
         end
 
-        -- Rainbow variant check: ONLY required if unlockRainbow is true, target 250 not reached, and pet is an easy rarity (Common/Rare)
-        if needRainbowForTarget and isEasyRarity then
+        -- Rainbow variant check: ONLY required if unlockRainbow is true, target 250 not reached, and pet is Common/Rare/Epic (NO Legendary)
+        if needRainbowForTarget and isRainbowEligible then
             if obtained[pId .. "_Rainbow"] ~= true then
                 if activeOrQueuedRainbow[pId] == true then
                     -- Already in Rainbow Machine (cooking 30-min craft or waiting in queue)!
@@ -4246,11 +4658,9 @@ function ProgAPI.GetNextUnindexedEgg(
     end
 
     -- =========================================================================
-    -- PASS 1 (PRIMARY): Normal & Gold across ALL worlds up to Legendary
-    -- User rule: "Normal > Gold. After all world got all possible gold for
-    -- legendary, then rainbow starts."
-    -- We do NOT craft or wait for Rainbows while any progression egg in any
-    -- world still has missing Normal or Golden pets!
+    -- STAGE 1: FAST BASE SWEEP ACROSS ALL WORLDS
+    -- Normal: Common, Rare, Epic, Legendary
+    -- Gold: Common, Rare, Epic ONLY (Legendary deferred for speedrun)
     -- =========================================================================
     if unlockNormal or unlockGold then
         for _, e in ipairs(REAL_PROGRESSION_EGGS) do
@@ -4259,35 +4669,88 @@ function ProgAPI.GetNextUnindexedEgg(
                 ignoreMythicAndAbove,
                 unlockNormal,
                 unlockGold,
-                false, -- unlockRainbow is strictly FALSE during Pass 1!
-                unlockDM
+                false, -- unlockRainbow is strictly FALSE during Stage 1
+                unlockDM,
+                false, -- includeGoldLegendary = false
+                false  -- includeRainbowLegendary = false
             )
             if not prog.IsComplete then
-                prog.IndexStage = "GoldPriority"
+                prog.IndexStage = "Stage 1: Normal & Easy Gold (Common..Epic)"
+                prog.StageCode = 1
                 return e, prog
             end
         end
     end
 
     -- =========================================================================
-    -- PASS 2 (FALLBACK FILLER): Easy Rainbows (Common/Rare) to reach 250
-    -- Activates ONLY AFTER all worlds have 100% of Normal & Gold complete!
+    -- STAGE 2: GOLD LEGENDARY PRIORITY (IF STILL < 250)
+    -- User rule: "End if index is not yet 250: Gold Legendary First"
+    -- Instant 100% craft at Golden Machine without 30-minute queue waiting!
+    -- =========================================================================
+    if unlockGold and curIndexed < targetTotal then
+        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+            local prog = ProgAPI.GetEggIndexProgress(
+                e.name,
+                ignoreMythicAndAbove,
+                false, -- Normal already 100% complete across all worlds
+                unlockGold,
+                false, -- No rainbow yet
+                unlockDM,
+                true,  -- includeGoldLegendary = true!
+                false
+            )
+            if not prog.IsComplete then
+                prog.IndexStage = "Stage 2: Gold Legendary Priority"
+                prog.StageCode = 2
+                return e, prog
+            end
+        end
+    end
+
+    -- =========================================================================
+    -- STAGE 3: RAINBOW FALLBACK (IF STILL < 250)
+    -- User rule: "then Rainbow after"
+    -- 3A: Easy Rainbows (Common, Rare, Epic)
+    -- 3B: Rainbow Legendary (if still under 250)
     -- =========================================================================
     local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
     local cookingCount = (rainbowStatus and rainbowStatus.TotalCooking) or 0
 
     if unlockRainbow and (curIndexed + cookingCount) < targetTotal then
+        -- 3A: Easy Rainbows (Common, Rare, Epic)
         for _, e in ipairs(REAL_PROGRESSION_EGGS) do
             local prog = ProgAPI.GetEggIndexProgress(
                 e.name,
                 ignoreMythicAndAbove,
-                unlockNormal,
-                unlockGold,
-                true, -- unlockRainbow is TRUE during Pass 2
-                unlockDM
+                false,
+                false,
+                true,  -- unlockRainbow = true
+                unlockDM,
+                false,
+                false  -- includeRainbowLegendary = false
             )
             if not prog.IsComplete then
-                prog.IndexStage = "RainbowFiller"
+                prog.IndexStage = "Stage 3A: Rainbow Easy (Common..Epic)"
+                prog.StageCode = 3
+                return e, prog
+            end
+        end
+
+        -- 3B: Rainbow Legendary (if still under 250)
+        for _, e in ipairs(REAL_PROGRESSION_EGGS) do
+            local prog = ProgAPI.GetEggIndexProgress(
+                e.name,
+                ignoreMythicAndAbove,
+                false,
+                false,
+                true,  -- unlockRainbow = true
+                unlockDM,
+                false,
+                true   -- includeRainbowLegendary = true!
+            )
+            if not prog.IsComplete then
+                prog.IndexStage = "Stage 3B: Rainbow Legendary"
+                prog.StageCode = 4
                 return e, prog
             end
         end
@@ -4322,10 +4785,14 @@ end
 
 function ProgAPI.CleanIndexedFodder(
     unlockGold: boolean?,
-    unlockRainbow: boolean?
+    unlockRainbow: boolean?,
+    includeGoldLegendary: boolean?,
+    includeRainbowLegendary: boolean?
 ): number
     if unlockGold == nil then unlockGold = true end
     if unlockRainbow == nil then unlockRainbow = true end
+    if includeGoldLegendary == nil then includeGoldLegendary = false end
+    if includeRainbowLegendary == nil then includeRainbowLegendary = false end
 
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
@@ -4372,9 +4839,20 @@ function ProgAPI.CleanIndexedFodder(
 
                 local petDef = Directory.Pets and Directory.Pets[pid]
                 local rarity = (petDef and petDef.Rarity) or "Basic"
-                local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
+                local isGoldEligible = (rarity == "Basic" or rarity == "Rare" or rarity == "Common" or rarity == "Epic") and (rarity ~= "Legendary")
                 if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
-                    isEasyRarity = Constants.RarityOrder[rarity] <= 2
+                    isGoldEligible = (Constants.RarityOrder[rarity] <= 3) and (rarity ~= "Legendary")
+                end
+                if includeGoldLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)) then
+                    isGoldEligible = true
+                end
+
+                local isRainbowEligible = (rarity == "Basic" or rarity == "Rare" or rarity == "Common" or rarity == "Epic") and (rarity ~= "Legendary")
+                if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
+                    isRainbowEligible = (Constants.RarityOrder[rarity] <= 3) and (rarity ~= "Legendary")
+                end
+                if includeRainbowLegendary == true and (rarity == "Legendary" or (Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] == 4)) then
+                    isRainbowEligible = true
                 end
 
                 local hasNormalIndex = (obtained[pid .. "_Normal"] == true)
@@ -4384,17 +4862,17 @@ function ProgAPI.CleanIndexedFodder(
 
                 local shouldKeep = false
 
-                -- If Gold index is needed and this is a normal pet, preserve up to 10 copies to craft Gold
-                if unlockGold and not hasGoldIndex and not isGold and not isRainbow then
+                -- If Gold index is needed (Common/Rare/Epic only, NO Legendary) and this is a normal pet, preserve up to 10 copies to craft Gold
+                if unlockGold and isGoldEligible and not hasGoldIndex and not isGold and not isRainbow then
                     preservedForGold[pid] = (preservedForGold[pid] or 0) + 1
                     if preservedForGold[pid] <= 10 then
                         shouldKeep = true
                     end
                 end
 
-                -- If Rainbow index is needed for easy rarity (Common/Rare) and not yet indexed and not yet queued:
+                -- If Rainbow index is needed for Common/Rare/Epic (NO Legendary) and not yet indexed and not yet queued:
                 -- preserve up to 6 golden copies to start a 100% 30-min craft!
-                if needRainbowForTarget and isEasyRarity and not hasRainbowIndex and not isRainbowQueued and isGold then
+                if needRainbowForTarget and isRainbowEligible and not hasRainbowIndex and not isRainbowQueued and isGold then
                     preservedForRainbow[pid] = (preservedForRainbow[pid] or 0) + 1
                     if preservedForRainbow[pid] <= 6 then
                         shouldKeep = true
@@ -4404,8 +4882,8 @@ function ProgAPI.CleanIndexedFodder(
                 -- If this pet has already fulfilled all active index requirements, it is fodder -> safe to delete!
                 if not shouldKeep then
                     local normalSatisfied = (not unlockNormal) or hasNormalIndex
-                    local goldSatisfied = (not unlockGold) or hasGoldIndex
-                    local rainbowSatisfied = (not needRainbowForTarget) or (not isEasyRarity) or hasRainbowIndex or isRainbowQueued
+                    local goldSatisfied = (not unlockGold) or (not isGoldEligible) or hasGoldIndex
+                    local rainbowSatisfied = (not needRainbowForTarget) or (not isRainbowEligible) or hasRainbowIndex or isRainbowQueued
 
                     if normalSatisfied and goldSatisfied and rainbowSatisfied then
                         table.insert(toDelete, guid)
@@ -4452,59 +4930,121 @@ function ProgAPI.StepAutoIndex(
         return true, "All progression eggs / target index goals complete! Phase 4 complete."
     end
 
-    local isGoldPriority = (eggProg.IndexStage == "GoldPriority")
+    local stageCode = eggProg.StageCode or 1
+    local isRainbowStage = (stageCode >= 3)
+    local includeRainLeg = (stageCode == 4)
     local pData = ProgAPI.GetPlayerData()
     local clicks = pData.Clicks or 0
 
     -- Check if player can afford egg
     if clicks < nextEgg.cost then
         return false, string.format("[Phase 4: %s] Saving clicks for %s (%s / %s)",
-            isGoldPriority and "Gold Priority" or "Rainbow Filler",
+            tostring(eggProg.IndexStage or "Index Progression"),
             tostring(nextEgg.name),
             ProgAPI.FormatNumber(clicks),
             ProgAPI.FormatNumber(nextEgg.cost)
         )
     end
 
-    -- Teleport to the egg ONLY IF not already close (prevents stutter/rubberbanding back and forth)
+    -- Identify target egg, island, and world
+    local eggMeta = eggData[nextEgg.name] or (Directory and Directory.Eggs and Directory.Eggs[nextEgg.name])
+    local targetIsland = eggMeta and (eggMeta.island or eggMeta.Island) or "Spawn"
+    local meta = islandMetaLookup[targetIsland] or (Directory and Directory.Islands and Directory.Islands[targetIsland])
+    local targetWorld = (meta and (meta.world or meta.World)) or "Overworld"
+    if targetIsland == "Base" or targetIsland == "Spaceship" or targetIsland == "Fragment" or targetIsland == "Matrix"
+        or nextEgg.name == "TechEgg" or nextEgg.name == "HolographicEgg" or nextEgg.name == "404Egg"
+        or nextEgg.name == "RedTechEgg" or nextEgg.name == "FragmentedEgg" or nextEgg.name == "MatrixEgg" then
+        targetWorld = "Techworld"
+    else
+        targetWorld = "Overworld"
+    end
+
+    local stats = Stats.Local(true) or {}
+    local curWorld = stats.CurrentWorld or "Overworld"
+    local curIsland = stats.CurrentIsland or ""
+    local inMinigame = (ProgAPI.IsInMinigame and ProgAPI.IsInMinigame())
+
     local eggModel, targetPart = ProgAPI.FindEggModel(nextEgg.name)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local isNearby = false
-    if hrp and targetPart and (hrp.Position - targetPart.Position).Magnitude <= 18 then
-        isNearby = true
-    elseif hrp and nextEgg.name == "MatrixEgg" and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 18 then
-        isNearby = true
+    local dist = (hrp and targetPart) and (hrp.Position - targetPart.Position).Magnitude or 999
+    local isNearby = (dist <= 16) or (nextEgg.name == "MatrixEgg" and hrp and (hrp.Position - Vector3.new(7828.7, 6196.1, 303.1)).Magnitude <= 16)
+
+    local isNewEgg = (rawget(ProgAPI, "_CurrentIndexEgg") ~= nextEgg.name)
+    local worldMismatch = (curWorld ~= targetWorld)
+
+    -- Teleport ONLY IF:
+    -- 1. Currently in a minigame
+    -- 2. In the wrong world (curWorld ~= targetWorld)
+    -- 3. Not nearby the target egg (dist > 16 studs)
+    if inMinigame or worldMismatch or not isNearby then
+        -- 1. Exit minigame if in one
+        if inMinigame then
+            ProgAPI.ExitMinigame()
+            task.wait(0.3)
+        end
+
+        -- 2. World Remote: ONLY invoke TeleportToWorld if in the WRONG WORLD!
+        -- If player is already in targetWorld, NEVER invoke TeleportToWorld (it teleports to Tech World Spawn)!
+        if worldMismatch then
+            if Channels.Portals then
+                pcall(function()
+                    Channels.Portals:InvokeServer("TeleportToWorld", targetWorld)
+                end)
+                task.wait(0.4)
+            else
+                ProgAPI.TeleportToWorld(targetWorld, true)
+                task.wait(0.4)
+            end
+        end
+
+        -- 3. Island Remote: invoke if island is not Spawn
+        if targetIsland ~= "Spawn" and Channels.Portals then
+            pcall(function()
+                Channels.Portals:InvokeServer("TeleportToIsland", targetIsland)
+            end)
+            task.wait(0.15)
+        end
+        if IslandsFrontend and IslandsFrontend.LocalTeleport then
+            pcall(function()
+                IslandsFrontend.LocalTeleport(targetIsland)
+            end)
+        end
+
+        -- 4. Teleport directly to the egg stand
+        ProgAPI.TeleportToEgg(nextEgg.name, false)
+        task.wait(0.1)
+        ProgAPI._CurrentIndexEgg = nextEgg.name
+    else
+        -- Already standing at the egg in the correct world: keep locked onto platform
+        ProgAPI._CurrentIndexEgg = nextEgg.name
+        if hrp and targetPart and dist > 8 then
+            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+        end
     end
 
-    if not isNearby then
-        ProgAPI.TeleportToEgg(nextEgg.name)
-    end
-
-    -- Multi-hatch according to player hatch rate
+    -- Multi-hatch at maximum speed without redundant teleportation
     local hatchAmount = ProgAPI.GetMaxEggOpenAmount(nextEgg.name)
-    pcall(function()
-        ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
-    end)
+    local openOk, openMsg = ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
 
-    -- Auto craft golden pets FIRST (Normal > Gold priority)
+    -- Auto craft golden pets FIRST (Normal > Gold priority in Stage 1 & 2)
     if unlockGold then
         pcall(ProgAPI.CraftGoldenPets)
     end
 
-    -- Rainbow crafting: ONLY executed if in RainbowFiller stage (Pass 2, all worlds already have gold)
-    if not isGoldPriority and unlockRainbow then
+    -- Rainbow crafting: ONLY executed during Stage 3 (Rainbow stage)
+    if isRainbowStage and unlockRainbow then
         pcall(function()
-            ProgAPI.CraftRainbowPets(true)
+            ProgAPI.CraftRainbowPets(true, includeRainLeg)
         end)
     end
     -- Always claim ready rainbow crafts in background
     pcall(ProgAPI.ClaimRainbowPets)
 
     -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
-    -- In GoldPriority stage, pass false for rainbow so extra gold pets are deleted and don't clutter bag
     pcall(function()
-        ProgAPI.CleanIndexedFodder(unlockGold, not isGoldPriority and unlockRainbow)
+        local includeGoldLeg = (stageCode >= 2)
+        ProgAPI.CleanIndexedFodder(unlockGold, isRainbowStage and unlockRainbow, includeGoldLeg, includeRainLeg)
     end)
 
     local missingNames = {}
@@ -4526,32 +5066,24 @@ function ProgAPI.StepAutoIndex(
     local rbStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
     local cooking = (rbStatus and rbStatus.TotalCooking) or 0
 
-    if isGoldPriority then
-        return false, string.format("[Phase 4: Gold Priority (%d/250)] %s (%d/%d): Missing %s",
-            curTotal,
-            tostring(eggProg.DisplayName),
-            eggProg.CompletedPetsCount,
-            eggProg.TargetPetsCount,
-            missingStr
-        )
-    else
-        return false, string.format("[Phase 4: Rainbow Filler (%d+%d/250)] %s (%d/%d): Missing %s%s",
-            curTotal,
-            cooking,
-            tostring(eggProg.DisplayName),
-            eggProg.CompletedPetsCount,
-            eggProg.TargetPetsCount,
-            missingStr,
-            queuedStr
-        )
-    end
+    local stageLabel = eggProg.IndexStage or "Index Progression"
+    return false, string.format("[Phase 4: %s (%d%s/250)] %s (%d/%d): Missing %s%s",
+        stageLabel,
+        curTotal,
+        cooking > 0 and ("+" .. tostring(cooking)) or "",
+        tostring(eggProg.DisplayName),
+        eggProg.CompletedPetsCount,
+        eggProg.TargetPetsCount,
+        missingStr,
+        queuedStr
+    )
 end
 
 --==============================================================================
--- PHASE 5: ENDGAME MATRIX MYTHIC PIPELINE
--- Activates once Phase 4 (Auto Index) is complete (or bypassed)!
+-- PHASE 6: ENDGAME MATRIX MYTHIC PIPELINE
+-- Activates once Phase 5 (Ultimate Click Skin) is complete (or bypassed)!
 --==============================================================================
--- Phase 5 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
+-- Phase 6 Dedicated Mythic Filter: Keeps ONLY Mythic and above pets!
 -- Strictly preserves Mythic, Mythical, Special, Mega, Secret, Divine, and Exclusive pets
 -- Deletes all non-mythic pets (Basic, Rare, Epic, Legendary, Stock)
 function ProgAPI.CleanNonMythicPets(): number
@@ -4693,7 +5225,7 @@ updateBlackScreenTelemetry = function()
             labels.SelectedEgg.Text = string.format("%s (%s %s)", eggDispName, ProgAPI.FormatNumber(eggCost), eggCurr)
         end
         if labels.EggLuck then
-            local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "2.7s"
+            local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "1.5s"
             labels.EggLuck.Text = string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(luckMult), speedText)
         end
         if labels.Activity then labels.Activity.Text = tostring(ProgAPI.CurrentActivity or "Auto Progression Active") end
@@ -4933,7 +5465,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
             blackScreenRowLabels.Island = addRow("Island", tostring(pData.CurrentIsland or "Spawn"), 80, "Island")
             blackScreenRowLabels.PetInv = addRow("Pet Inventory", string.format("%d / %d", initPets, initMaxPets), 100, "PetInv")
             blackScreenRowLabels.SelectedEgg = addRow("Selected Egg", string.format("%s (%s %s)", initEggDisp, ProgAPI.FormatNumber(initEggCost), initEggCurr), 120, "SelectedEgg")
-            local initSpeed = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "2.7s"
+            local initSpeed = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed() or "1.5s"
             blackScreenRowLabels.EggLuck = addRow("Current Egg Luck", string.format("%s (Hatch: %s)", ProgAPI.FormatLuck(initLuck), initSpeed), 140, "EggLuck")
 
             blackScreenRowLabels.Activity = addRow("Current Activity", tostring(ProgAPI.CurrentActivity or "Auto Farm Active"), 168, "Activity")
@@ -5268,7 +5800,7 @@ function ProgAPI.SetDisableInGameSettings(enabled: boolean)
         HidePetsOwn = enabled,
         TransparentPets = enabled,
         DisableServerMessages = enabled,
-        TradeRequests = not enabled,
+        TradeRequests = true, -- TradeRequests MUST ALWAYS BE TRUE! Never disable in in-game settings
     }
 
     for settingName, val in pairs(targetSettings) do
@@ -5276,6 +5808,10 @@ function ProgAPI.SetDisableInGameSettings(enabled: boolean)
             SettingsCh:InvokeServer("SetSetting", settingName, val)
         end)
     end
+    -- Redundant guarantee: explicitly ensure TradeRequests is set to true on the server
+    pcall(function()
+        SettingsCh:InvokeServer("SetSetting", "TradeRequests", true)
+    end)
 
     -- Visually update button states if PlayerGui.Settings is open
     pcall(function()
@@ -5653,4 +6189,223 @@ function ProgAPI.StopAutoRejoin()
     table.clear(_autoRejoinConnections)
 end
 
+--==============================================================================
+-- AUTOMATIC TRADING PIPELINE
+-- Feature: Auto Accept Trade (Default ON)
+-- 1. Automatically accepts incoming trade requests.
+-- 2. Waits until the other player is ready (Accepted!).
+-- 3. Readies up once the other player is ready.
+-- 4. Waits through the 5-second countdown cooldown until the button changes to "Confirm!".
+-- 5. Confirms the trade.
+--==============================================================================
+
+local _autoTradeListenerConnected = false
+local _lastTradeActionTick = 0
+local _lastTradeSettingTick = 0
+
+function ProgAPI.InitAutoTradeListener()
+    -- Always guarantee in-game TradeRequests setting is ON (never disabled)
+    pcall(function()
+        local SettingsCh = Channels.Settings or (Network and Network.Channel("Settings"))
+        if SettingsCh then
+            SettingsCh:InvokeServer("SetSetting", "TradeRequests", true)
+        end
+    end)
+
+    if _autoTradeListenerConnected then return end
+    pcall(function()
+        local rep = game:GetService("ReplicatedStorage")
+        local lib = rep:WaitForChild("Library", 5)
+        local client = lib and lib:WaitForChild("Client", 5)
+        local tradeFrontendMod = client and client:WaitForChild("TradeFrontend", 5)
+        if tradeFrontendMod then
+            local TradeFrontend = require(tradeFrontendMod)
+            if TradeFrontend then
+                -- 1. Hook TradeRequestDecision: Whenever AutoAcceptTrade is active, FORCE decision = 1 (Accept)!
+                -- This prevents the game's Trade List script from sending 'false' (decline) when Message.New closes!
+                if TradeFrontend.TradeRequestDecision and not TradeFrontend._autoTradeHooked then
+                    local origDecision = TradeFrontend.TradeRequestDecision
+                    TradeFrontend.TradeRequestDecision = function(requester, decision)
+                        local st = rawget(_G, "State")
+                        if st and st.AutoAcceptTrade ~= false then
+                            decision = 1 -- 1 = Accept in Clicker Simulator TradeFrontend
+                        end
+                        return origDecision(requester, decision)
+                    end
+                    TradeFrontend._autoTradeHooked = true
+                end
+
+                -- 2. Hook TradeRequestReceived
+                if TradeFrontend.TradeRequestReceived then
+                    TradeFrontend.TradeRequestReceived:Connect(function(requester)
+                        local st = rawget(_G, "State")
+                        if st and st.AutoAcceptTrade ~= false then
+                            task.spawn(function()
+                                task.wait(0.08)
+                                -- Automatically accept/dismiss Message GUI prompt if present
+                                local msgGui = LocalPlayer.PlayerGui:FindFirstChild("Message")
+                                if msgGui and msgGui.Enabled then
+                                    local frame = msgGui:FindFirstChild("Frame")
+                                    local buttons = frame and frame:FindFirstChild("Buttons")
+                                    if buttons then
+                                        for _, b in ipairs(buttons:GetChildren()) do
+                                            local titleLbl = b:FindFirstChild("Title", true)
+                                            local mainBtn = b:FindFirstChild("Main") or b:FindFirstChildWhichIsA("GuiButton", true)
+                                            if titleLbl and titleLbl.Text == "Accept" and mainBtn then
+                                                pcall(function()
+                                                    if firesignal then
+                                                        firesignal(mainBtn.Activated)
+                                                        firesignal(mainBtn.MouseButton1Click)
+                                                    end
+                                                end)
+                                            end
+                                        end
+                                    end
+                                end
+                                -- Accept trade directly via TradeRequestDecision
+                                pcall(function()
+                                    TradeFrontend.TradeRequestDecision(requester, 1)
+                                end)
+                            end)
+                        end
+                    end)
+                    _autoTradeListenerConnected = true
+                end
+            end
+        end
+    end)
+end
+
+function ProgAPI.GetTradeStatus(): (boolean, table?)
+    local tradingGui = LocalPlayer.PlayerGui:FindFirstChild("Trading")
+    if not tradingGui or not tradingGui.Enabled then
+        return false, nil
+    end
+    local frame = tradingGui:FindFirstChild("Frame")
+    if not frame or not frame.Visible then
+        return false, nil
+    end
+
+    local they = frame:FindFirstChild("They")
+    local readyBtn = they and they:FindFirstChild("Buttons") and they.Buttons:FindFirstChild("Ready") and they.Buttons.Ready:FindFirstChild("Button")
+    local readyTitle = readyBtn and readyBtn:FindFirstChild("Title")
+    local status = they and they:FindFirstChild("Scrolling") and they.Scrolling:FindFirstChild("Status")
+    local statusLabel = status and status:FindFirstChild("Label")
+    local note = they and they:FindFirstChild("Note")
+
+    local otherAccepted = (status and status.Visible and statusLabel and (statusLabel.Text == "Accepted!" or statusLabel.Text == "Confirmed!"))
+        or (note and (note.Text:find("Waiting for You to Accept") ~= nil or note.Text:find("Waiting for You to Confirm") ~= nil or note.Text:find("both players Confirm") ~= nil))
+
+    local btnText = (readyTitle and readyTitle.Text) or ""
+    local noteText = (note and note.Text) or ""
+
+    return true, {
+        TradingOpen = true,
+        ReadyButton = readyBtn,
+        ButtonText = btnText,
+        NoteText = noteText,
+        OtherAccepted = otherAccepted or false,
+        StatusText = (statusLabel and statusLabel.Text) or "",
+        Executing = (btnText == "Processing..." or noteText:find("Processing") ~= nil)
+    }
+end
+
+function ProgAPI.StepAutoTrade(): (boolean, string?)
+    local st = rawget(_G, "State")
+    if st and st.AutoAcceptTrade == false then
+        return false, "AutoAcceptTrade disabled"
+    end
+
+    local now = tick()
+
+    -- Periodically enforce in-game setting TradeRequests = true every 5 seconds
+    if now - _lastTradeSettingTick >= 5 then
+        _lastTradeSettingTick = now
+        pcall(function()
+            local SettingsCh = Channels.Settings or (Network and Network.Channel("Settings"))
+            if SettingsCh then
+                SettingsCh:InvokeServer("SetSetting", "TradeRequests", true)
+            end
+        end)
+    end
+
+    -- 1. Auto-accept pending trade request prompt in Message GUI if visible
+    local msgGui = LocalPlayer.PlayerGui:FindFirstChild("Message")
+    if msgGui and msgGui.Enabled then
+        local frame = msgGui:FindFirstChild("Frame")
+        local desc = frame and frame:FindFirstChild("Desc")
+        local descText = (desc and desc.Text) or ""
+        if descText:find("trade request") or descText:find("Trade") or descText:find("sent you") then
+            local buttons = frame and frame:FindFirstChild("Buttons")
+            if buttons then
+                for _, b in ipairs(buttons:GetChildren()) do
+                    if b:IsA("GuiObject") then
+                        local titleLbl = b:FindFirstChild("Title", true)
+                        local mainBtn = b:FindFirstChild("Main") or b:FindFirstChildWhichIsA("GuiButton", true)
+                        if titleLbl and titleLbl.Text == "Accept" and mainBtn then
+                            pcall(function()
+                                if firesignal then
+                                    firesignal(mainBtn.Activated)
+                                    firesignal(mainBtn.MouseButton1Click)
+                                end
+                            end)
+                            return true, "Accepted incoming trade request prompt"
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Inspect active trading window
+    local isOpen, trade = ProgAPI.GetTradeStatus()
+    if not isOpen or not trade or not trade.ReadyButton then
+        return false, "Trade window closed"
+    end
+
+    if trade.Executing then
+        return true, "Trade processing..."
+    end
+
+    -- 3. If other player is ready and our button is "Ready!", ready up!
+    if trade.ButtonText == "Ready!" then
+        if trade.OtherAccepted then
+            if now - _lastTradeActionTick >= 0.35 then
+                _lastTradeActionTick = now
+                pcall(function()
+                    if firesignal then
+                        firesignal(trade.ReadyButton.Activated)
+                        firesignal(trade.ReadyButton.MouseButton1Click)
+                    end
+                end)
+                return true, "Readied up trade"
+            end
+        else
+            return false, "Waiting for other player to accept"
+        end
+    end
+
+    -- 4. If button is "Confirm!", the 5-second countdown cooldown has elapsed -> Confirm the trade!
+    if trade.ButtonText == "Confirm!" then
+        if now - _lastTradeActionTick >= 0.35 then
+            _lastTradeActionTick = now
+            pcall(function()
+                if firesignal then
+                    firesignal(trade.ReadyButton.Activated)
+                    firesignal(trade.ReadyButton.MouseButton1Click)
+                end
+            end)
+            return true, "Confirmed trade"
+        end
+    end
+
+    -- 5. During countdown (ButtonText is "Unready!" and cooldown is running)
+    if trade.ButtonText == "Unready!" then
+        return false, trade.NoteText ~= "" and trade.NoteText or "Cooldown timer running..."
+    end
+
+    return false, "Trading in progress"
+end
+
 return ProgAPI
+
