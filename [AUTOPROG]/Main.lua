@@ -692,8 +692,8 @@ Phase6Tab:AddToggle("AutoMatrixEggToggle_P6", {
 })
 
 Phase6Tab:AddToggle("AutoMythicFilterToggle_P6", {
-    Title = "Keep Mythic & Above (Delete Non-Mythic)",
-    Description = "Strictly keeps Mythic, Secret, Mega, Divine, and Exclusive pets; deletes Common, Rare, Epic, Legendary",
+    Title = "Protect High-Tier (Exclusive, Secret, Stock, Divine, Mega)",
+    Description = "Strictly keeps Exclusive, Secret, Stock, Divine, Mega, and Mythic pets; deletes Common, Rare, Epic, Legendary",
     Default = State.AutoMythicFilter ~= false,
     Callback = function(val) State.AutoMythicFilter = val; Configs.Set("AutoMythicFilter", val) end
 })
