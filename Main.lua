@@ -1478,15 +1478,17 @@ table.insert(threads, task.spawn(function()
     local lastSkinTick = 0
     local lastQuestTick = 0
     local lastFurthestTpTick = 0
+    local lastCraftTick = 0
+    local lastEquipTick = 0
 
     while isRunning do
-        task.wait(0.05)
+        task.wait(0.03)
         if not State.MasterEnabled or not isRunning then continue end
         pcall(function()
             local now = tick()
 
-            -- WATCHDOG: If egg hatching task hangs or takes > 3.5s, force unlock to prevent stalls
-            if isEggHatching and (now - lastEggHatchStartTick > 3.5) then
+            -- WATCHDOG: If egg hatching task hangs or takes > 2.0s, force unlock to prevent stalls
+            if isEggHatching and (now - lastEggHatchStartTick > 2.0) then
                 isEggHatching = false
             end
 
@@ -1560,21 +1562,25 @@ table.insert(threads, task.spawn(function()
                 -- 3. Auto buy egg for pets & auto gold pets strictly on furthest island
                 local hatchDelay = (AutoProgAPI.GetPlayerHatchSpeed and AutoProgAPI.GetPlayerHatchSpeed(bestEgg and bestEgg.name)) or 1.5
                 if (State.AutoBestEggs or State.AutoGold) and not isEggHatching and (now - lastEggHatchTick >= hatchDelay) then
-                    lastEggHatchTick = now
-
                     -- If team is not yet all gold, hatch best affordable egg strictly on furthest island!
                     if not isAllGold and canAffordBestEgg and isSafeEgg and not isNearUnlock then
                         local hatchAmount = AutoProgAPI.GetMaxEggOpenAmount(bestEgg.name)
                         currentActivity = string.format("[Phase 1] Hatching %dx %s on %s for Golden Team", hatchAmount, bestEgg.name, bestEgg.island)
                         isEggHatching = true
                         lastEggHatchStartTick = now
+                        lastEggHatchTick = now -- START COUNTDOWN IMMEDIATELY!
                         task.spawn(function()
                             pcall(function()
                                 AutoProgAPI.OpenEgg(bestEgg.name, hatchAmount, true)
+                            end)
+                            -- Release hatch lock immediately as soon as egg remote returns!
+                            isEggHatching = false
+
+                            -- Background craft & equip without delaying next hatch:
+                            task.spawn(function()
                                 pcall(AutoProgAPI.CraftGoldenPets)
                                 pcall(AutoProgAPI.EquipBest)
                             end)
-                            isEggHatching = false
                         end)
                     end
                 end
@@ -1730,32 +1736,41 @@ table.insert(threads, task.spawn(function()
                         currentActivity = string.format("[Phase 6: Matrix] Hatching %dx MatrixEgg (Mythic Hunt)...", hatchAmount)
                         isEggHatching = true
                         lastEggHatchStartTick = now
+                        lastEggHatchTick = now -- START COUNTDOWN IMMEDIATELY!
+
                         task.spawn(function()
+                            -- Open egg directly without holding up the thread
                             pcall(function()
-                                -- Proactive cleanup BEFORE open to guarantee free slots!
-                                if State.AutoMythicFilter then
-                                    pcall(AutoProgAPI.CleanNonMythicPets)
-                                end
                                 AutoProgAPI.OpenEgg("MatrixEgg", hatchAmount, true)
+                            end)
 
-                                -- 2. Mythic Pet Filter & Cleaner: Delete non-mythics and old weak pets
-                                if State.AutoMythicFilter then
+                            -- Release egg hatch lock IMMEDIATELY upon server return so countdown dictates next hatch!
+                            isEggHatching = false
+
+                            -- Run post-hatch cleanup and maintenance asynchronously in background
+                            task.spawn(function()
+                                -- Only clean non-mythics if inventory is close to capacity to avoid wasting network bandwidth every hatch
+                                local pStats = AutoProgAPI.GetPlayerData()
+                                local curPets = 0
+                                for _ in pairs(pStats.Pets or {}) do curPets = curPets + 1 end
+                                local maxPets = pStats.MaxInventoryPets or 200
+
+                                if State.AutoMythicFilter and (curPets + hatchAmount >= maxPets - 4) then
                                     pcall(AutoProgAPI.CleanNonMythicPets)
                                 end
 
-                                -- 3. Auto Craft Golden & Rainbow Mythics
-                                if State.AutoCraftMythics then
+                                if State.AutoCraftMythics and (tick() - lastCraftTick > 2.5) then
+                                    lastCraftTick = tick()
                                     pcall(AutoProgAPI.CraftGoldenPets)
                                     pcall(AutoProgAPI.CraftRainbowPets)
                                     pcall(AutoProgAPI.ClaimRainbowPets)
                                 end
 
-                                -- 4. Auto Replace Team with Mythics
-                                if State.AutoReplaceTeam then
+                                if State.AutoReplaceTeam and (tick() - lastEquipTick > 3) then
+                                    lastEquipTick = tick()
                                     pcall(AutoProgAPI.EquipBest)
                                 end
                             end)
-                            isEggHatching = false
                         end)
                     else
                         -- Not enough clicks yet for Matrix Egg: Stay directly on Matrix Egg to click & hatch!

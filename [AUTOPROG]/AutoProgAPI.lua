@@ -150,6 +150,10 @@ end
 ProgAPI.SessionStats = _G.__ProgAPI_SessionStats
 ProgAPI.WebhookUrl = ""
 ProgAPI.WebhookEnabled = true
+ProgAPI.LastHatchTriggerTick = 0
+ProgAPI.LastHatchedBatchTick = 0
+ProgAPI.IsEggHatching = false
+ProgAPI.HatchBackoffUntil = 0
 
 function ProgAPI.DetectGlobalWebhook(): string?
     local candidates = {
@@ -479,6 +483,10 @@ local function setupHatchTracker()
 
     _G.__ProgAPI_HatchConn = sig:Connect(function(eggName, petList, batchId)
         if type(petList) ~= "table" then return end
+        ProgAPI.LastHatchedBatchTick = tick()
+        if (tick() - (ProgAPI.LastHatchTriggerTick or 0)) > 2.0 then
+            ProgAPI.LastHatchTriggerTick = tick()
+        end
         local count = #petList
         ProgAPI.SessionStats.Eggs = ProgAPI.SessionStats.Eggs + count
         ProgAPI.SelectedEgg = eggName
@@ -1597,46 +1605,58 @@ function ProgAPI.TeleportToEgg(eggName: string, forceWorldRemote: boolean?): boo
 end
 
 -- Dynamically retrieves the exact Hatching Speed displayed on the User Profile
--- (e.g. 1.5s, 2.7s) to guarantee 100% accurate synchronization with game engine and server cooldowns
+-- (e.g. 1.1s, 1.5s, 2.7s) to guarantee 100% accurate synchronization with game engine and server cooldowns
 function ProgAPI.GetUserProfileHatchSpeed(eggName: string?): (number, string)
     eggName = eggName or ProgAPI.SelectedEgg or "MatrixEgg"
 
-    -- 1. Try reading the exact text from the User Profile GUI if available
-    local pGui = LocalPlayer:FindFirstChild("PlayerGui")
-    local profileGui = pGui and pGui:FindFirstChild("Profile")
-    if profileGui then
-        local hs = profileGui:FindFirstChild("HatchSpeed", true)
-        if hs then
-            local val = hs:FindFirstChild("Value")
-            if val and val.Text and val.Text ~= "" then
-                local num = tonumber(val.Text:match("([%d%.]+)"))
-                if num and num > 0 then
-                    return num, string.format("%.1fs", num)
+    -- 1. Try reading the exact text from the User Profile GUI if available (matches player screen 100%)
+    local guiSpeed = nil
+    pcall(function()
+        local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+        local profileGui = pGui and pGui:FindFirstChild("Profile")
+        if profileGui then
+            local hs = profileGui:FindFirstChild("HatchSpeed", true)
+            if hs then
+                local val = hs:FindFirstChild("Value")
+                if val and val.Text and val.Text ~= "" then
+                    local num = tonumber(val.Text:match("([%d%.]+)"))
+                    if num and num > 0 then
+                        guiSpeed = num
+                    end
                 end
             end
         end
-    end
+    end)
 
     -- 2. Exact game engine formula used by Profile script: string.format("%.1fs", 4.2 / EggsFrontend.GetHatchSpeedMultiplier())
-    local mult = 1
-    if EggsFrontend and EggsFrontend.GetHatchSpeedMultiplier then
-        local ok, m = pcall(function()
-            return EggsFrontend.GetHatchSpeedMultiplier(eggName)
-        end)
-        if not ok or type(m) ~= "number" or m <= 0 then
-            ok, m = pcall(function()
-                return EggsFrontend.GetHatchSpeedMultiplier()
-            end)
+    local engineSpeed = nil
+    pcall(function()
+        if not EggsFrontend then
+            local lib = ReplicatedStorage:FindFirstChild("Library")
+            local cl = lib and lib:FindFirstChild("Client")
+            if cl and cl:FindFirstChild("EggsFrontend") then
+                EggsFrontend = require(cl.EggsFrontend)
+            end
         end
-        if ok and type(m) == "number" and m > 0 then
-            mult = m
+        if EggsFrontend and EggsFrontend.GetHatchSpeedMultiplier then
+            local mult = EggsFrontend.GetHatchSpeedMultiplier(eggName)
+            if not mult or mult <= 0 then
+                mult = EggsFrontend.GetHatchSpeedMultiplier()
+            end
+            if mult and mult > 0 then
+                local raw = 4.2 / mult
+                local formatted = string.format("%.1f", raw)
+                local num = tonumber(formatted) or raw
+                if num and num > 0 then
+                    engineSpeed = num
+                end
+            end
         end
-    end
+    end)
 
-    local raw = 4.2 / mult
-    local formatted = string.format("%.1f", raw)
-    local speed = tonumber(formatted) or raw
-    return math.clamp(speed, 0.1, 10.0), formatted .. "s"
+    local chosen = guiSpeed or engineSpeed or 1.5
+    local clamped = math.clamp(chosen, 0.4, 10.0)
+    return clamped, string.format("%.1fs", clamped)
 end
 
 function ProgAPI.GetPlayerHatchSpeed(eggName: string?): number
@@ -1647,6 +1667,19 @@ end
 function ProgAPI.FormatHatchSpeed(eggName: string?): string
     local _, formatted = ProgAPI.GetUserProfileHatchSpeed(eggName)
     return formatted
+end
+
+function ProgAPI.GetRemainingHatchCooldown(eggName: string?): number
+    local speed = ProgAPI.GetPlayerHatchSpeed(eggName)
+    local lastTrigger = ProgAPI.LastHatchTriggerTick or 0
+    local elapsed = tick() - lastTrigger
+    return math.max(0, speed - elapsed)
+end
+
+function ProgAPI.CanHatchEgg(eggName: string?): boolean
+    if ProgAPI.IsEggHatching then return false end
+    if tick() < (ProgAPI.HatchBackoffUntil or 0) then return false end
+    return ProgAPI.GetRemainingHatchCooldown(eggName) <= 0
 end
 
 -- Calculates dynamic max multi-open hatch amount (1x, 3x, 8x, or higher) based on gamepasses, boosts, inventory space, and clicks
@@ -1729,6 +1762,9 @@ end
 
 function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean?): (boolean, string)
     if not eggName or eggName == "" then return false, "No egg specified" end
+    if tick() < (ProgAPI.HatchBackoffUntil or 0) then
+        return false, "Hatch on cooldown backoff"
+    end
     ProgAPI.SelectedEgg = eggName
     ProgAPI.DisableEggAnimation()
 
@@ -1837,36 +1873,46 @@ function ProgAPI.OpenEgg(eggName: string, amount: number?, skipTeleport: boolean
         task.wait(0.08)
     end
 
+    -- START COUNTDOWN AT THE INSTANT OF THE HATCH TRIGGER:
+    ProgAPI.LastHatchTriggerTick = tick()
+    ProgAPI.IsEggHatching = true
+
     local guid = HttpService:GenerateGUID(false)
     local ok, res, reason = pcall(function()
         return Channels.Egg:InvokeServer("Open", eggName, amount, guid)
     end)
 
+    -- Release hatching lock immediately upon server return so countdown dictates next hatch!
+    ProgAPI.IsEggHatching = false
+    ProgAPI.LastHatchCompleteTick = tick()
+
     if ok and (res == true or type(res) == "table") then
         return true, "Successfully opened " .. eggName
     end
 
-    -- If server rejected due to full inventory, clean immediately
+    -- If server rejected due to full inventory, clean immediately in background
     if tostring(reason):lower():find("full") or tostring(res):lower():find("full") then
-        if isP6 then
-            pcall(ProgAPI.CleanNonMythicPets)
-        elseif isP4 then
-            pcall(ProgAPI.CraftGoldenPets)
-            pcall(ProgAPI.CleanIndexedFodder)
-        elseif isP2GoldDone then
-            pcall(ProgAPI.CleanSecretQuestPets)
-        else
-            pcall(ProgAPI.CraftGoldenPets)
-            pcall(function() ProgAPI.CleanWeakPets(false) end)
-        end
+        task.spawn(function()
+            if isP6 then
+                pcall(ProgAPI.CleanNonMythicPets)
+            elseif isP4 then
+                pcall(ProgAPI.CraftGoldenPets)
+                pcall(ProgAPI.CleanIndexedFodder)
+            elseif isP2GoldDone then
+                pcall(ProgAPI.CleanSecretQuestPets)
+            else
+                pcall(ProgAPI.CraftGoldenPets)
+                pcall(function() ProgAPI.CleanWeakPets(false) end)
+            end
+        end)
     end
 
-    -- If server rate-limited or player on cooldown, back off minimally to let server cooldown expire
+    -- If server rate-limited or player on cooldown, back off minimally so next frame/tick succeeds
     if tostring(reason):lower():find("too fast") or tostring(res):lower():find("too fast") then
-        ProgAPI.HatchBackoffUntil = tick() + 0.35
+        ProgAPI.HatchBackoffUntil = tick() + 0.15
     end
     if tostring(reason):lower():find("cooldown") or tostring(res):lower():find("cooldown") or tostring(reason):lower():find("ratelimit") or tostring(res):lower():find("ratelimit") then
-        ProgAPI.HatchBackoffUntil = tick() + 1.2
+        ProgAPI.HatchBackoffUntil = tick() + 0.20
     end
 
     -- If server specifically rejected due to distance, gently reposition HRP right onto the egg stand
@@ -4446,9 +4492,10 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
 
             local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
             ProgAPI.OpenEgg(eggName, openAmount, false)
-            task.wait(0.08)
-            pcall(ProgAPI.CraftGoldenPets)
-            pcall(ProgAPI.CleanWeakPets)
+            task.spawn(function()
+                pcall(ProgAPI.CraftGoldenPets)
+                pcall(ProgAPI.CleanWeakPets)
+            end)
             return true, string.format("[Phase 2: ???] Hatching %s at Spawn to craft Golden (%d / %d)", eggName, questInfo.Golden.Progress, questInfo.Golden.Amount)
         end
     end
@@ -4473,8 +4520,15 @@ function ProgAPI.StepSecretQuest(): (boolean, string)
 
         local openAmount = math.min(8, ProgAPI.GetMaxEggOpenAmount(eggName))
         ProgAPI.OpenEgg(eggName, openAmount, false)
-        -- Auto delete all BasicEgg pets (Dog, Cat, Bunny, Pig - Normal & Golden) immediately
-        pcall(ProgAPI.CleanSecretQuestPets)
+        task.spawn(function()
+            local pStats = Stats.Local(true) or {}
+            local curPets = 0
+            for _ in pairs(pStats.Pets or {}) do curPets = curPets + 1 end
+            local maxPets = pStats.MaxInventoryPets or 200
+            if curPets + openAmount >= maxPets - 4 then
+                pcall(ProgAPI.CleanSecretQuestPets)
+            end
+        end)
         return true, string.format("[Phase 2: ???] Hatching %s at Spawn (%s / %s)", eggName, ProgAPI.FormatNumber(questInfo.Hatch.Progress), ProgAPI.FormatNumber(questInfo.Hatch.Amount))
     end
 
@@ -5085,23 +5139,26 @@ function ProgAPI.StepAutoIndex(
     local hatchAmount = ProgAPI.GetMaxEggOpenAmount(nextEgg.name)
     local openOk, openMsg = ProgAPI.OpenEgg(nextEgg.name, hatchAmount, true)
 
-    -- Auto craft golden pets FIRST (Normal > Gold priority in Stage 1 & 2)
-    if unlockGold then
-        pcall(ProgAPI.CraftGoldenPets)
-    end
+    -- Run crafting & fodder cleaning concurrently in background task so StepAutoIndex returns immediately!
+    task.spawn(function()
+        -- Auto craft golden pets FIRST (Normal > Gold priority in Stage 1 & 2)
+        if unlockGold then
+            pcall(ProgAPI.CraftGoldenPets)
+        end
 
-    -- Rainbow crafting: ONLY executed during Stage 2 (Rainbow stage, Basic & Rare ONLY)
-    if isRainbowStage and unlockRainbow then
+        -- Rainbow crafting: ONLY executed during Stage 2 (Rainbow stage, Basic & Rare ONLY)
+        if isRainbowStage and unlockRainbow then
+            pcall(function()
+                ProgAPI.CraftRainbowPets(true, false)
+            end)
+        end
+        -- Always claim ready rainbow crafts in background
+        pcall(ProgAPI.ClaimRainbowPets)
+
+        -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
         pcall(function()
-            ProgAPI.CraftRainbowPets(true, false)
+            ProgAPI.CleanIndexedFodder(unlockGold, isRainbowStage and unlockRainbow, false, false)
         end)
-    end
-    -- Always claim ready rainbow crafts in background
-    pcall(ProgAPI.ClaimRainbowPets)
-
-    -- Sweep and delete indexed fodder (while protecting Mythics/Secrets!)
-    pcall(function()
-        ProgAPI.CleanIndexedFodder(unlockGold, isRainbowStage and unlockRainbow, false, false)
     end)
 
     local missingNames = {}
@@ -5407,9 +5464,10 @@ updateBlackScreenTelemetry = function()
             labels.CoinsTechCoins.Text = string.format("%s / %s", ProgAPI.FormatNumber(coins), ProgAPI.FormatNumber(techCoins))
         end
         if labels.RebirthsPrestige then labels.RebirthsPrestige.Text = rebStr end
-        if labels.WorldIsland then labels.WorldIsland.Text = worldIslandStr end
-        if labels.CurrentEgg then labels.CurrentEgg.Text = eggDispName end
-        if labels.PetCollection then labels.PetCollection.Text = petCollStr end
+        if labels.CurrentEgg then
+            local speedText = ProgAPI.FormatHatchSpeed and ProgAPI.FormatHatchSpeed(eggName) or "1.5s"
+            labels.CurrentEgg.Text = string.format("%s (%s)", eggDispName, speedText)
+        end
         if labels.CollectionTarget then labels.CollectionTarget.Text = collTargetStr end
         if labels.PetInventory then labels.PetInventory.Text = petInvStr end
         if labels.SkillTree then labels.SkillTree.Text = skillTreeStr end
