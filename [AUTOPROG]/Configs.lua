@@ -185,6 +185,32 @@ function Configs.Load()
                 end
             end
         end)
+
+        -- Automatically detect and apply user-defined global DisableRender / BlackScreen
+        pcall(function()
+            local candidates = {
+                (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+                _G,
+                shared,
+            }
+            local keys = {
+                "DisableRender", "disableRender", "disablerender", "DISABLE_RENDER",
+                "DisableRendering", "disableRendering", "RenderDisabled",
+                "BlackScreen", "blackScreen", "blackscreen"
+            }
+            for _, env in ipairs(candidates) do
+                if type(env) == "table" then
+                    for _, k in ipairs(keys) do
+                        local val = rawget(env, k) or env[k]
+                        if type(val) == "boolean" then
+                            Configs.Current.BlackScreen = val
+                            Configs.Save()
+                            return
+                        end
+                    end
+                end
+            end
+        end)
     end)
     return Configs.Current
 end

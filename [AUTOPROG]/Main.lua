@@ -71,6 +71,70 @@ end
 if not checkExecutor() then return end
 
 --==============================================================================
+-- IGNORE PLAYER CHECK
+-- If the current player's username or UserId is in IgnorePlayer, halt immediately.
+-- Example: IgnorePlayer = { "Kolubus_1243" } or IgnorePlayer = {}
+--==============================================================================
+local function shouldIgnoreCurrentPlayer(): boolean
+    local lp = LocalPlayer or Players.LocalPlayer
+    if not lp then return false end
+
+    local myName = string.lower(lp.Name)
+    local myUserId = lp.UserId
+
+    local candidates = {
+        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        _G,
+        shared,
+    }
+    local keys = {
+        "IgnorePlayer", "IgnorePlayers", "ignorePlayer", "ignorePlayers",
+        "ignoreplayer", "ignoreplayers", "IGNORE_PLAYER", "IGNORE_PLAYERS"
+    }
+
+    for _, env in ipairs(candidates) do
+        if type(env) == "table" then
+            for _, k in ipairs(keys) do
+                local val = rawget(env, k) or env[k]
+                if val ~= nil then
+                    if type(val) == "table" then
+                        for _, entry in pairs(val) do
+                            if type(entry) == "string" then
+                                local clean = string.lower(entry:gsub("^%s+", ""):gsub("%s+$", ""))
+                                if clean ~= "" and (clean == myName or tonumber(clean) == myUserId) then
+                                    return true
+                                end
+                            elseif type(entry) == "number" then
+                                if entry == myUserId then
+                                    return true
+                                end
+                            end
+                        end
+                    elseif type(val) == "string" then
+                        local clean = string.lower(val:gsub("^%s+", ""):gsub("%s+$", ""))
+                        if clean ~= "" and (clean == myName or tonumber(clean) == myUserId) then
+                            return true
+                        end
+                    elseif type(val) == "number" then
+                        if val == myUserId then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return false
+end
+
+if shouldIgnoreCurrentPlayer() then
+    local lp = LocalPlayer or Players.LocalPlayer
+    warn(string.format("[CLICKER HUB] Current player '%s' (%s) is in IgnorePlayer list. Execution halted.", lp and lp.Name or "Unknown", tostring(lp and lp.UserId or 0)))
+    return
+end
+
+--==============================================================================
 -- LOAD MODULES (Hybrid Local + GitHub Remote Fallback)
 --==============================================================================
 local GITHUB_REPO = "https://raw.githubusercontent.com/Atxvy/-CLICKER-HUB-/main"
@@ -213,6 +277,32 @@ pcall(function()
                         AutoProgAPI.WebhookEnabled = true
                         return
                     end
+                end
+            end
+        end
+    end
+end)
+
+-- Automatically detect and apply global DisableRender / BlackScreen variable if passed before loader
+pcall(function()
+    local candidates = {
+        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        _G,
+        shared,
+    }
+    local keys = {
+        "DisableRender", "disableRender", "disablerender", "DISABLE_RENDER",
+        "DisableRendering", "disableRendering", "RenderDisabled",
+        "BlackScreen", "blackScreen", "blackscreen"
+    }
+    for _, env in ipairs(candidates) do
+        if type(env) == "table" then
+            for _, k in ipairs(keys) do
+                local val = rawget(env, k) or env[k]
+                if type(val) == "boolean" then
+                    State.BlackScreen = val
+                    Configs.Set("BlackScreen", val)
+                    return
                 end
             end
         end
@@ -1053,7 +1143,11 @@ task.spawn(function()
     pcall(AutoProgAPI.ClaimDaily)
     pcall(AutoProgAPI.ClaimAllChests)
     pcall(AutoProgAPI.EquipBest)
-    if State.BlackScreen ~= false then pcall(AutoProgAPI.SetBlackScreen, true) end
+    if State.BlackScreen == false then
+        pcall(AutoProgAPI.SetBlackScreen, false)
+    else
+        pcall(AutoProgAPI.SetBlackScreen, true)
+    end
     if State.RemoveMaps then pcall(AutoProgAPI.SetRemoveMaps, true) end
     if State.OptimizeGameSettings ~= false then pcall(AutoProgAPI.SetDisableInGameSettings, true) end
 end)

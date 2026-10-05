@@ -180,6 +180,35 @@ if detectedWebhook then
     ProgAPI.WebhookEnabled = true
 end
 
+function ProgAPI.DetectGlobalDisableRender(): boolean?
+    local candidates = {
+        (getgenv and type(getgenv) == "function" and getgenv()) or nil,
+        _G,
+        shared,
+    }
+    local keys = {
+        "DisableRender", "disableRender", "disablerender", "DISABLE_RENDER",
+        "DisableRendering", "disableRendering", "RenderDisabled",
+        "BlackScreen", "blackScreen", "blackscreen"
+    }
+    for _, env in ipairs(candidates) do
+        if type(env) == "table" then
+            for _, k in ipairs(keys) do
+                local val = rawget(env, k) or env[k]
+                if type(val) == "boolean" then
+                    return val
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local detectedDisableRender = ProgAPI.DetectGlobalDisableRender()
+if detectedDisableRender ~= nil then
+    ProgAPI.DisableRender = detectedDisableRender
+end
+
 ProgAPI.CurrentActivity = "Auto Progression Active"
 ProgAPI.CurrentPhase = "Evaluating..."
 ProgAPI.SelectedEgg = "MatrixEgg"
