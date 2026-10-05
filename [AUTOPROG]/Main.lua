@@ -152,21 +152,33 @@ _G.ClickerSimulatorAutoProgCleanup = function()
     pcall(function()
         if ProgAPI and ProgAPI.SetBlackScreen then ProgAPI.SetBlackScreen(false) end
         if ProgAPI and ProgAPI.SetRemoveMaps then ProgAPI.SetRemoveMaps(false) end
+        if ProgAPI and ProgAPI.StopAntiAFK then ProgAPI.StopAntiAFK() end
+        if ProgAPI and ProgAPI.StopAutoRejoin then ProgAPI.StopAutoRejoin() end
     end)
     if _G.ClickerSimulatorAutoProgWindow then
         pcall(function() _G.ClickerSimulatorAutoProgWindow:Destroy() end)
     end
 end
 
--- Load state from Configs
+-- Load state from Configs (Multi-account isolated profile)
 local State = Configs.Load()
 if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
+if State.AntiAFK == nil then State.AntiAFK = true end
+if State.AutoRejoin == nil then State.AutoRejoin = true end
 _G.State = State
 _G.ProgAPI = ProgAPI
 _G.AutoProgAPI = AutoProgAPI
 _G.OpenBank = function() return AutoProgAPI.OpenBank() end
 _G.CloseBank = function() return AutoProgAPI.CloseBank() end
 _G.ToggleBank = function() return AutoProgAPI.ToggleBank() end
+
+-- Auto-start default resilience features (Anti-AFK & Auto Rejoin enabled by default)
+if State.AntiAFK ~= false then
+    pcall(AutoProgAPI.StartAntiAFK)
+end
+if State.AutoRejoin ~= false then
+    pcall(AutoProgAPI.StartAutoRejoin)
+end
 
 --==============================================================================
 -- UI INITIALIZATION
@@ -809,6 +821,54 @@ MiscTab:AddButton({
         local count = AutoProgAPI.ClaimAllChests()
         Window:Notify({ Title = "Chests", Content = string.format("Claimed %d map chest(s)!", count), Duration = 3 })
     end
+})
+
+MiscTab:AddSection("SESSION RESILIENCE & MULTI-ACCOUNT")
+MiscTab:AddToggle("AntiAFKToggle", {
+    Title = "Anti-AFK (Idle Kick Prevention)",
+    Description = "Prevents Roblox 20-minute idle disconnection via Idled event bypass and controller keepalive",
+    Default = State.AntiAFK ~= false,
+    Callback = function(val)
+        State.AntiAFK = val
+        Configs.Set("AntiAFK", val)
+        if val then
+            AutoProgAPI.StartAntiAFK()
+            Window:Notify({ Title = "Anti-AFK", Content = "Anti-AFK enabled! AFK kicks are prevented.", Duration = 2.5 })
+        else
+            AutoProgAPI.StopAntiAFK()
+            Window:Notify({ Title = "Anti-AFK", Content = "Anti-AFK disabled.", Duration = 2.5 })
+        end
+    end
+})
+
+MiscTab:AddToggle("AutoRejoinToggle", {
+    Title = "Auto Rejoin on Disconnect (Any Error)",
+    Description = "Automatically reconnects and reloads the script upon any disconnection, kick, or error code",
+    Default = State.AutoRejoin ~= false,
+    Callback = function(val)
+        State.AutoRejoin = val
+        Configs.Set("AutoRejoin", val)
+        if val then
+            AutoProgAPI.StartAutoRejoin()
+            Window:Notify({ Title = "Auto Rejoin", Content = "Auto Rejoin enabled! Will reconnect on disconnect.", Duration = 2.5 })
+        else
+            AutoProgAPI.StopAutoRejoin()
+            Window:Notify({ Title = "Auto Rejoin", Content = "Auto Rejoin disabled.", Duration = 2.5 })
+        end
+    end
+})
+
+MiscTab:AddParagraph({
+    Title = "Active Account Profile (Isolated Storage)",
+    Content = string.format("User: %s (ID: %d)\nProfile Folder: %s\nConfig Path: %s",
+        LocalPlayer.Name,
+        LocalPlayer.UserId,
+        Configs.UserFolder or AutoProgAPI.GetUserAccountFolder(),
+        Configs.ConfigPath or AutoProgAPI.GetUserAccountConfigPath()
+    ),
+    TitleSize = 15,
+    BodySize = 13,
+    Height = 85
 })
 
 MiscTab:AddSection("QUICK UTILITIES & SHORTCUTS")
