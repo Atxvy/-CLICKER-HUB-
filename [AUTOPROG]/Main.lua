@@ -165,11 +165,15 @@ local State = Configs.Load()
 if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
 if State.AntiAFK == nil then State.AntiAFK = true end
 if State.AutoRejoin == nil then State.AutoRejoin = true end
-if State.IndexUnlockRainbow == nil or State._RainbowV2Updated ~= true then
+if State.IndexUnlockRainbow == nil or State._RainbowV3Updated ~= true then
     State.IndexUnlockRainbow = true
-    State._RainbowV2Updated = true
+    State._RainbowV3Updated = true
     Configs.Set("IndexUnlockRainbow", true)
-    Configs.Set("_RainbowV2Updated", true)
+    Configs.Set("_RainbowV3Updated", true)
+end
+if State.IndexTargetTotal == nil then
+    State.IndexTargetTotal = 250
+    Configs.Set("IndexTargetTotal", 250)
 end
 _G.State = State
 _G.ProgAPI = ProgAPI
@@ -535,6 +539,16 @@ Phase4Tab:AddToggle("AutoIndexPetsToggle", {
     Description = "Automatically visits all progression eggs and unlocks missing pet index entries",
     Default = State.AutoIndexPets ~= false,
     Callback = function(val) State.AutoIndexPets = val; Configs.Set("AutoIndexPets", val) end
+})
+
+Phase4Tab:AddSlider("IndexTargetTotalSlider", {
+    Title = "Phase 4 Target Index Goal",
+    Description = "Total index entries needed before completing Phase 4 and transitioning to Phase 5 (Default: 250)",
+    Default = tonumber(State.IndexTargetTotal) or 250,
+    Min = 50,
+    Max = 400,
+    Increment = 10,
+    Callback = function(val) State.IndexTargetTotal = val; Configs.Set("IndexTargetTotal", val) end
 })
 
 Phase4Tab:AddToggle("IndexIgnoreMythicToggle", {
@@ -1378,13 +1392,7 @@ table.insert(threads, task.spawn(function()
             -- Condition: All 17 islands unlocked, Secret Quest done, Skill Tree done (39/39),
             -- and AutoIndexPets enabled and NOT all progression eggs indexed!
             -- =====================================================================
-            elseif State.AutoIndexPets and not (AutoProgAPI.IsIndexComplete and AutoProgAPI.IsIndexComplete(
-                State.IndexIgnoreMythicAndAbove ~= false,
-                State.IndexUnlockNormal ~= false,
-                State.IndexUnlockGold ~= false,
-                State.IndexUnlockRainbow == true,
-                State.IndexUnlockDarkMatter == true
-            )) then
+            elseif State.AutoIndexPets and AutoProgAPI.IsPhase4 and AutoProgAPI.IsPhase4() then
                 currentPhaseText = "📖 PHASE 4: AUTO INDEX PETS"
                 local nextEgg, eggProg = AutoProgAPI.GetNextUnindexedEgg(
                     State.IndexIgnoreMythicAndAbove ~= false,
@@ -1780,14 +1788,22 @@ local function updateTelemetry()
                 local goldPct = math.clamp(math.floor(((totalStats.IndexedGolden or 0) / math.max(1, totalUnique)) * 100), 0, 100)
                 local rainPct = math.clamp(math.floor(((totalStats.IndexedRainbow or 0) / math.max(1, totalUnique)) * 100), 0, 100)
 
+                local targetGoal = (State and tonumber(State.IndexTargetTotal)) or 250
+                local rainbowStatus = ProgAPI.GetRainbowMachineStatus and ProgAPI.GetRainbowMachineStatus()
+                local cookingCount = (rainbowStatus and rainbowStatus.TotalCooking) or 0
+
                 local statsContent = string.format(
-                    "📖 <b>Total Pets Indexed:</b> %s\n\n" ..
+                    "🎯 <b>Target Goal:</b> %d Total Index (Rainbow Optional)\n" ..
+                    "📖 <b>Total Indexed:</b> %s / %d (Cooking 🌈: %d)\n\n" ..
                     "⚪ <b>Normal:</b> %d / %d (%d%%)\n" ..
-                    "🟡 <b>Golden:</b> %d / %d (%d%%)\n" ..
+                    "🟡 <b>Golden:</b> %d / %d (%d%%) [Prioritized]\n" ..
                     "🌈 <b>Rainbow:</b> %d / %d (%d%%)\n" ..
                     "✨ <b>Shiny:</b> %d\n" ..
                     "🌌 <b>Total Game Pets:</b> %d entries in index",
+                    targetGoal,
                     ProgAPI.FormatNumber(totalStats.TotalIndexed or 0),
+                    targetGoal,
+                    cookingCount,
                     totalStats.IndexedNormal or 0, totalUnique, normPct,
                     totalStats.IndexedGolden or 0, totalUnique, goldPct,
                     totalStats.IndexedRainbow or 0, totalUnique, rainPct,
