@@ -2,12 +2,33 @@
 --==============================================================================
 -- [AUTOPROG] Configs.lua
 -- Settings persistence manager for Auto Progression
+-- Supports multi-account profile isolation: [AUTOPROG]/[NAME][USERID]/config.json
 --==============================================================================
 
 local Configs = {}
 
 local HttpService = game:GetService("HttpService")
-local CONFIG_PATH = "[AUTOPROG]/config.json"
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    pcall(function()
+        LocalPlayer = Players.PlayerAdded:Wait()
+    end)
+end
+
+local playerName = (LocalPlayer and LocalPlayer.Name) or "Player"
+local playerUserId = (LocalPlayer and LocalPlayer.UserId) or 0
+
+-- Multi-account isolated folder structure: [AUTOPROG]/[NAME][USERID]/config.json
+local USER_FOLDER = string.format("[AUTOPROG]/[%s][%s]", playerName, tostring(playerUserId))
+local CONFIG_PATH = string.format("%s/config.json", USER_FOLDER)
+local LEGACY_CONFIG_PATH = "[AUTOPROG]/config.json"
+
+Configs.UserFolder = USER_FOLDER
+Configs.ConfigPath = CONFIG_PATH
+Configs.UserName = playerName
+Configs.UserId = playerUserId
 
 Configs.Default = {
     MasterEnabled = true,
@@ -57,6 +78,9 @@ Configs.Default = {
     BlackScreen = false,
     RemoveMaps = false,
     OptimizeGameSettings = true,
+    -- Session Resilience & Multi-Account (Default ON)
+    AntiAFK = true,
+    AutoRejoin = true,
     WalkSpeed = 16,
     JumpPower = 50,
     WebhookUrl = "",
@@ -65,15 +89,49 @@ Configs.Default = {
 
 Configs.Current = table.clone(Configs.Default)
 
-function Configs.Load()
+local function ensureFolder()
     pcall(function()
-        if readfile and isfile and isfile(CONFIG_PATH) then
-            local raw = readfile(CONFIG_PATH)
-            local decoded = HttpService:JSONDecode(raw)
-            if type(decoded) == "table" then
-                for k, v in pairs(decoded) do
-                    Configs.Current[k] = v
+        if makefolder and isfolder then
+            if not isfolder("[AUTOPROG]") then
+                makefolder("[AUTOPROG]")
+            end
+            if not isfolder(USER_FOLDER) then
+                makefolder(USER_FOLDER)
+            end
+        end
+    end)
+end
+
+function Configs.Load()
+    ensureFolder()
+    pcall(function()
+        if readfile and isfile then
+            local targetPath = nil
+            if isfile(CONFIG_PATH) then
+                targetPath = CONFIG_PATH
+            elseif isfile(LEGACY_CONFIG_PATH) then
+                targetPath = LEGACY_CONFIG_PATH
+            end
+
+            if targetPath then
+                local raw = readfile(targetPath)
+                local decoded = HttpService:JSONDecode(raw)
+                if type(decoded) == "table" then
+                    for k, v in pairs(decoded) do
+                        Configs.Current[k] = v
+                    end
                 end
+                -- Ensure defaults for newly introduced keys if nil in loaded json
+                if Configs.Current.AntiAFK == nil then Configs.Current.AntiAFK = true end
+                if Configs.Current.AutoRejoin == nil then Configs.Current.AutoRejoin = true end
+
+                -- If loaded from legacy config, save into new isolated path immediately
+                if targetPath == LEGACY_CONFIG_PATH and not isfile(CONFIG_PATH) then
+                    Configs.Save()
+                end
+            else
+                -- Initialize file with defaults immediately
+                Configs.Save()
             end
         end
     end)
@@ -81,6 +139,7 @@ function Configs.Load()
 end
 
 function Configs.Save()
+    ensureFolder()
     pcall(function()
         if writefile then
             local encoded = HttpService:JSONEncode(Configs.Current)
