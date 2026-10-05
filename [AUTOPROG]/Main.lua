@@ -164,6 +164,9 @@ if State.OptimizeGameSettings == nil then State.OptimizeGameSettings = true end
 _G.State = State
 _G.ProgAPI = ProgAPI
 _G.AutoProgAPI = AutoProgAPI
+_G.OpenBank = function() return AutoProgAPI.OpenBank() end
+_G.CloseBank = function() return AutoProgAPI.CloseBank() end
+_G.ToggleBank = function() return AutoProgAPI.ToggleBank() end
 
 --==============================================================================
 -- UI INITIALIZATION
@@ -214,6 +217,14 @@ local LiveStatusCard = DashTab:AddParagraph({
 _G.ClickerSimulatorAutoProgCard = LiveStatusCard
 
 DashTab:AddSection("QUICK ACTIONS")
+DashTab:AddButton({
+    Title = "Open Bank GUI",
+    Description = "Bypasses FFlags restriction and opens The Bank window to deposit and withdraw tokens and pets",
+    Callback = function()
+        local ok, msg = AutoProgAPI.OpenBank()
+        Window:Notify({ Title = "The Bank", Content = msg or (ok and "Bank Opened!" or "Failed to open Bank"), Duration = 3 })
+    end
+})
 DashTab:AddButton({
     Title = "Prestige Now (If Available)",
     Description = "Immediately executes Prestige if requirements are met",
@@ -797,6 +808,16 @@ MiscTab:AddButton({
     Callback = function()
         local count = AutoProgAPI.ClaimAllChests()
         Window:Notify({ Title = "Chests", Content = string.format("Claimed %d map chest(s)!", count), Duration = 3 })
+    end
+})
+
+MiscTab:AddSection("QUICK UTILITIES & SHORTCUTS")
+MiscTab:AddButton({
+    Title = "Open Bank GUI",
+    Description = "Bypasses FFlags restriction and opens The Bank window to deposit and withdraw tokens and pets",
+    Callback = function()
+        local ok, msg = AutoProgAPI.OpenBank()
+        Window:Notify({ Title = "The Bank", Content = msg or (ok and "Bank Opened!" or "Failed to open Bank"), Duration = 3 })
     end
 })
 
