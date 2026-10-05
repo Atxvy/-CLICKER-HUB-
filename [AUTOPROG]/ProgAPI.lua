@@ -1815,12 +1815,64 @@ function ProgAPI.CraftGoldenPets(): number
     return craftedCount
 end
 
+--==============================================================================
+-- RAINBOW MACHINE HELPERS & TRACKING
+--==============================================================================
+function ProgAPI.GetActiveAndQueuedRainbowPetIds(): { [string]: boolean }
+    local res = {}
+    local stats = Stats.Local(true) or {}
+    local crafts = stats.RainbowCrafts or {}
+    for slot, craft in pairs(crafts) do
+        if type(craft) == "table" and craft.PetId then
+            res[tostring(craft.PetId)] = true
+        end
+    end
+    local queue = stats.RainbowCraftQueue or {}
+    for idx, item in pairs(queue) do
+        if type(item) == "table" and item.PetId then
+            res[tostring(item.PetId)] = true
+        end
+    end
+    return res
+end
+
+function ProgAPI.GetRainbowMachineStatus(): {
+    ActiveCount: number,
+    QueueCount: number,
+    TotalCooking: number,
+    ActivePetIds: { [string]: boolean }
+}
+    local activeOrQueued = ProgAPI.GetActiveAndQueuedRainbowPetIds()
+    local stats = Stats.Local(true) or {}
+    local crafts = stats.RainbowCrafts or {}
+    local queue = stats.RainbowCraftQueue or {}
+
+    local aCount = 0
+    for _, c in pairs(crafts) do
+        if type(c) == "table" and c.PetId then aCount = aCount + 1 end
+    end
+    local qCount = 0
+    for _, q in pairs(queue) do
+        if type(q) == "table" and q.PetId then qCount = qCount + 1 end
+    end
+
+    return {
+        ActiveCount = aCount,
+        QueueCount = qCount,
+        TotalCooking = aCount + qCount,
+        ActivePetIds = activeOrQueued
+    }
+end
+
 -- Converts batches of duplicate Golden pets into Rainbow pets
-function ProgAPI.CraftRainbowPets(): number
+-- In Phase 4 Index Mode: Only crafts easy pets (Basic & Rare), and only 1 batch per pet until queued or obtained
+function ProgAPI.CraftRainbowPets(phase4IndexMode: boolean?): number
     if not Channels.Pets and not Channels.Crafting then return 0 end
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
     local equipped = stats.EquippedPets or {}
+    local obtained = stats.ObtainedPets or {}
+    local activeOrQueued = ProgAPI.GetActiveAndQueuedRainbowPetIds()
 
     local groups = {}
     for guid, p in pairs(pets) do
@@ -1830,9 +1882,29 @@ function ProgAPI.CraftRainbowPets(): number
         local isExclusive = Directory.Pets and Directory.Pets[p.id] and Directory.Pets[p.id].Rarity == "Exclusive"
 
         if not isEquipped and not isLocked and isGolden and not isExclusive then
-            local key = tostring(p.id) .. "_" .. tostring(p.Shiny or p.s or false)
-            groups[key] = groups[key] or { id = p.id, guids = {} }
-            table.insert(groups[key].guids, guid)
+            local petDef = Directory.Pets and Directory.Pets[p.id]
+            local rarity = (petDef and petDef.Rarity) or "Basic"
+            local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
+            if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
+                isEasyRarity = Constants.RarityOrder[rarity] <= 2
+            end
+
+            local allow = true
+            if phase4IndexMode then
+                if not isEasyRarity then
+                    allow = false
+                elseif obtained[p.id .. "_Rainbow"] == true then
+                    allow = false
+                elseif activeOrQueued[tostring(p.id)] == true then
+                    allow = false
+                end
+            end
+
+            if allow then
+                local key = tostring(p.id) .. "_" .. tostring(p.Shiny or p.s or false)
+                groups[key] = groups[key] or { id = p.id, guids = {} }
+                table.insert(groups[key].guids, guid)
+            end
         end
     end
 
@@ -1850,9 +1922,13 @@ function ProgAPI.CraftRainbowPets(): number
                     return Channels.Crafting:InvokeServer("CraftRainbow", batch)
                 end
             end)
-            if ok and (res == true or type(res) == "table") then
+            if ok and (res == true or type(res) == "table" or res == "Queued") then
                 craftedCount = craftedCount + 1
+                activeOrQueued[tostring(g.id)] = true
                 task.wait(0.2)
+                if phase4IndexMode then
+                    break
+                end
             else
                 break
             end
@@ -1871,7 +1947,7 @@ function ProgAPI.ClaimRainbowPets(): number
             local slotIndex = tonumber(slotKey)
             if slotIndex and type(craft) == "table" and craft.EndTimestamp then
                 local now = workspace:GetServerTimeNow()
-                local saveAge = stats.SaveAge or 0
+                local saveAge = (Stats.GetSaveAge and Stats.GetSaveAge()) or stats.SaveAge or 0
                 local remaining = craft.EndTimestamp - now
                 if craft.SaveAge ~= nil then
                     remaining = remaining - (saveAge - craft.SaveAge) * 2
@@ -3613,7 +3689,7 @@ function ProgAPI.IsPhase4(): boolean
     local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
     local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
     local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
-    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or false
+    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or true
     local unDM = (st and st.IndexUnlockDarkMatter ~= nil) and st.IndexUnlockDarkMatter or false
     return not ProgAPI.IsIndexComplete(ignMyth, unNorm, unGold, unRain, unDM)
 end
@@ -3627,7 +3703,7 @@ function ProgAPI.IsPhase5(): boolean
     local ignMyth = (st and st.IndexIgnoreMythicAndAbove ~= nil) and st.IndexIgnoreMythicAndAbove or true
     local unNorm = (st and st.IndexUnlockNormal ~= nil) and st.IndexUnlockNormal or true
     local unGold = (st and st.IndexUnlockGold ~= nil) and st.IndexUnlockGold or true
-    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or false
+    local unRain = (st and st.IndexUnlockRainbow ~= nil) and st.IndexUnlockRainbow or true
     local unDM = (st and st.IndexUnlockDarkMatter ~= nil) and st.IndexUnlockDarkMatter or false
     return ProgAPI.IsIndexComplete(ignMyth, unNorm, unGold, unRain, unDM)
 end
@@ -3989,12 +4065,21 @@ function ProgAPI.GetEggIndexProgress(
         end
     end
 
+    local activeOrQueuedRainbow = ProgAPI.GetActiveAndQueuedRainbowPetIds and ProgAPI.GetActiveAndQueuedRainbowPetIds() or {}
     local missingList = {}
+    local queuedRainbows = {}
     local completedCount = 0
 
     for _, target in ipairs(targetPets) do
         local pId = target.PetId
+        local rarity = target.Rarity
+        local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
+        if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
+            isEasyRarity = Constants.RarityOrder[rarity] <= 2
+        end
+
         local missingVariants = {}
+        local isQueuedRainbow = false
 
         if unlockNormal and obtained[pId .. "_Normal"] ~= true then
             table.insert(missingVariants, "Normal")
@@ -4002,9 +4087,24 @@ function ProgAPI.GetEggIndexProgress(
         if unlockGold and obtained[pId .. "_Golden"] ~= true then
             table.insert(missingVariants, "Golden")
         end
-        if unlockRainbow and obtained[pId .. "_Rainbow"] ~= true then
-            table.insert(missingVariants, "Rainbow")
+
+        -- Rainbow variant check: ONLY required if unlockRainbow is true AND pet is an easy rarity (Common/Rare)
+        if unlockRainbow and isEasyRarity then
+            if obtained[pId .. "_Rainbow"] ~= true then
+                if activeOrQueuedRainbow[pId] == true then
+                    -- Already in Rainbow Machine (cooking 30-min craft or waiting in queue)!
+                    -- Does NOT block the egg from being completed / moving to next egg!
+                    isQueuedRainbow = true
+                    table.insert(queuedRainbows, {
+                        PetId = pId,
+                        Name = target.Name
+                    })
+                else
+                    table.insert(missingVariants, "Rainbow")
+                end
+            end
         end
+
         if unlockDM and obtained[pId .. "_DarkMatter"] ~= true then
             table.insert(missingVariants, "DarkMatter")
         end
@@ -4014,7 +4114,8 @@ function ProgAPI.GetEggIndexProgress(
                 PetId = pId,
                 Name = target.Name,
                 Rarity = target.Rarity,
-                MissingVariants = missingVariants
+                MissingVariants = missingVariants,
+                RainbowQueued = isQueuedRainbow
             })
         else
             completedCount = completedCount + 1
@@ -4031,6 +4132,7 @@ function ProgAPI.GetEggIndexProgress(
         TargetPetsCount = #targetPets,
         CompletedPetsCount = completedCount,
         MissingPets = missingList,
+        QueuedRainbows = queuedRainbows,
         SkippedRareCount = #skippedRares,
         SkippedRares = skippedRares
     }
@@ -4082,12 +4184,13 @@ function ProgAPI.CleanIndexedFodder(
     unlockRainbow: boolean?
 ): number
     if unlockGold == nil then unlockGold = true end
-    if unlockRainbow == nil then unlockRainbow = false end
+    if unlockRainbow == nil then unlockRainbow = true end
 
     local stats = Stats.Local(true) or {}
     local pets = stats.Pets or {}
     local equipped = stats.EquippedPets or {}
     local obtained = stats.ObtainedPets or {}
+    local activeOrQueuedRainbow = ProgAPI.GetActiveAndQueuedRainbowPetIds and ProgAPI.GetActiveAndQueuedRainbowPetIds() or {}
 
     -- Count unequipped copies per petId to avoid deleting crafting ingredients
     local normalCounts = {}
@@ -4118,9 +4221,17 @@ function ProgAPI.CleanIndexedFodder(
                 local isGold = (p.Variant == "Golden" or p.variant == "Golden" or p.g == true)
                 local isRainbow = (p.Variant == "Rainbow" or p.variant == "Rainbow" or p.r == true)
 
+                local petDef = Directory.Pets and Directory.Pets[pid]
+                local rarity = (petDef and petDef.Rarity) or "Basic"
+                local isEasyRarity = (rarity == "Basic" or rarity == "Rare" or rarity == "Common")
+                if Constants and Constants.RarityOrder and Constants.RarityOrder[rarity] then
+                    isEasyRarity = Constants.RarityOrder[rarity] <= 2
+                end
+
                 local hasNormalIndex = (obtained[pid .. "_Normal"] == true)
                 local hasGoldIndex = (obtained[pid .. "_Golden"] == true)
                 local hasRainbowIndex = (obtained[pid .. "_Rainbow"] == true)
+                local isRainbowQueued = (activeOrQueuedRainbow[pid] == true)
 
                 local shouldKeep = false
 
@@ -4132,10 +4243,11 @@ function ProgAPI.CleanIndexedFodder(
                     end
                 end
 
-                -- If Rainbow index is needed and this is a gold pet, preserve up to 5 copies to craft Rainbow
-                if unlockRainbow and not hasRainbowIndex and isGold then
+                -- If Rainbow index is needed for easy rarity (Common/Rare) and not yet indexed and not yet queued:
+                -- preserve up to 6 golden copies to start a 100% 30-min craft!
+                if unlockRainbow and isEasyRarity and not hasRainbowIndex and not isRainbowQueued and isGold then
                     preservedForRainbow[pid] = (preservedForRainbow[pid] or 0) + 1
-                    if preservedForRainbow[pid] <= 5 then
+                    if preservedForRainbow[pid] <= 6 then
                         shouldKeep = true
                     end
                 end
@@ -4144,7 +4256,7 @@ function ProgAPI.CleanIndexedFodder(
                 if not shouldKeep then
                     local normalSatisfied = (not unlockNormal) or hasNormalIndex
                     local goldSatisfied = (not unlockGold) or hasGoldIndex
-                    local rainbowSatisfied = (not unlockRainbow) or hasRainbowIndex
+                    local rainbowSatisfied = (not unlockRainbow) or (not isEasyRarity) or hasRainbowIndex or isRainbowQueued
 
                     if normalSatisfied and goldSatisfied and rainbowSatisfied then
                         table.insert(toDelete, guid)
@@ -4217,9 +4329,11 @@ function ProgAPI.StepAutoIndex(
         pcall(ProgAPI.CraftGoldenPets)
     end
 
-    -- Auto craft rainbow pets if rainbow index is enabled
+    -- Auto craft rainbow pets if rainbow index is enabled (pass true for Phase 4 easy index mode!)
     if unlockRainbow then
-        pcall(ProgAPI.CraftRainbowPets)
+        pcall(function()
+            ProgAPI.CraftRainbowPets(true)
+        end)
         pcall(ProgAPI.ClaimRainbowPets)
     end
 
@@ -4232,13 +4346,22 @@ function ProgAPI.StepAutoIndex(
     for _, m in ipairs(eggProg.MissingPets) do
         table.insert(missingNames, string.format("%s (%s)", m.Name, table.concat(m.MissingVariants, "/")))
     end
-    local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "None"
+    local queuedStr = ""
+    if eggProg.QueuedRainbows and #eggProg.QueuedRainbows > 0 then
+        local qNames = {}
+        for _, q in ipairs(eggProg.QueuedRainbows) do
+            table.insert(qNames, q.Name)
+        end
+        queuedStr = string.format(" [Queued 🌈: %s]", table.concat(qNames, ", "))
+    end
+    local missingStr = #missingNames > 0 and table.concat(missingNames, ", ") or "All Active Goals Queued/Done"
 
-    return false, string.format("[Phase 4: Auto Index] %s (%d/%d): Missing %s",
+    return false, string.format("[Phase 4: Auto Index] %s (%d/%d): Missing %s%s",
         tostring(eggProg.DisplayName),
         eggProg.CompletedPetsCount,
         eggProg.TargetPetsCount,
-        missingStr
+        missingStr,
+        queuedStr
     )
 end
 
