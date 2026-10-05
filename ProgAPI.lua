@@ -5193,17 +5193,9 @@ updateBlackScreenTelemetry = function()
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
     if not blackScreenGui or not blackScreenGui.Parent or not blackScreenGui.Enabled then
-        local found = nil
-        pcall(function()
-            local cg = game:GetService("CoreGui")
-            if cg then found = cg:FindFirstChild("ClickerHub_BlackScreen") end
-        end)
-        if not found and pg then
-            found = pg:FindFirstChild("ClickerHub_BlackScreen")
-        end
-        if not found and _G.__ProgAPI_BlackScreenGui then
-            found = _G.__ProgAPI_BlackScreenGui
-        end
+        local found = (pg and pg:FindFirstChild("ClickerHub_BlackScreen"))
+            or (game:GetService("CoreGui") and pcall(function() return game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen") end) and game:GetService("CoreGui"):FindFirstChild("ClickerHub_BlackScreen"))
+            or _G.__ProgAPI_BlackScreenGui
         if found and found.Enabled and found.Parent then
             blackScreenGui = found
         else
@@ -5212,14 +5204,51 @@ updateBlackScreenTelemetry = function()
     end
 
     local labels = _G.__ProgAPI_BlackScreenLabels or blackScreenRowLabels
+    if not labels or not labels.Activity then
+        local main = blackScreenGui:FindFirstChild("MainContent")
+        if main then
+            local list = main:FindFirstChild("RowsList")
+            if list then
+                labels = labels or {}
+                for _, r in ipairs(list:GetChildren()) do
+                    if r:IsA("Frame") and r.Name:sub(1, 4) == "Row_" then
+                        local key = r.Name:sub(5)
+                        local val = r:FindFirstChild("Value")
+                        if val and val:IsA("TextLabel") then
+                            labels[key] = val
+                        end
+                    end
+                end
+                local footer = main:FindFirstChild("Footer")
+                if footer then
+                    local fl = footer:FindFirstChild("FooterLeft")
+                    if fl and fl:IsA("TextLabel") then
+                        labels.FooterLeft = fl
+                    end
+                end
+                _G.__ProgAPI_BlackScreenLabels = labels
+                blackScreenRowLabels = labels
+            end
+        end
+    end
     if not labels then return end
 
-    local pData = ProgAPI.GetPlayerData()
-    local StatsMod = nil
-    pcall(function() StatsMod = require(Client:WaitForChild("Stats", 2)) end)
-    local stats = (StatsMod and StatsMod.Local(true)) or {}
+    local pData = (ProgAPI.GetPlayerData and ProgAPI.GetPlayerData()) or {}
+    local StatsMod = Stats
+    if not StatsMod then
+        pcall(function()
+            local lib = game:GetService("ReplicatedStorage"):FindFirstChild("Library")
+            local client = lib and lib:FindFirstChild("Client")
+            StatsMod = require(client and client:FindFirstChild("Stats") or Client:WaitForChild("Stats", 2))
+        end)
+    end
+    local stats = (StatsMod and StatsMod.Local and StatsMod.Local(true)) or {}
     local Currency = nil
-    pcall(function() Currency = require(Client:WaitForChild("Currency", 2)) end)
+    pcall(function()
+        local lib = game:GetService("ReplicatedStorage"):FindFirstChild("Library")
+        local client = lib and lib:FindFirstChild("Client")
+        Currency = require(client and client:FindFirstChild("Currency") or Client:WaitForChild("Currency", 2))
+    end)
 
     -- 1. Status & Phase determination
     local statusText = "Running | World Progression"
@@ -5235,40 +5264,41 @@ updateBlackScreenTelemetry = function()
         statusText = "Running | ??? Secret Area Quest"
     end
 
-    -- 2. Current Activity
+    -- 2. Currencies (Clicks, Gems, Coins, Tech Coins, Tokens)
+    local clicks = (stats.Currency and stats.Currency.Clicks) or (Currency and Currency.Get and Currency.Get("Clicks")) or pData.Clicks or 0
+    local gems = (stats.Currency and stats.Currency.Gems) or (Currency and Currency.Get and Currency.Get("Gems")) or pData.Gems or 0
+    local coins = (stats.Currency and stats.Currency.Coins) or (Currency and Currency.Get and Currency.Get("Coins")) or stats.Coins or 0
+    local techCoins = (stats.Currency and (stats.Currency.TechCoins or stats.Currency["Tech Coins"])) or (Currency and Currency.Get and (Currency.Get("TechCoins") or Currency.Get("Tech Coins"))) or stats.TechCoins or 0
+    local tokens = (stats.Currency and stats.Currency.Tokens) or (Currency and Currency.Get and Currency.Get("Tokens")) or stats.Tokens or 0
+
+    -- 3. Current Activity & Target Egg
     local eggName = ProgAPI.SelectedEgg or "MatrixEgg"
+    local nextEgg, eggProg = nil, nil
     if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
-        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
+        nextEgg, eggProg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
         if nextEgg and nextEgg.name then eggName = nextEgg.name end
+    elseif _G.State and _G.State.SelectedEgg then
+        eggName = _G.State.SelectedEgg
     end
     local eggData = Directory.Eggs and Directory.Eggs[eggName]
     local eggDispName = (eggData and (eggData.Name or eggData.DisplayName)) or eggName
 
-    local curActivity = tostring(ProgAPI.CurrentActivity or ("Hatching " .. eggDispName))
-    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
-        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
-        if nextEgg and nextEgg.petId then
-            local pName = nextEgg.petId
-            local pMeta = Directory.Pets and Directory.Pets[pName]
-            if pMeta and pMeta.Name then pName = pMeta.Name end
-            curActivity = string.format("Getting %s %s", nextEgg.targetType or "Normal", pName)
-        end
+    local curActivity = tostring((_G.State and _G.State.Activity) or ProgAPI.CurrentActivity or ("Hatching " .. eggDispName))
+    if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() and eggProg and eggProg.MissingPets and #eggProg.MissingPets > 0 then
+        local firstMissing = eggProg.MissingPets[1]
+        local vList = table.concat(firstMissing.MissingVariants, "/")
+        curActivity = string.format("Getting %s %s (%s)", vList, firstMissing.Name, eggDispName)
     end
 
-    -- 3. Currencies (Coins, Tech Coins, Gems, Clicks, Tokens)
-    local coins = 0
-    pcall(function() coins = (Currency and Currency.Get and Currency.Get("Coins")) or stats.Coins or 0 end)
-    local techCoins = 0
-    pcall(function() techCoins = (Currency and Currency.Get and (Currency.Get("TechCoins") or Currency.Get("Tech Coins"))) or stats.TechCoins or 0 end)
-    local tokens = 0
-    pcall(function() tokens = (Currency and Currency.Get and (Currency.Get("Tokens") or Currency.Get("ClickTokens"))) or stats.Tokens or stats.ClickTokens or stats.BoothTokensRaised or 0 end)
-
     -- 4. Rebirths & Prestige
+    local rebirths = (stats.Currency and stats.Currency.Rebirths) or pData.Rebirths or 0
     local prestiges = stats.Prestiges or 0
-    local rebStr = string.format("%s / %d/2", ProgAPI.FormatNumber(pData.Rebirths or 0), prestiges)
+    local rebStr = string.format("%s / %d/2", ProgAPI.FormatNumber(rebirths), prestiges)
 
     -- 5. World / Island
-    local worldIslandStr = string.format("%s / %s", tostring(pData.CurrentWorld or "Overworld"), tostring(pData.CurrentIsland or "Spawn"))
+    local curWorld = tostring(stats.CurrentWorld or pData.CurrentWorld or "Overworld")
+    local curIsland = tostring(stats.CurrentIsland or pData.CurrentIsland or "Spawn")
+    local worldIslandStr = string.format("%s / %s", curWorld, curIsland)
 
     -- 6. Pet Collection
     local idx = (ProgAPI.GetTotalIndexStats and ProgAPI.GetTotalIndexStats()) or {}
@@ -5282,15 +5312,12 @@ updateBlackScreenTelemetry = function()
     -- 7. Collection Target
     local collTargetStr = "Progression Target: Active"
     if ProgAPI.IsPhase4 and ProgAPI.IsPhase4() then
-        local nextEgg = ProgAPI.GetNextUnindexedEgg and ProgAPI.GetNextUnindexedEgg()
-        if nextEgg and nextEgg.petId then
-            local pName = nextEgg.petId
-            local pMeta = Directory.Pets and Directory.Pets[pName]
-            if pMeta and pMeta.Name then pName = pMeta.Name end
-            local nDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Normal"]) and "Completed" or "Doing"
-            local gDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Golden"]) and "Completed" or (nDone == "Completed" and "Doing" or "Pending")
-            local rDone = (stats.ObtainedPets and stats.ObtainedPets[nextEgg.petId .. "_Rainbow"]) and "Completed" or (gDone == "Completed" and "Doing" or "Pending")
-            collTargetStr = string.format("%s | Normal: %s | Golden: %s | Rainbow: %s", pName, nDone, gDone, rDone)
+        if eggProg and eggProg.MissingPets and #eggProg.MissingPets > 0 then
+            local firstMissing = eggProg.MissingPets[1]
+            local nDone = (stats.ObtainedPets and stats.ObtainedPets[firstMissing.PetId .. "_Normal"]) and "Completed" or "Doing"
+            local gDone = (stats.ObtainedPets and stats.ObtainedPets[firstMissing.PetId .. "_Golden"]) and "Completed" or (nDone == "Completed" and "Doing" or "Pending")
+            local rDone = (stats.ObtainedPets and stats.ObtainedPets[firstMissing.PetId .. "_Rainbow"]) and "Completed" or (gDone == "Completed" and "Doing" or "Pending")
+            collTargetStr = string.format("%s | Normal: %s | Golden: %s | Rainbow: %s", firstMissing.Name, nDone, gDone, rDone)
         else
             local targetTotal = (_G.State and _G.State.IndexTargetTotal) or 250
             collTargetStr = string.format("Target: 250 Index | Total: %d/%d", idx.TotalIndexed or 0, targetTotal)
@@ -5301,20 +5328,27 @@ updateBlackScreenTelemetry = function()
             isFullRainbow, rbCount, totalEquipped = ProgAPI.IsEquippedTeamAllRainbowMythic()
         end
         collTargetStr = string.format("Rainbow Matrix Mythics: %d/%d Equipped", rbCount, totalEquipped)
+    elseif ProgAPI.IsPhase5 and ProgAPI.IsPhase5() then
+        collTargetStr = "Ultimate Click Skin | Rerolling +3 Hatch & +15% Speed"
     elseif ProgAPI.IsPhase2 and ProgAPI.IsPhase2() then
         collTargetStr = "Dominus Gateway Quest | Objective in progress"
     else
-        collTargetStr = string.format("World %d | Highest Island: %s", pData.FurthestWorld or 1, tostring(pData.CurrentIsland or "Spawn"))
+        collTargetStr = string.format("World %d | Highest Island: %s", pData.FurthestWorld or 1, curIsland)
     end
 
     -- 8. Pet Inventory
     local curPets = 0
-    local maxPets = 200
+    local maxPets = stats.MaxInventoryPets or 200
     pcall(function()
-        local Pets = require(Client:WaitForChild("Pets", 2))
-        if Pets and Pets.GetInventoryCount then curPets = Pets.GetInventoryCount() end
-        if Pets and Pets.GetEffectiveMaxInventoryPets then maxPets = Pets.GetEffectiveMaxInventoryPets() end
+        local petsMod = require(Library.Client.Pets)
+        if petsMod and petsMod.GetInventoryCount then curPets = petsMod.GetInventoryCount() end
+        if petsMod and petsMod.GetEffectiveMaxInventoryPets then maxPets = petsMod.GetEffectiveMaxInventoryPets() end
     end)
+    if curPets == 0 and stats.EquippedPets then
+        local count = 0
+        for _ in pairs(stats.EquippedPets) do count = count + 1 end
+        curPets = count
+    end
     local petInvStr = string.format("%d / %d", curPets, maxPets)
 
     -- 9. Skill Tree
@@ -5322,16 +5356,20 @@ updateBlackScreenTelemetry = function()
     for _, v in pairs(stats.SkillTree or {}) do
         if v == true then treeCount = treeCount + 1 end
     end
-    local dominusArea = stats.DominusAreaUnlocked == true
+    local dominusArea = (stats.DominusAreaUnlocked == true) or (stats.SkillTree and stats.SkillTree["SecretArea"] == true)
     local skillTreeStr = string.format("%d/52 | Secret area: %s", treeCount, dominusArea and "Unlocked" or "Locked")
 
-    -- 10. Apply all labels
+    -- 10. Session Time
+    if not _G.__ProgAPI_StartTick then _G.__ProgAPI_StartTick = tick() end
+    local sessionTimeStr = ProgAPI.FormatSessionTime()
+
+    -- 11. Apply directly to all labels
     pcall(function()
         if labels.Status then labels.Status.Text = statusText end
         if labels.Activity then labels.Activity.Text = curActivity end
-        if labels.SessionTime then labels.SessionTime.Text = ProgAPI.FormatSessionTime() end
-        if labels.Clicks then labels.Clicks.Text = ProgAPI.FormatNumber(pData.Clicks or 0) end
-        if labels.Gems then labels.Gems.Text = ProgAPI.FormatNumber(pData.Gems or 0) end
+        if labels.SessionTime then labels.SessionTime.Text = sessionTimeStr end
+        if labels.Clicks then labels.Clicks.Text = ProgAPI.FormatNumber(clicks) end
+        if labels.Gems then labels.Gems.Text = ProgAPI.FormatNumber(gems) end
         if labels.CoinsTechCoins then
             labels.CoinsTechCoins.Text = string.format("%s / %s", ProgAPI.FormatNumber(coins), ProgAPI.FormatNumber(techCoins))
         end
@@ -5355,6 +5393,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
     local lp = LocalPlayer or game:GetService("Players").LocalPlayer
     local pg = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:FindFirstChild("PlayerGui"))
     local RunService = game:GetService("RunService")
+    local parentTarget = pg
 
     pcall(function()
         if RunService and RunService.Set3dRenderingEnabled then
@@ -5425,37 +5464,34 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         if not blackScreenGui or not blackScreenGui.Parent then
-            local parentTarget = nil
+            -- Clean up old instances across CoreGui, gethui(), and PlayerGui
             pcall(function()
                 local cg = game:GetService("CoreGui")
-                if cg and cg:IsA("CoreGui") then
-                    parentTarget = cg
-                elseif gethui and type(gethui) == "function" then
-                    local h = gethui()
-                    if h and h:IsA("ScreenGui") then
-                        parentTarget = h.Parent or pg
-                    else
-                        parentTarget = h
-                    end
-                end
-            end)
-            if not parentTarget then
-                parentTarget = pg
-            end
-
-            -- Clean up old instance
-            pcall(function()
-                if parentTarget then
-                    for _, ch in ipairs(parentTarget:GetChildren()) do
-                        if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                            ch:Destroy()
+                if cg then
+                    for _, inst in ipairs(cg:GetDescendants()) do
+                        if inst.Name == "ClickerHub_BlackScreen" and inst ~= blackScreenGui then
+                            pcall(function() inst:Destroy() end)
                         end
                     end
                 end
-                if pg and parentTarget ~= pg then
+            end)
+            pcall(function()
+                if gethui and type(gethui) == "function" then
+                    local h = gethui()
+                    if h then
+                        for _, inst in ipairs(h:GetDescendants()) do
+                            if inst.Name == "ClickerHub_BlackScreen" and inst ~= blackScreenGui then
+                                pcall(function() inst:Destroy() end)
+                            end
+                        end
+                    end
+                end
+            end)
+            pcall(function()
+                if pg then
                     for _, ch in ipairs(pg:GetChildren()) do
                         if ch.Name == "ClickerHub_BlackScreen" and ch ~= blackScreenGui then
-                            ch:Destroy()
+                            pcall(function() ch:Destroy() end)
                         end
                     end
                 end
@@ -5696,6 +5732,7 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         blackScreenGui.Enabled = true
+        pcall(updateBlackScreenTelemetry)
 
         -- Start periodic telemetry refresh & continuous anti-disruption watchdog
         _G.__ProgAPI_IsBlackScreenRunning = true
@@ -5802,18 +5839,28 @@ function ProgAPI.SetBlackScreen(enabled: boolean)
         end
 
         pcall(function()
-            local parentTarget = (gethui and pcall(gethui) and gethui()) or game:GetService("CoreGui") or pg
-            if parentTarget then
-                for _, ch in ipairs(parentTarget:GetChildren()) do
-                    if ch.Name == "ClickerHub_BlackScreen" then
-                        ch:Destroy()
+            local cg = game:GetService("CoreGui")
+            if cg then
+                for _, inst in ipairs(cg:GetDescendants()) do
+                    if inst.Name == "ClickerHub_BlackScreen" then
+                        pcall(function() inst:Destroy() end)
+                    end
+                end
+            end
+            if gethui and type(gethui) == "function" then
+                local h = gethui()
+                if h then
+                    for _, inst in ipairs(h:GetDescendants()) do
+                        if inst.Name == "ClickerHub_BlackScreen" then
+                            pcall(function() inst:Destroy() end)
+                        end
                     end
                 end
             end
             if pg then
                 for _, ch in ipairs(pg:GetChildren()) do
                     if ch.Name == "ClickerHub_BlackScreen" then
-                        ch:Destroy()
+                        pcall(function() ch:Destroy() end)
                     end
                 end
             end
